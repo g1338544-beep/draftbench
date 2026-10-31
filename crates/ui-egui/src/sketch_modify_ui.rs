@@ -122,7 +122,7 @@ pub enum Mod {
     /// `sketch.project_to_surface`, laid out as a Project Curve window: the curves (of one
     /// sketch), the face they land on, and the projection direction (0 along the face normal,
     /// 1 along the active sketch's normal).
-    ProjectCurve { dir: usize },
+    ProjectCurve { dir: usize, associative: bool },
 }
 
 impl Mod {
@@ -200,7 +200,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sketch.scale" => Mod::Scale { factor: "2".into() },
         "sketch.offset" => Mod::Offset { distance: "2 mm".into(), distance2: "2 mm".into(), mode: 0, chain: true, flip: false },
         "sketch.mirror" => Mod::Mirror,
-        "sketch.project_to_surface" => Mod::ProjectCurve { dir: 0 },
+        "sketch.project_to_surface" => Mod::ProjectCurve { dir: 0, associative: true },
         "sketch.move" => Mod::Move { x: "0 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false },
         "sketch.pattern.rectangular" => Mod::PatternRect {
             count: "3".into(),
@@ -389,11 +389,15 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod) -> bool {
             });
         }
         Mod::Mirror => {}
-        Mod::ProjectCurve { dir } => {
+        Mod::ProjectCurve { dir, associative } => {
             ui_kit::section(ui, "project_direction", "Projection Direction", true, |ui| {
                 ui_kit::row(ui, "Direction", |ui| {
                     ui_kit::segmented(ui, dir, &["Along Face Normal", "Along Sketch Normal"], Default::default());
                 });
+            });
+            // Off: the curves are cut loose from their sources, so editing the sketch no longer moves them.
+            ui_kit::section(ui, "project_settings", "Settings", true, |ui| {
+                ui_kit::checkbox_grid(ui, &mut [("Associative", associative)], 1);
             });
         }
         Mod::Move { x, y, angle, copy } => {
@@ -854,7 +858,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 _ => ("sketch.chamfer.equal_distance", p),
             }
         }
-        Mod::ProjectCurve { dir } => {
+        Mod::ProjectCurve { dir, associative } => {
             let curves = curve_ids(inputs, 0);
             if curves.is_empty() {
                 return Err("Select the curves to project first".into());
@@ -871,7 +875,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             };
             let list: Vec<Value> = curves.iter().map(|c| json!({"sketch": sketch, "curve": c})).collect();
             let direction = if *dir == 0 { "normal" } else { "sketch" };
-            let project = json!({"curves": list, "face": [point.x, point.y, point.z], "body": body, "direction": direction});
+            let project = json!({"curves": list, "face": [point.x, point.y, point.z], "body": body, "direction": direction, "associative": associative});
             if app.session.active_sketch.is_some() {
                 return Ok(vec![("sketch.project_to_surface".to_string(), project)]);
             }

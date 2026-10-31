@@ -32,7 +32,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.project_to_surface", "Project Curve", project_to_surface)
         .at("SKETCH", "CREATE")
         .icon("project_curve")
-        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?, direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
+        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?, associative?: bool (default true; false cuts the links so the curves stay put), direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.intersection_curve", "Intersection Curve", intersection_curve)
         .at("SKETCH", "CREATE")
         .icon("intersection_curve")
@@ -316,6 +316,16 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "each entry must be {sketch, curve}"));
         };
         out.push(one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve, body: body.clone(), at, normal })?);
+    }
+    // Not associative: cut every new link loose, so the curves stay where they are.
+    if p.get("associative").and_then(Value::as_bool) == Some(false) {
+        let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+        let mut doc = (*s.doc).clone();
+        let sk = doc.sketch_mut(id)?;
+        for l in out.iter().filter_map(|o| o.get("link").and_then(Value::as_str)) {
+            sk.break_link(l)?;
+        }
+        *s.doc_mut() = doc;
     }
     Ok(json!({"links": out}))
 }
