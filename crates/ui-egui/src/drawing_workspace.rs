@@ -51,6 +51,8 @@ pub struct State {
     error: Option<String>,
     design_camera: Option<(Camera, bool)>,
     shown: Option<(u64, u32, u32)>,
+    /// Update was asked for: it runs on the next frame, after "Computing…" has been painted.
+    pending: u8,
 }
 
 impl Default for State {
@@ -59,15 +61,16 @@ impl Default for State {
             paper: 3,
             landscape: true,
             first_angle: true,
-            views: [true, true, true, false, false, false, false],
+            views: [true, true, false, false, false, false, false],
             scale: String::new(),
-            hidden: true,
+            hidden: false,
             dimensions: true,
             title: String::new(),
             sheet: None,
             error: None,
             design_camera: None,
             shown: None,
+            pending: 0,
         }
     }
 }
@@ -86,6 +89,7 @@ fn params(st: &State) -> Value {
         "hidden": if st.hidden { "dashed" } else { "omit" },
         "dimensions": st.dimensions,
         "title": st.title,
+        "tolerance": 0.5,
     });
     if let Ok(k) = st.scale.trim().parse::<f64>()
         && k.is_finite()
@@ -185,7 +189,8 @@ pub fn enter(app: &mut SolveApp) -> Result<(), String> {
     if app.drawing.title.is_empty() {
         app.drawing.title = app.session.doc.name.clone();
     }
-    update(app);
+    // Nothing is computed on entering: the page opens at once, Update draws the sheet.
+    fit(app);
     Ok(())
 }
 
@@ -242,7 +247,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_title"), &mut app.drawing.title, "", false, 80).changed();
                     ui.separator();
                     if crate::ui_kit::button(ui, "Update drawing", crate::ui_kit::Button::Normal).clicked() {
-                        update(app);
+                        app.drawing.pending = 2;
                     }
                     if crate::ui_kit::button(ui, "Export DXF (AutoCAD)…", crate::ui_kit::Button::Normal).clicked() {
                         let name = format!("{}-drawing.dxf", app.session.doc.name);
@@ -281,8 +286,24 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, Color32::from_gray(58));
+    if app.drawing.pending > 0 {
+        // Paint "Computing…" for a frame first: the projection blocks this thread while it runs.
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Computing the views…",
+            egui::FontId::proportional(Tokens::get().font_heading),
+            Color32::from_gray(230),
+        );
+        app.drawing.pending -= 1;
+        ui.ctx().request_repaint();
+        if app.drawing.pending == 0 {
+            update(app);
+        }
+        return;
+    }
     let Some(sheet) = app.drawing.sheet.as_ref() else {
-        let msg = app.drawing.error.clone().unwrap_or_else(|| "Press Update drawing".into());
+        let msg = app.drawing.error.clone().unwrap_or_else(|| "Press Update drawing to draw the views".into());
         painter.text(rect.center(), egui::Align2::CENTER_CENTER, msg, egui::FontId::proportional(Tokens::get().font_heading), Color32::from_gray(210));
         return;
     };
