@@ -534,10 +534,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let page = Container::new(ui.ctx(), Surface::Viewport).central();
     page.frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(t.panel).inner_margin(egui::Margin::symmetric(36, 24))).show(ui, |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("SolidCraft").size(crate::theme::Tokens::get().font_display).semibold().color(t.text));
-                ui.add_space(t.space_12);
-                ui.label(RichText::new(crate::i18n::tr_label("Start")).size(crate::theme::Tokens::get().font_intro).color(t.text_dim));
+            // A banner: the name, what it is for, and the two ways in just below.
+            egui::Frame::new().fill(t.accent_soft).corner_radius(t.radius_md).inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Draftbench").size(crate::theme::Tokens::get().font_display * 1.25).semibold().color(t.text));
+                ui.add_space(t.space_8);
+                ui.label(
+                    RichText::new(crate::i18n::tr_label("Parametric 3D design in your browser: sketch, extrude, assemble."))
+                        .size(crate::theme::Tokens::get().font_intro)
+                        .color(t.text_dim),
+                );
             });
             ui.add_space(t.space_16);
             ui.horizontal(|ui| {
@@ -588,8 +594,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.add_space(t.space_24);
             ui.horizontal_wrapped(|ui| {
                 ui.hyperlink_to(app.tr("home.documentation"), crate::help::DOCS_URL);
-                ui.hyperlink_to(app.tr("home.report_issue"), "https://github.com/tangency-labs/solidcraft/issues/new");
-                ui.hyperlink_to(app.tr("home.whats_new"), "https://github.com/bherbruck/solidcraft/releases/latest");
+                ui.hyperlink_to(app.tr("home.report_issue"), "https://github.com/g1338544-beep/draftbench/issues/new");
+                ui.hyperlink_to(app.tr("home.whats_new"), "https://github.com/g1338544-beep/draftbench/releases");
                 if ui.link(app.tr("ui.keyboard_shortcuts")).clicked() {
                     app.keymap.open = true;
                     app.keymap.read_only = true;
