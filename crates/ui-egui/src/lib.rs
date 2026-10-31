@@ -1071,6 +1071,15 @@ impl SolveApp {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.dialog = Some(d);
+            // The prompt line says what to click, the way a mate asks for its two faces.
+            let prompt = match id {
+                "solid.align" => Some("Mate: click the body to move, then the face (or edge/point) to move from, then the face to meet; pick Distance for a gap"),
+                "sketch.project_to_surface" => Some("Project Curve: click curves of other sketches, then the face to project onto"),
+                _ => None,
+            };
+            if let Some(text) = prompt {
+                self.set_status(text, false);
+            }
             return;
         }
         // Undo and redo can recompute much of the history: off the window thread when slow.
