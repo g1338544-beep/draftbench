@@ -380,6 +380,10 @@ preference_settings! {
     nav: String = "solidworks".into(), 1;
     /// Graphics area background as `#rrggbb`; empty keeps the theme's own.
     viewport_bg: String = String::new(), 1;
+    /// Colour of the model's edges as `#rrggbb`; empty keeps the theme's own.
+    edge_colour: String = String::new(), 1;
+    /// Colour of sketch lines as `#rrggbb`; empty keeps the theme's own.
+    sketch_colour: String = String::new(), 1;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = true, 1 => check_tr("nav.free_orbit.label");
@@ -1481,6 +1485,25 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                 }
             });
+            for (label, which) in [("Edge colour", 0), ("Sketch line colour", 1)] {
+                ui_kit::row(ui, app.tr_label(label), |ui| {
+                    for (name, hex) in [
+                        ("Theme", ""),
+                        ("Black", "#111111"),
+                        ("Grey", "#7a838f"),
+                        ("White", "#f2f4f7"),
+                        ("Blue", "#2f6fdd"),
+                        ("Green", "#1f9d6a"),
+                        ("Orange", "#e07b1f"),
+                        ("Red", "#d63a3a"),
+                    ] {
+                        let slot = if which == 0 { &mut app.preferences.edge_colour } else { &mut app.preferences.sketch_colour };
+                        if ui.selectable_label(*slot == hex, crate::i18n::tr_label(name)).clicked() {
+                            *slot = hex.to_string();
+                        }
+                    }
+                });
+            }
             ui.add_enabled_ui(app.ui.show_grid, |ui| {
                 setting::grid_follows_view(app, ui);
             });

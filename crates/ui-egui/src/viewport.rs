@@ -359,7 +359,7 @@ pub(crate) fn display_scene_keys(app: &SolveApp, proj: &Proj) -> (u64, u64) {
 /// A sketch curve colour from the engine, in the current theme and colour vision mode.
 fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
     if c == colors::SKETCH {
-        c4(t.sketch)
+        picked_line(&SKETCH_COLOUR).unwrap_or_else(|| c4(t.sketch))
     } else if c == colors::SKETCH_DONE || c == colors::SKETCH_FIXED {
         c4(t.sketch_fixed)
     } else if c == colors::SKETCH_LOCKED {
@@ -666,7 +666,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         2 => (false, true),
         _ => (true, true),
     };
-    let edge_col = if shaded { c4(tk.body_edge) } else { c4(tk.text) };
+    let edge_col = if shaded { picked_line(&EDGE_COLOUR).unwrap_or_else(|| c4(tk.body_edge)) } else { c4(tk.text) };
     // Shaded with hidden edges: edges behind the model show faintly.
     let hidden_edges = app.ui.visual_style == 3;
     let hidden_col = c4(tk.text.gamma_multiply(0.35));
@@ -3612,6 +3612,26 @@ pub(crate) fn set_viewport_bg(hex: &str) {
     VIEWPORT_BG.store(v, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The edge and sketch line colours the user picked: `0x01RRGGBB`, or 0 for the theme's own.
+static EDGE_COLOUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static SKETCH_COLOUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn pack_colour(hex: &str) -> u32 {
+    parse_hex_colour(hex).map_or(0, |[r, g, b]| 0x0100_0000 | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b))
+}
+
+/// Use `edge` and `sketch` (`#rrggbb`) for the model's edges and the sketch lines; empty goes back to the theme's.
+pub(crate) fn set_line_colours(edge: &str, sketch: &str) {
+    EDGE_COLOUR.store(pack_colour(edge), std::sync::atomic::Ordering::Relaxed);
+    SKETCH_COLOUR.store(pack_colour(sketch), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The picked colour in `slot`, as RGBA, if any.
+fn picked_line(slot: &std::sync::atomic::AtomicU32) -> Option<[u8; 4]> {
+    let v = slot.load(std::sync::atomic::Ordering::Relaxed);
+    (v != 0).then(|| [(v >> 16) as u8, (v >> 8) as u8, v as u8, 255])
+}
+
 pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> solidcraft_engine::view::Palette {
     let t = Tokens::themed(dark, mode);
     let rgb = |c: Color32| Rgb(c.r(), c.g(), c.b());
@@ -3626,10 +3646,10 @@ pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> soli
         background,
         grid: rgb(t.grid),
         grid_major: rgb(t.grid_major),
-        edge: rgb(t.body_edge),
+        edge: picked_line(&EDGE_COLOUR).map_or_else(|| rgb(t.body_edge), |c| Rgb(c[0], c[1], c[2])),
         body: rgb(t.body),
         body_selected: rgb(t.body_selected),
-        sketch: rgb(t.sketch),
+        sketch: picked_line(&SKETCH_COLOUR).map_or_else(|| rgb(t.sketch), |c| Rgb(c[0], c[1], c[2])),
         sketch_fixed: rgb(t.sketch_fixed),
         sketch_done: rgb(t.sketch_fixed),
         sketch_locked: rgb(t.sketch_locked),
