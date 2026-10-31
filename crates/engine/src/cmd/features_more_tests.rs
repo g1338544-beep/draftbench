@@ -1618,3 +1618,12 @@ fn loft_through_coplanar_sections_is_refused() {
     assert!(e.contains("same plane"), "{e}");
     assert!(s.model.state().bodies.is_empty());
 }
+
+#[test]
+fn align_offset_keeps_a_distance_between_faces() {
+    use serde_json::json;
+    let mut s = crate::Session::new();
+    // A hostile offset is an error, never a panic.
+    let r = s.execute("solid.align", &json!({"bodies": ["Nope"], "from": "origin", "to": "origin", "offset": f64::MAX}));
+    assert!(r.is_err());
+}

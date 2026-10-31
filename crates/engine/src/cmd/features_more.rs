@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.align", "Align", align)
         .at("SOLID", "MODIFY")
         .icon("align")
-        .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); faces and planes also turn to meet; flip?: bool"),
+        .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; offset?: millimetres the bodies stay apart from a target face (a distance mate; needs to_face); to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); faces and planes also turn to meet; flip?: bool"),
     CommandSpec::new("solid.remove", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
 ];
 
@@ -428,11 +428,18 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         _ => (None, None),
     };
     let flip = bool_(p, "flip").unwrap_or(false);
-    add_feature(
+    // A distance mate: the bodies stop `offset` mm short of the target face, along its normal.
+    let offset = p.get("offset").and_then(Value::as_f64).unwrap_or(0.0);
+    if !offset.is_finite() || offset.abs() > 1.0e6 {
+        return Err(bad(cmd, "`offset` must be a number of millimetres"));
+    }
+    let push = to_normal.filter(|_| offset != 0.0).map(|n| n * offset);
+    let moving: Vec<String> = bodies.clone();
+    let out = add_feature(
         s,
         p,
         FeatureKind::Align {
-            bodies: bodies.into_iter().map(BodyName).collect(),
+            bodies: bodies.iter().cloned().map(BodyName).collect(),
             from: Position(from),
             to: Position(to),
             from_normal: from_normal.map(Dir),
@@ -441,7 +448,11 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             from_plane,
             to_plane,
         },
-    )
+    )?;
+    if let Some(v) = push {
+        super::features::move_bodies(s, &serde_json::json!({"bodies": moving, "translate": [v.x, v.y, v.z]}))?;
+    }
+    Ok(out)
 }
 
 fn remove(s: &mut Session, p: &Value) -> Result<Value> {

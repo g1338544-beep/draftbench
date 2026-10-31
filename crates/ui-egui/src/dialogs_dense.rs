@@ -683,6 +683,18 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                     extra_choice(ui, &mut d.extra, key, key, &[("As Picked", "picked"), ("Centre", "center"), ("Circle Centre", "circle")]);
                 });
             }
+            // Mate in the part, as in an assembly: the faces meet (Coincident), point the
+            // same way (Aligned), or stay a distance apart.
+            form_row(ui, "Mate", |ui| {
+                extra_choice(ui, &mut d.extra, "mate", "mate", &[("Coincident", "coincident"), ("Aligned", "aligned"), ("Distance", "distance")]);
+            });
+            if d.extra.get("mate").and_then(Value::as_str) == Some("distance") {
+                let mut off = d.extra.get("offset").and_then(Value::as_str).unwrap_or("5").to_string();
+                form_row(ui, "Distance (mm)", |ui| {
+                    ui.text_edit_singleline(&mut off);
+                });
+                d.extra.insert("offset".into(), json!(off));
+            }
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
         }
         Kind::BoundaryFill { operation, cells, .. } => {

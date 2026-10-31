@@ -3439,7 +3439,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "bodies")?;
             need(1, "what to move from")?;
             need(2, "where to move it to")?;
-            let mut p = json!({"bodies": sels(d, 0).body_names(), "flip": flip});
+            let mate = d.extra.get("mate").and_then(Value::as_str).unwrap_or("coincident");
+            let mut p = json!({"bodies": sels(d, 0).body_names(), "flip": flip.clone() != (mate == "aligned")});
+            if mate == "distance" {
+                let off = d.extra.get("offset").and_then(Value::as_str).unwrap_or("0").trim();
+                p["offset"] = json!(off.parse::<f64>().map_err(|_| "the distance must be a number of millimetres")?);
+            }
             for (i, key) in [(1, "from"), (2, "to")] {
                 let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
                 match (sels(d, i).first(), snap) {

@@ -1274,7 +1274,7 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
-fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.move";
     let bodies = string_list(p, "bodies");
     if bodies.is_empty() {
