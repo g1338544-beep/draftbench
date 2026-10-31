@@ -118,7 +118,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Scale { factor, .. }) {
             factor: String = "2".into() => factor.to_string(),
         } => json!({"factor": factor});
-        OffsetFaces("solid.offset_face", "MOVE FACE", [("Faces", PLANAR_FACES, true)],
+        OffsetFaces("solid.offset_face", "MOVE FACE", [("Faces", FACES, true)],
             FeatureKind::OffsetFace { distance, .. }) {
             distance: String = "2 mm".into() => distance.to_string(),
         } => json!({"distance": distance});
@@ -3560,7 +3560,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             ("solid.scale", json!({"bodies": sels(d, 0).body_names()}))
         }
         Kind::OffsetFaces { .. } => {
-            need(0, "planar faces")?;
+            need(0, "faces")?;
             ("solid.offset_face", json!({"faces": face_points(0)}))
         }
         Kind::Thread { designation, length, suggested, .. } => {
@@ -3771,7 +3771,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         let mut factor: Option<f64> = None;
         for sel in sels(d, 0) {
             if let Sel::Face { body, index, .. } = sel {
-                let (_, n) = planar_face(s, body, *index).ok_or("pick planar faces to move")?;
+                let (_, n) = planar_face(s, body, *index).ok_or("moving along X, Y or Z needs flat faces: use Normal for round faces")?;
                 let f = n.dot(axis);
                 if f.abs() < 1e-6 {
                     return Err("a face parallel to that direction does not change when it slides along it".into());
