@@ -119,6 +119,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("split_body")
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
+    CommandSpec::new("solid.trim_body", "Trim Body", trim_body)
+        .at("SOLID", "MODIFY")
+        .icon("split_body")
+        .params("body: name; keep: [x,y,z] a point inside the part of the body to keep (the rest is thrown away); plane | tool: {body, point} | sketch + line: the cutting tool, as for solid.split_body"),
     CommandSpec::new("solid.press_pull", "Press Pull", press_pull)
         .at("SOLID", "MODIFY")
         .icon("presspull")
@@ -1712,6 +1716,28 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let plane = plane_param(s, p.get("plane"), cmd)?;
     add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, sketch: None, line: None })
+}
+
+/// Trim Body: cut a body with a plane, a face or a sketch line and keep only the part around
+/// `keep`: a split, then the other pieces removed.
+fn trim_body(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.trim_body";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
+    let keep = p.get("keep").and_then(crate::params::vec3).ok_or_else(|| bad(cmd, "`keep` must be [x, y, z] inside the part to keep"))?;
+    let out = split_body(s, p)?;
+    let prefix = format!("{body} (");
+    let discard: Vec<BodyName> = {
+        let st = s.model.state();
+        let pieces: Vec<&solidcraft_doc::ModelBody> = st.bodies.iter().filter(|b| b.name == body || b.name.starts_with(&prefix)).collect();
+        if !pieces.iter().any(|b| b.body.contains(keep)) {
+            return Err(bad(cmd, "`keep` is not inside any part of the trimmed body"));
+        }
+        pieces.iter().filter(|b| !b.body.contains(keep)).map(|b| BodyName(b.name.clone())).collect()
+    };
+    if !discard.is_empty() {
+        add_feature(s, &json!({"name": "Trim Body"}), FeatureKind::Remove { bodies: discard })?;
+    }
+    Ok(out)
 }
 
 /// ISO 273 clearance hole diameters (close, normal, loose fit) for metric bolts.

@@ -308,6 +308,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         if let Some(t) = crate::dialogs_move::triad(app, &d)
             && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::new("sc_move_triad"), &t, snap_step(app.cam.half_height()))
         {
+            // Holding Ctrl as the drag starts makes it a copy, as in other CAD tools.
+            if g.started && ui.input(|i| i.modifiers.command) {
+                d.extra.insert("copy".into(), serde_json::json!(true));
+            }
             crate::dialogs_move::drag(app, &mut d, g);
             dragging = true;
         }
