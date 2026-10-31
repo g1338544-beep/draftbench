@@ -190,7 +190,7 @@ fn resolve_uncached(
                 _ => project_sketch_curve(&ss.sketch, &ss.plane, ci, plane),
             }
         }
-        LinkSource::OnSurface { sketch, curve, body, at } => {
+        LinkSource::OnSurface { sketch, curve, body, at, normal } => {
             let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
             let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
@@ -201,8 +201,8 @@ fn resolve_uncached(
                 return Err(lost("the face"));
             }
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
-            source = LinkSource::OnSurface { sketch: *sketch, curve: curve.clone(), body: name, at: q };
-            wires = crate::project3d::onto_face(&mesh, f, &pts, plane.normal());
+            source = LinkSource::OnSurface { sketch: *sketch, curve: curve.clone(), body: name, at: q, normal: *normal };
+            wires = if *normal { crate::project3d::onto_face_nearest(&mesh, f, &pts) } else { crate::project3d::onto_face(&mesh, f, &pts, plane.normal()) };
             Vec::new()
         }
         LinkSource::Intersection { a, b } => {

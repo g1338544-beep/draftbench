@@ -33,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("project_surface")
         .enabled(in_sketch)
-        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?: projected along the active sketch's normal onto the face, as linked 3D curves", created_doc!())),
+        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?, direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.intersection_curve", "Intersection Curve", intersection_curve)
         .at("SKETCH", "CREATE")
         .icon("intersection_curve")
@@ -302,6 +302,11 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.project_to_surface";
     let at = p.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be a point [x,y,z] on the target face"))?;
     let body = str_(p, "body").unwrap_or("").to_string();
+    let normal = match str_(p, "direction").unwrap_or("sketch") {
+        "sketch" => false,
+        "normal" | "surface" => true,
+        _ => return Err(bad(cmd, "`direction` must be `sketch` or `normal`")),
+    };
     let list = p.get("curves").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`curves` must list {sketch, curve}"))?;
     if list.is_empty() || list.len() > 500 {
         return Err(bad(cmd, "`curves` must list 1…500 curves"));
@@ -311,7 +316,7 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
         let LinkSource::SketchCurve { sketch, curve } = source(s, &v, cmd)? else {
             return Err(bad(cmd, "each entry must be {sketch, curve}"));
         };
-        out.push(one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve, body: body.clone(), at })?);
+        out.push(one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve, body: body.clone(), at, normal })?);
     }
     Ok(json!({"links": out}))
 }

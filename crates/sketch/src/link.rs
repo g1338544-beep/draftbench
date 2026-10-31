@@ -61,9 +61,17 @@ pub enum LinkSource {
     /// An origin plane (`XY`, `XZ`, `YZ`) or a construction plane (by name): its trace on the
     /// sketch plane.
     Plane { name: String },
-    /// A curve of a sketch projected onto a body face (through `at`) along the normal of the
-    /// sketch that holds the link: a 3D curve.
-    OnSurface { sketch: u64, curve: String, body: String, at: Vec3 },
+    /// A curve of a sketch projected onto a body face (through `at`): a 3D curve. By default
+    /// it runs along the normal of the sketch that holds the link; with `normal` each point
+    /// lands on the nearest point of the face, so the projection runs normal to the surface.
+    OnSurface {
+        sketch: u64,
+        curve: String,
+        body: String,
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        normal: bool,
+    },
     /// Where two bodies or faces (`Body` / `Face` sources) meet: 3D curves.
     Intersection { a: Box<LinkSource>, b: Box<LinkSource> },
     /// An isoparametric curve of the face through `at`: `dir` is `u` (around a curved face),

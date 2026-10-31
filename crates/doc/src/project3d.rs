@@ -99,6 +99,58 @@ pub(crate) fn onto_face(m: &Mesh, f: u32, pts: &[Vec3], dir: Vec3) -> Vec<Vec<Ve
     out
 }
 
+/// Project a world polyline onto face `f` normal to the surface: every point goes to the
+/// nearest point of the face (its foot point). Points farther from the face than the body's
+/// size split the result.
+pub(crate) fn onto_face_nearest(m: &Mesh, f: u32, pts: &[Vec3]) -> Vec<Vec<Vec3>> {
+    let ts = tris(m, Some(f));
+    if ts.is_empty() {
+        return Vec::new();
+    }
+    let size = m.bounds().diagonal().max(1e-9);
+    let step = size / 200.0;
+    let mut dense: Vec<Vec3> = Vec::new();
+    for w in pts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let n = ((a.dist(b) / step).ceil() as usize).clamp(1, 2000);
+        for i in 0..n {
+            dense.push(a.lerp(b, i as f64 / n as f64));
+        }
+        if dense.len() > 200_000 {
+            break;
+        }
+    }
+    if let Some(l) = pts.last() {
+        dense.push(*l);
+    }
+    let mut out: Vec<Vec<Vec3>> = Vec::new();
+    let mut cur: Vec<Vec3> = Vec::new();
+    for p in dense {
+        let mut best: Option<(f64, Vec3)> = None;
+        for t in &ts {
+            let q = crate::project::closest_on_triangle(p, t[0], t[1], t[2]);
+            let d = q.dist(p);
+            if best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, q));
+            }
+        }
+        match best {
+            Some((d, q)) if d <= size => cur.push(q),
+            _ => {
+                if cur.len() >= 2 {
+                    out.push(std::mem::take(&mut cur));
+                } else {
+                    cur.clear();
+                }
+            }
+        }
+    }
+    if cur.len() >= 2 {
+        out.push(cur);
+    }
+    out
+}
+
 /// Segment where two triangles cross (None when they do not, or are coplanar).
 fn tri_tri(a: &[Vec3; 3], b: &[Vec3; 3]) -> Option<(Vec3, Vec3)> {
     let nb = (b[1] - b[0]).cross(b[2] - b[0]).normalized()?;
