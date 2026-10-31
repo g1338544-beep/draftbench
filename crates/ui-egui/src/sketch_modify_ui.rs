@@ -32,7 +32,7 @@ use solidcraft_engine::sketch::PatternAlignment;
 
 use crate::SolveApp;
 use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind};
-use crate::selection::{AXES, CURVES, SKETCH_POINTS, SelInput};
+use crate::selection::{AXES, CURVES, FACES, SKETCH_POINTS, SelInput};
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::ui_kit;
 use crate::viewport::{Hit, Proj};
@@ -119,6 +119,10 @@ pub enum Mod {
     /// `angle` the angle from the first line. `flip` names the two lines in the other order, so
     /// the first distance lands on the other leg of the corner.
     Corner { chamfer: bool, ctype: usize, size: String, distance2: String, angle: String, flip: bool },
+    /// `sketch.project_to_surface`, laid out as a Project Curve window: the curves (of one
+    /// sketch), the face they land on, and the projection direction (0 along the face normal,
+    /// 1 along the active sketch's normal).
+    ProjectCurve { dir: usize },
 }
 
 impl Mod {
@@ -136,6 +140,7 @@ impl Mod {
             Mod::PatternCirc { .. } => "CIRCULAR PATTERN",
             Mod::Corner { chamfer: false, .. } => "FILLET",
             Mod::Corner { .. } => "CHAMFER",
+            Mod::ProjectCurve { .. } => "PROJECT CURVE",
         }
     }
 
@@ -145,7 +150,7 @@ impl Mod {
             Mod::Scale { factor } => Some(("Factor", ValueKind::Unitless, factor)),
             Mod::Offset { distance, .. } => Some(("Distance", ValueKind::Length, distance)),
             Mod::Move { x, .. } => Some(("X Distance", ValueKind::Length, x)),
-            Mod::Mirror => None,
+            Mod::Mirror | Mod::ProjectCurve { .. } => None,
             Mod::PatternRect { spacing, .. } => Some(("Spacing", ValueKind::Length, spacing)),
             Mod::PatternCirc { angle, .. } => Some(("Angle", ValueKind::Angle, angle)),
             Mod::Corner { chamfer: false, size, .. } => Some(("Radius", ValueKind::Length, size)),
@@ -158,6 +163,9 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
     match k {
         Mod::Scale { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Base point", SKETCH_POINTS, false)],
         Mod::Offset { .. } => vec![SelInput::new("Curves", CURVES, true)],
+        Mod::ProjectCurve { .. } => {
+            vec![SelInput::new("Curves to project", CURVES, true), SelInput::new("Object to project to", FACES, false)]
+        }
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Mirror line", AXES, false)],
         Mod::Move { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Center", SKETCH_POINTS, false)],
@@ -192,6 +200,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sketch.scale" => Mod::Scale { factor: "2".into() },
         "sketch.offset" => Mod::Offset { distance: "2 mm".into(), distance2: "2 mm".into(), mode: 0, chain: true, flip: false },
         "sketch.mirror" => Mod::Mirror,
+        "sketch.project_to_surface" => Mod::ProjectCurve { dir: 0 },
         "sketch.move" => Mod::Move { x: "0 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false },
         "sketch.pattern.rectangular" => Mod::PatternRect {
             count: "3".into(),
@@ -220,6 +229,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 /// rectangular-pattern directions, while Hole continues using its separate POINTS mask.
 pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> Option<Sel> {
     let active = session.active_sketch?;
+    // Project Curve takes curves of other sketches and a face of any body.
+    if matches!(d.kind, Kind::SketchModify(Mod::ProjectCurve { .. })) {
+        return d.active_input()?.accepts(hit, |_, _| false);
+    }
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } if *sketch != active => None,
         _ => d.active_input()?.accepts(hit, |_, _| false),
@@ -310,6 +323,7 @@ pub(crate) fn command(k: &Mod) -> &'static str {
         Mod::Scale { .. } => "sketch.scale",
         Mod::Offset { .. } => "sketch.offset",
         Mod::Mirror => "sketch.mirror",
+        Mod::ProjectCurve { .. } => "sketch.project_to_surface",
         Mod::Move { .. } => "sketch.move",
         Mod::PatternRect { .. } => "sketch.pattern.rectangular",
         Mod::PatternCirc { .. } => "sketch.pattern.circular",
@@ -322,7 +336,7 @@ pub(crate) fn command(k: &Mod) -> &'static str {
 
 /// Repeatable operations offer Apply for another selection, with the same typed values.
 pub(crate) fn repeatable(k: &Mod) -> bool {
-    matches!(k, Mod::Offset { .. } | Mod::Mirror | Mod::PatternRect { .. } | Mod::PatternCirc { .. })
+    matches!(k, Mod::Offset { .. } | Mod::Mirror | Mod::PatternRect { .. } | Mod::PatternCirc { .. } | Mod::ProjectCurve { .. })
 }
 
 /// A labelled value row. The value carries its own unit text ("2 mm", "45 deg").
@@ -375,6 +389,13 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod) -> bool {
             });
         }
         Mod::Mirror => {}
+        Mod::ProjectCurve { dir } => {
+            ui_kit::section(ui, "project_direction", "Projection Direction", true, |ui| {
+                ui_kit::row(ui, "Direction", |ui| {
+                    ui_kit::segmented(ui, dir, &["Along Face Normal", "Along Sketch Normal"], Default::default());
+                });
+            });
+        }
         Mod::Move { x, y, angle, copy } => {
             enter |= ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], Some(["X Distance", "Y Distance"]));
             enter |= number(ui, "Angle", angle);
@@ -832,6 +853,25 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 }
                 _ => ("sketch.chamfer.equal_distance", p),
             }
+        }
+        Mod::ProjectCurve { dir } => {
+            let curves = curve_ids(inputs, 0);
+            if curves.is_empty() {
+                return Err("Select the curves to project first".into());
+            }
+            let Some(Sel::Face { body, point, .. }) = items(inputs, 1).first() else { return Err("Select the face to project onto".into()) };
+            // The sketch the curves belong to: the one a pick came from, else the only one holding them.
+            let state = app.session.world_state();
+            let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
+            let picked = extra.get("tool_sketch").and_then(Value::as_u64);
+            let sketch = match picked {
+                Some(k) if holding.contains(&k) => k,
+                _ if holding.len() == 1 => holding.first().copied().ok_or("pick the curves in the viewport")?,
+                _ => return Err("Pick curves from one sketch".into()),
+            };
+            let list: Vec<Value> = curves.iter().map(|c| json!({"sketch": sketch, "curve": c})).collect();
+            let direction = if *dir == 0 { "normal" } else { "sketch" };
+            ("sketch.project_to_surface", json!({"curves": list, "face": [point.x, point.y, point.z], "body": body, "direction": direction}))
         }
     };
     if let Value::Object(m) = &mut params {

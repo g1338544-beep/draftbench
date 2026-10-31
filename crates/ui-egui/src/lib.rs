@@ -1010,6 +1010,14 @@ impl SolveApp {
         {
             self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
         }
+        // Project Curve is a window (curves, face, direction), not a click-through tool.
+        if id == "sketch.project_to_surface"
+            && let Some(d) = dialogs::Dialog::for_command(self, id)
+        {
+            self.dialog = Some(d);
+            self.set_status("Project Curve: pick the curves, then the face to project onto; choose the direction and press OK", false);
+            return;
+        }
         if let Some(mut t) = tools::Tool::for_command(id) {
             if let Some(params) = tools::constraint_preselection(id, &self.session.selection) {
                 if self.run(id, params).is_ok() {
