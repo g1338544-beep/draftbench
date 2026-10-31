@@ -652,6 +652,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
+        Kind::Split if d.extra.contains_key("trim") => {
+            // With a plane or planar face as the tool, its arrow points at the part that goes.
+            extra_options(ui, "trim_options", &mut d.extra, &[("Reverse Direction", "reverse")]);
+        }
         Kind::Split | Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::Construct { t: None, .. } => {}
         Kind::Rib { thickness, depth, flip, normal, .. } => {
             form_row(ui, "Direction", |ui| {

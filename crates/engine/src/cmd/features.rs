@@ -122,7 +122,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.trim_body", "Trim Body", trim_body)
         .at("SOLID", "MODIFY")
         .icon("split_body")
-        .params("body: name; keep: [x,y,z] a point inside the part of the body to keep (the rest is thrown away); plane | tool: {body, point} | sketch + line: the cutting tool, as for solid.split_body"),
+        .params("body: name; keep?: [x,y,z] a point inside the part of the body to keep (the rest is thrown away; without it a plane or planar face tool keeps the side its normal points away from, `reverse`: bool keeps the other); plane | tool: {body, point} | sketch + line: the cutting tool, as for solid.split_body"),
     CommandSpec::new("solid.press_pull", "Press Pull", press_pull)
         .at("SOLID", "MODIFY")
         .icon("presspull")
@@ -1723,16 +1723,45 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
 fn trim_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.trim_body";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
-    let keep = p.get("keep").and_then(crate::params::vec3).ok_or_else(|| bad(cmd, "`keep` must be [x, y, z] inside the part to keep"))?;
+    let keep = p.get("keep").and_then(crate::params::vec3);
+    // Without `keep`, the plane's normal points at the part that goes; `reverse` flips it.
+    let side = if keep.is_some() {
+        None
+    } else {
+        let plane = match p.get("plane") {
+            Some(Value::String(n)) => match n.to_ascii_uppercase().as_str() {
+                "XY" => Some((Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0))),
+                "XZ" => Some((Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0))),
+                "YZ" => Some((Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0))),
+                _ => None,
+            },
+            Some(v @ Value::Object(_)) => v.get("origin").and_then(crate::params::vec3).zip(v.get("normal").and_then(crate::params::vec3)),
+            _ => None,
+        };
+        let plane = plane.ok_or_else(|| bad(cmd, "give `keep` ([x, y, z] inside the part to keep), or a plane or planar face as the tool"))?;
+        Some((plane, bool_(p, "reverse").unwrap_or(false)))
+    };
     let out = split_body(s, p)?;
     let prefix = format!("{body} (");
     let discard: Vec<BodyName> = {
         let st = s.model.state();
         let pieces: Vec<&solidcraft_doc::ModelBody> = st.bodies.iter().filter(|b| b.name == body || b.name.starts_with(&prefix)).collect();
-        if !pieces.iter().any(|b| b.body.contains(keep)) {
-            return Err(bad(cmd, "`keep` is not inside any part of the trimmed body"));
-        }
-        pieces.iter().filter(|b| !b.body.contains(keep)).map(|b| BodyName(b.name.clone())).collect()
+        let kept: Option<usize> = match (keep, side) {
+            (Some(k), _) => pieces.iter().position(|b| b.body.contains(k)),
+            (None, Some(((origin, normal), reverse))) => {
+                let dist = |b: &solidcraft_doc::ModelBody| {
+                    let bb = b.mesh().bounds();
+                    ((bb.min + bb.max) * 0.5 - origin).dot(normal)
+                };
+                let mut order: Vec<(usize, f64)> = pieces.iter().enumerate().map(|(i, b)| (i, dist(b))).collect();
+                order.sort_by(|a, b| a.1.total_cmp(&b.1));
+                // The normal points at the removed side: the kept piece is the lowest.
+                if reverse { order.last().map(|x| x.0) } else { order.first().map(|x| x.0) }
+            }
+            _ => None,
+        };
+        let Some(kept) = kept else { return Err(bad(cmd, "no part of the trimmed body could be chosen to keep")) };
+        pieces.iter().enumerate().filter(|(i, _)| *i != kept).map(|(_, b)| BodyName(b.name.clone())).collect()
     };
     if !discard.is_empty() {
         add_feature(s, &json!({"name": "Trim Body"}), FeatureKind::Remove { bodies: discard })?;

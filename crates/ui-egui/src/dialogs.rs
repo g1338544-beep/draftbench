@@ -665,7 +665,7 @@ impl Dialog {
                 vec![
                     SelInput::new("Body to trim", BODIES, false),
                     SelInput::new("Trimming tool", PLANES | FACES | AXES, false),
-                    SelInput::new("Face on the part to keep", PLANAR_FACES, false),
+                    SelInput::new("Face on the part to keep (optional)", PLANAR_FACES, false),
                 ],
             ),
             "solid.thread" => Dialog::new(
@@ -3532,13 +3532,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 _ => return Err("pick a plane, a face or a sketch line".into()),
             };
             if d.extra.get("trim").and_then(Value::as_bool).unwrap_or(false) {
-                need(2, "a planar face on the part to keep")?;
                 let mut p = p;
-                let Some(Sel::Face { body: kb, index, point }) = sels(d, 2).first() else { return Err("pick a planar face on the part to keep".into()) };
-                let (_, n) = planar_face(s, kb, *index).ok_or("the face to keep must be planar")?;
-                // A little inside the part, below the face.
-                let inside = *point - n * 0.3;
-                p["keep"] = pt(inside);
+                if let Some(Sel::Face { body: kb, index, point }) = sels(d, 2).first() {
+                    // A planar face on the part to keep: a point a little inside the part, below it.
+                    let (_, n) = planar_face(s, kb, *index).ok_or("the face to keep must be planar")?;
+                    p["keep"] = pt(*point - n * 0.3);
+                } else if p.get("plane").is_some() {
+                    // The plane's arrow points at the part that goes; Reverse Direction flips it.
+                    p["reverse"] = json!(d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false));
+                } else {
+                    return Err("pick a planar face on the part to keep".into());
+                }
                 return Ok(vec![("solid.trim_body".into(), p)]);
             }
             ("solid.split_body", p)
