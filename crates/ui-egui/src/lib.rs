@@ -1087,6 +1087,8 @@ impl SolveApp {
             let prompt = match id {
                 "solid.align" => Some("Mate: click the body to move, then the face (or edge/point) to move from, then the face to meet; pick Distance for a gap"),
                 "sketch.project_to_surface" => Some("Project Curve: click curves of other sketches, then the face to project onto"),
+                "solid.sweep" => Some("Sweep: click the profile (a closed shape), then click the path curve(s); the path goes in another sketch, then press OK"),
+                "solid.hole" => Some("Hole: click a face where the hole goes (or a sketch point), choose the size, then press OK"),
                 _ => None,
             };
             if let Some(text) = prompt {
