@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Move Face</title>
+  <path d="M5.70 19.01L23.00 29.00L23.00 48.98L5.70 38.99Z" fill="#b8c3cf"/>
+  <path d="M23.00 9.02L40.30 19.01L23.00 29.00L5.70 19.01Z" fill="#e2e8ef"/>
+  <path d="M23.00 29.00L40.30 19.01L40.30 38.99L23.00 48.98Z" fill="#328bd3"/>
+  <path d="M23.00 9.02L40.30 19.01L40.30 38.99L23.00 48.98L5.70 38.99L5.70 19.01Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M5.70 19.01L23.00 29.00" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.00 29.00L40.30 19.01" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.00 29.00L23.00 48.98" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31.65 34.00L46.37 42.50" fill="none" stroke="#ffffff" stroke-width="8.4" stroke-linecap="round"/>
+  <path d="M31.65 34.00L43.77 41.00" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linecap="round"/>
+  <path d="M48.97 44.00L38.58 44.00L43.78 34.99Z" fill="#236ead"/>
+</svg>

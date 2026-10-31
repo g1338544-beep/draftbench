@@ -137,6 +137,7 @@ min_radius	false
 mirror	false
 motion_link	false
 move	false
+move_face	false
 new	false
 normal	false
 offset	false

@@ -109,7 +109,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Thread { .. } => "thread",
         FeatureKind::SplitFace { .. } => "split_face",
         FeatureKind::Scale { .. } => "scale",
-        FeatureKind::OffsetFace { .. } => "offset_face",
+        FeatureKind::OffsetFace { .. } => "move_face",
         FeatureKind::DeleteFace { .. } => "delete_face",
         FeatureKind::Remove { .. } => "delete",
         FeatureKind::BoundingSolid { .. } => "bounding_solid",

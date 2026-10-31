@@ -87,7 +87,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("faces: [[x,y,z] points on the faces, or face names from model.faces]; body?; heal?: bool (default true: the neighbouring planes close the gap, as when a rounded edge, hole or boss is taken off; false: the gap stays open and the faces left are a surface body)"),
     CommandSpec::new("solid.offset_face", "Move Face", offset_face)
         .at("SOLID", "MODIFY")
-        .icon("offset_face")
+        .icon("move_face")
         .params("faces: [[x,y,z] points on planar faces, or face names from model.faces]; distance: expr (positive: outward); body?"),
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
