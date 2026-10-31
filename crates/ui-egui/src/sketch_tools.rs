@@ -639,7 +639,7 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.constrainer" => "Constrain: click one or two entities; right-click to apply",
             "sketch.constraint.polygon" => "Polygon: click the lines of a closed chain; right-click to apply",
             "sketch.centerline" => "Centerline: click lines",
-            "sketch.project_to_surface" => "Project to surface: click curves of other sketches, right-click, then click the face (hold Shift while clicking the face to project normal to the surface)",
+            "sketch.project_to_surface" => "Project Curve: click curves of other sketches, right-click, then click the face (hold Shift while clicking the face to project normal to the surface)",
             "sketch.intersection_curve" => "Intersection curve: click two faces",
             "sketch.spun_profile" => "Spun profile: click the body, then the axis line",
             _ => return None,

@@ -29,7 +29,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("include")
         .enabled(in_sketch)
         .params(concat!("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it", created_doc!())),
-    CommandSpec::new("sketch.project_to_surface", "Project To Surface", project_to_surface)
+    CommandSpec::new("sketch.project_to_surface", "Project Curve", project_to_surface)
         .at("SKETCH", "CREATE")
         .icon("project_surface")
         .enabled(in_sketch)
