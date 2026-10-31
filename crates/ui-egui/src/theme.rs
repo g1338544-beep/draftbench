@@ -584,8 +584,8 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_visuals(visuals(dark));
     let t = Tokens::get();
     ctx.global_style_mut(|s| {
-        s.spacing.item_spacing = egui::vec2(t.space_6, t.space_4);
-        s.spacing.button_padding = egui::vec2(t.space_6, t.space_3);
+        s.spacing.item_spacing = egui::vec2(t.space_8, t.space_6);
+        s.spacing.button_padding = egui::vec2(t.space_10, t.space_4);
     });
 }
 

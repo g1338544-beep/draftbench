@@ -18,19 +18,19 @@ impl Tokens {
             space_14: 14.0,
             space_16: 16.0,
             space_24: 24.0,
-            radius_sm: 4,
-            radius_md: 6,
-            radius_lg: 8,
-            radius_xl: 10,
+            radius_sm: 6,
+            radius_md: 9,
+            radius_lg: 12,
+            radius_xl: 16,
             font_badge: 9.5,
             font_micro: 10.0,
             font_panel: 10.5,
             font_small: 11.0,
             font_caption: 11.5,
-            font_body: 12.0,
-            font_label: 12.5,
-            font_button: 13.0,
-            font_heading: 14.0,
+            font_body: 13.0,
+            font_label: 13.0,
+            font_button: 13.5,
+            font_heading: 15.0,
             font_triad: 8.0,
             font_compass: 13.5,
             font_subtitle: 15.0,
@@ -38,7 +38,7 @@ impl Tokens {
             font_article_heading: 17.0,
             font_title: 22.0,
             font_display: 26.0,
-            control_height: 28.0,
+            control_height: 32.0,
             form_ink: Color32::from_rgb(27, 36, 48),
             form_dim: Color32::from_rgb(74, 88, 104),
             form_primary: Color32::from_rgb(35, 110, 173),
@@ -46,9 +46,9 @@ impl Tokens {
             form_error_fill: Color32::from_rgb(252, 239, 237),
             form_success: Color32::from_rgb(39, 107, 44),
             form_success_fill: Color32::from_rgb(229, 242, 230),
-            control_radius: 6,
-            form_label_width: 70.0,
-            form_gap_y: 5.0,
+            control_radius: 8,
+            form_label_width: 76.0,
+            form_gap_y: 7.0,
             form_footer_height: 48.0,
             form_header_height: 40.0,
             form_card_width: 264.0,
@@ -58,7 +58,7 @@ impl Tokens {
             form_icon_inset: 4.5,
             form_section_icon_size: 11.0,
             form_checkbox_height: 22.0,
-            form_button_height: 28.0,
+            form_button_height: 32.0,
             sketch_palette_width: 232.0,
             sketch_mode_size: 36.0,
             sketch_mode_radius: 7,
@@ -67,16 +67,16 @@ impl Tokens {
             sketch_mode_tint: 0.12,
             sketch_footer_icon_size: 15.0,
             font_section_tracking: 0.04,
-            app_bar: Color32::from_rgb(16, 62, 44),
-            app_bar_separator: Color32::from_rgb(104, 158, 128),
-            toolbar: Color32::from_rgb(243, 249, 245),
-            panel: Color32::from_rgb(248, 252, 249),
-            panel_header: Color32::from_rgb(230, 241, 234),
-            border: Color32::from_rgb(200, 218, 207),
-            text: Color32::from_rgb(26, 44, 35),
-            text_dim: Color32::from_rgb(98, 120, 107),
-            accent: Color32::from_rgb(21, 128, 61),
-            accent_soft: Color32::from_rgb(210, 240, 220),
+            app_bar: Color32::from_rgb(38, 46, 58),
+            app_bar_separator: Color32::from_rgb(110, 122, 140),
+            toolbar: Color32::from_rgb(250, 251, 252),
+            panel: Color32::from_rgb(246, 247, 249),
+            panel_header: Color32::from_rgb(236, 239, 243),
+            border: Color32::from_rgb(220, 225, 232),
+            text: Color32::from_rgb(34, 41, 52),
+            text_dim: Color32::from_rgb(108, 118, 132),
+            accent: Color32::from_rgb(20, 140, 110),
+            accent_soft: Color32::from_rgb(222, 242, 236),
             sketch_accent: icon_primary(crate::icon_svg::SKETCH_PRIMARY[0]),
             // Icon palette active-3 ramps; these accents have no compiled constants yet.
             surface_accent: Color32::from_rgb(164, 80, 0),
@@ -214,10 +214,10 @@ impl Tokens {
         t.font_article_heading = 17.0;
         t.font_title = 22.0;
         t.font_display = 26.0;
-        t.control_height = 28.0;
-        t.control_radius = 6;
-        t.form_label_width = 70.0;
-        t.form_gap_y = 5.0;
+        t.control_height = 32.0;
+        t.control_radius = 8;
+        t.form_label_width = 76.0;
+        t.form_gap_y = 7.0;
         t.form_footer_height = 48.0;
         t.form_header_height = 40.0;
         t.form_card_width = 264.0;
@@ -227,7 +227,7 @@ impl Tokens {
         t.form_icon_inset = 4.5;
         t.form_section_icon_size = 11.0;
         t.form_checkbox_height = 22.0;
-        t.form_button_height = 28.0;
+        t.form_button_height = 32.0;
         t.sketch_palette_width = 232.0;
         t.sketch_mode_size = 36.0;
         t.sketch_mode_radius = 7;
@@ -236,15 +236,15 @@ impl Tokens {
         t.sketch_mode_tint = 0.12;
         t.sketch_footer_icon_size = 15.0;
         t.font_section_tracking = 0.04;
-        t.app_bar = Color32::from_rgb(12, 36, 26);
-        t.toolbar = Color32::from_rgb(24, 44, 34);
-        t.panel = Color32::from_rgb(24, 44, 34);
-        t.panel_header = Color32::from_rgb(31, 55, 43);
-        t.border = Color32::from_rgb(52, 82, 66);
-        t.text = Color32::from_rgb(222, 236, 228);
-        t.text_dim = Color32::from_rgb(146, 170, 156);
-        t.accent = Color32::from_rgb(52, 199, 105);
-        t.accent_soft = Color32::from_rgb(27, 78, 52);
+        t.app_bar = Color32::from_rgb(24, 28, 35);
+        t.toolbar = Color32::from_rgb(34, 39, 48);
+        t.panel = Color32::from_rgb(34, 39, 48);
+        t.panel_header = Color32::from_rgb(42, 48, 58);
+        t.border = Color32::from_rgb(56, 63, 76);
+        t.text = Color32::from_rgb(230, 234, 240);
+        t.text_dim = Color32::from_rgb(152, 162, 177);
+        t.accent = Color32::from_rgb(78, 200, 160);
+        t.accent_soft = Color32::from_rgb(36, 76, 68);
         t.sketch_accent = icon_primary(crate::icon_svg::SKETCH_PRIMARY[1]);
         t.surface_accent = Color32::from_rgb(149, 104, 45);
         t.mesh_accent = Color32::from_rgb(133, 113, 0);
@@ -280,7 +280,7 @@ impl Tokens {
         t.error = Color32::from_rgb(240, 100, 96);
         t.warning = Color32::from_rgb(236, 170, 70);
         t.icon = Color32::from_rgb(208, 214, 226);
-        t.timeline = Color32::from_rgb(19, 38, 29);
+        t.timeline = Color32::from_rgb(28, 32, 40);
         t.hover = Color32::from_rgb(54, 61, 74);
         t.hover_edge_halo = Color32::from_rgb(203, 203, 203);
         t.origin_point = Color32::from_rgb(214, 215, 218);
