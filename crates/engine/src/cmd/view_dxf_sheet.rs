@@ -141,36 +141,19 @@ fn build(s: &mut Session, p: &Value) -> Result<Built> {
         None => 0.15,
         Some(v) => v.as_f64().filter(|t| (0.001..=2.0).contains(t)).ok_or_else(|| bad(CMD, "tolerance must be 0.001..2 mm"))?,
     };
-    progress::Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
-    let scene = meshes::prepare(s, tolerance)?;
-    let parts = sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?;
+    let key = cache_key(s, tolerance);
+    let (scene, parts) = scene_and_parts(s, tolerance, key)?;
 
-    // Project each view with its own orthographic camera.
+    // Project each view with its own orthographic camera (each is kept until the model changes,
+    // so a view computed once, e.g. by `warm`, costs nothing the next time).
     let mut placed: Vec<Placed> = Vec::new();
     for view in &views {
-        let (yaw, pitch) = (*view).angles();
-        let cam = Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
-        let drawing = projection::drawing(&scene, &parts, &cam).map_err(|e| bad(CMD, e))?;
-        let mut lines: Vec<(Vec2, Vec2, bool)> = Vec::new();
-        let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
-        for l in drawing.lines {
-            if !(l.a.is_finite() && l.b.is_finite()) {
-                continue;
-            }
-            if !l.hidden {
-                for q in [l.a, l.b] {
-                    lo = Vec2::new(lo.x.min(q.x), lo.y.min(q.y));
-                    hi = Vec2::new(hi.x.max(q.x), hi.y.max(q.y));
-                }
-            }
-            if !l.hidden || dashed {
-                lines.push((l.a, l.b, l.hidden));
-            }
-        }
-        if lo.x > hi.x {
+        let all = view_lines(&scene, &parts, *view, key)?;
+        if all.lo.x > all.hi.x {
             continue; // nothing visible from this side
         }
-        placed.push(Placed { view: *view, lines, lo, hi });
+        let lines: Vec<(Vec2, Vec2, bool)> = all.lines.iter().copied().filter(|l| !l.2 || dashed).collect();
+        placed.push(Placed { view: *view, lines, lo: all.lo, hi: all.hi });
     }
     if placed.is_empty() {
         return Err(bad(CMD, "nothing to draw in these views"));
@@ -315,11 +298,14 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
 pub(super) const PREVIEW: &str = "drawing.sheet";
 
 pub(super) const PREVIEW_SPEC: CommandSpec = CommandSpec::new(PREVIEW, "Drawing Sheet", preview).noundo().params(
-    "paper?: A0..A4, orientation?, projection?, views?, scale?, title?, hidden?, dimensions?, tolerance? (as file.export_drawing_dxf, without path)",
+    "paper?: A0..A4, orientation?, projection?, views?, scale?, title?, hidden?, dimensions?, tolerance? (as file.export_drawing_dxf, without path); warm?: scene|<view> computes and keeps one stage",
 );
 
 /// The sheet as plain JSON entities in millimetres, for the Drawing workspace to paint.
 fn preview(s: &mut Session, p: &Value) -> Result<Value> {
+    if p.get("warm").is_some() {
+        return warm(s, p);
+    }
     let b = build(s, p)?;
     let pt = |v: Vec2| json!([v.x, v.y]);
     let mut items = Vec::with_capacity(b.entities.len());
@@ -335,6 +321,103 @@ fn preview(s: &mut Session, p: &Value) -> Result<Value> {
         });
     }
     Ok(json!({"width": b.sheet.0, "height": b.sheet.1, "summary": b.summary, "items": items}))
+}
+
+type Key = (u64, usize, u64, u64);
+
+struct Projected {
+    lines: Vec<(Vec2, Vec2, bool)>,
+    lo: Vec2,
+    hi: Vec2,
+}
+
+#[derive(Default)]
+struct Cache {
+    key: Option<Key>,
+    scene: Option<std::rc::Rc<meshes::Scene>>,
+    parts: Option<std::rc::Rc<Vec<sketch::Part>>>,
+    views: std::collections::BTreeMap<&'static str, std::rc::Rc<Projected>>,
+}
+
+thread_local! {
+    static CACHE: std::cell::RefCell<Cache> = std::cell::RefCell::new(Cache::default());
+}
+
+fn cache_key(s: &Session, tolerance: f64) -> Key {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.visibility.hidden_bodies.hash(&mut h);
+    s.visibility.hidden_occurrences.hash(&mut h);
+    (s.revision, std::sync::Arc::as_ptr(&s.world_state()) as usize, h.finish(), tolerance.to_bits())
+}
+
+fn scene_and_parts(s: &Session, tolerance: f64, key: Key) -> Result<(std::rc::Rc<meshes::Scene>, std::rc::Rc<Vec<sketch::Part>>)> {
+    let cached = CACHE.with(|c| {
+        let c = c.borrow();
+        (c.key == Some(key)).then(|| c.scene.clone().zip(c.parts.clone())).flatten()
+    });
+    if let Some(found) = cached {
+        return Ok(found);
+    }
+    progress::Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
+    let scene = std::rc::Rc::new(meshes::prepare(s, tolerance)?);
+    let parts = std::rc::Rc::new(sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?);
+    CACHE.with(|c| {
+        *c.borrow_mut() = Cache { key: Some(key), scene: Some(scene.clone()), parts: Some(parts.clone()), views: Default::default() };
+    });
+    Ok((scene, parts))
+}
+
+fn view_lines(scene: &meshes::Scene, parts: &[sketch::Part], view: StandardView, key: Key) -> Result<std::rc::Rc<Projected>> {
+    let name = view_name(view);
+    if let Some(found) = CACHE.with(|c| {
+        let c = c.borrow();
+        if c.key == Some(key) { c.views.get(name).cloned() } else { None }
+    }) {
+        return Ok(found);
+    }
+    let (yaw, pitch) = view.angles();
+    let cam = Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+    let drawing = projection::drawing(scene, parts, &cam).map_err(|e| bad(CMD, e))?;
+    let mut lines: Vec<(Vec2, Vec2, bool)> = Vec::new();
+    let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+    for l in drawing.lines {
+        if !(l.a.is_finite() && l.b.is_finite()) {
+            continue;
+        }
+        if !l.hidden {
+            for q in [l.a, l.b] {
+                lo = Vec2::new(lo.x.min(q.x), lo.y.min(q.y));
+                hi = Vec2::new(hi.x.max(q.x), hi.y.max(q.y));
+            }
+        }
+        lines.push((l.a, l.b, l.hidden));
+    }
+    let done = std::rc::Rc::new(Projected { lines, lo, hi });
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.key == Some(key) {
+            c.views.insert(name, done.clone());
+        }
+    });
+    Ok(done)
+}
+
+/// Compute one stage ("scene", or a view name) and keep it, so the page can spread a sheet's
+/// work over several frames instead of freezing for all of it.
+fn warm(s: &mut Session, p: &Value) -> Result<Value> {
+    if !sketch::exportable(s) {
+        return Err(bad(PREVIEW, "no visible bodies or sketches to draw: create a solid in Design first"));
+    }
+    let tolerance = p.get("tolerance").and_then(Value::as_f64).filter(|t| (0.001..=2.0).contains(t)).unwrap_or(0.15);
+    let key = cache_key(s, tolerance);
+    let (scene, parts) = scene_and_parts(s, tolerance, key)?;
+    let stage = str_(p, "warm").unwrap_or("scene");
+    if stage != "scene" {
+        let view = StandardView::parse(stage).ok_or_else(|| bad(PREVIEW, format!("unknown view `{stage}`")))?;
+        view_lines(&scene, &parts, view, key)?;
+    }
+    Ok(json!({"warmed": stage}))
 }
 
 fn view_name(v: StandardView) -> &'static str {

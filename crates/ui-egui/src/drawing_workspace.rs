@@ -51,8 +51,11 @@ pub struct State {
     error: Option<String>,
     design_camera: Option<(Camera, bool)>,
     shown: Option<(u64, u32, u32)>,
-    /// Update was asked for: it runs on the next frame, after "Computing…" has been painted.
-    pending: u8,
+    /// Stages of an Update still to run (scene, then each view): one per frame, so the page
+    /// keeps painting and shows progress instead of freezing for the whole sheet.
+    steps: Vec<String>,
+    total: usize,
+    painted: bool,
 }
 
 impl Default for State {
@@ -70,7 +73,9 @@ impl Default for State {
             error: None,
             design_camera: None,
             shown: None,
-            pending: 0,
+            steps: Vec::new(),
+            total: 0,
+            painted: false,
         }
     }
 }
@@ -134,6 +139,16 @@ fn parse(v: &Value) -> Option<Sheet> {
     Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items })
 }
 
+/// Start an Update: the model first, then each wanted view, one stage per frame.
+fn begin(app: &mut SolveApp) {
+    let mut steps = vec!["scene".to_string()];
+    steps.extend(VIEWS.iter().zip(app.drawing.views).filter(|(_, on)| *on).map(|((n, _), _)| n.to_string()));
+    app.drawing.total = steps.len();
+    app.drawing.steps = steps;
+    app.drawing.painted = false;
+    app.drawing.error = None;
+}
+
 /// Compute the sheet now (the heavy step) and frame it.
 pub fn update(app: &mut SolveApp) {
     let p = params(&app.drawing);
@@ -189,7 +204,8 @@ pub fn enter(app: &mut SolveApp) -> Result<(), String> {
     if app.drawing.title.is_empty() {
         app.drawing.title = app.session.doc.name.clone();
     }
-    // Nothing is computed on entering: the page opens at once, Update draws the sheet.
+    // The page opens at once; the sheet is computed stage by stage over the next frames.
+    begin(app);
     fit(app);
     Ok(())
 }
@@ -247,7 +263,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_title"), &mut app.drawing.title, "", false, 80).changed();
                     ui.separator();
                     if crate::ui_kit::button(ui, "Update drawing", crate::ui_kit::Button::Normal).clicked() {
-                        app.drawing.pending = 2;
+                        begin(app);
                     }
                     if crate::ui_kit::button(ui, "Export DXF (AutoCAD)…", crate::ui_kit::Button::Normal).clicked() {
                         let name = format!("{}-drawing.dxf", app.session.doc.name);
@@ -286,18 +302,32 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, Color32::from_gray(58));
-    if app.drawing.pending > 0 {
-        // Paint "Computing…" for a frame first: the projection blocks this thread while it runs.
+    if !app.drawing.steps.is_empty() {
+        let done = app.drawing.total - app.drawing.steps.len();
+        let next = app.drawing.steps.first().cloned().unwrap_or_default();
+        let label = if next == "scene" { "preparing the model".to_string() } else { format!("{next} view") };
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "Computing the views…",
+            format!("Computing the views… {done}/{}  ({label})", app.drawing.total),
             egui::FontId::proportional(Tokens::get().font_heading),
             Color32::from_gray(230),
         );
-        app.drawing.pending -= 1;
         ui.ctx().request_repaint();
-        if app.drawing.pending == 0 {
+        if !app.drawing.painted {
+            // Let this frame reach the screen before the next stage blocks the thread.
+            app.drawing.painted = true;
+            return;
+        }
+        app.drawing.painted = false;
+        let mut p = params(&app.drawing);
+        p["warm"] = json!(next);
+        app.drawing.steps.remove(0);
+        if let Err(e) = app.run("drawing.sheet", p) {
+            app.drawing.steps.clear();
+            app.drawing.sheet = None;
+            app.drawing.error = Some(e);
+        } else if app.drawing.steps.is_empty() {
             update(app);
         }
         return;
