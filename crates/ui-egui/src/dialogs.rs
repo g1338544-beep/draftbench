@@ -912,6 +912,9 @@ impl Dialog {
             Kind::Part(_) | Kind::PartSize(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
+            // A sweep along a long or curved path can take long enough to freeze the browser tab
+            // while the pointer moves; the browser build applies it only on OK.
+            Kind::Sweep { .. } => return !cfg!(target_arch = "wasm32"),
             _ => {}
         }
         matches!(
@@ -937,7 +940,6 @@ impl Dialog {
                 | Kind::PatternRect { .. }
                 | Kind::PatternCirc { .. }
                 | Kind::Loft { .. }
-                | Kind::Sweep { .. }
                 | Kind::PathPlane { .. }
                 | Kind::Midplane
                 | Kind::Construct { .. }
