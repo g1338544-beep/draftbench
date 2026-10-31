@@ -2447,7 +2447,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::select_other::hover_override(app);
     let painter = ui.painter_at(rect);
     // Background gradient.
-    let (top, bot) = (t.viewport_top, t.viewport_bottom);
+    let (top, bot) = match VIEWPORT_BG.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => (t.viewport_top, t.viewport_bottom),
+        v => {
+            // The background the user picked in Preferences > Graphics.
+            let c = Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
+            (c, c)
+        }
+    };
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.left_top(), top);
     mesh.colored_vertex(rect.right_top(), top);
