@@ -5,9 +5,9 @@
     .f2{animation-delay:.5s}.f3{animation-delay:1s}.f4{animation-delay:1.5s}
     @keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
   </style>
-  <polygon class="f" points="200,10 365,105 200,200 35,105" fill="#2dd4bf"/>
-  <polygon class="f f2" points="35,105 200,200 200,390 35,295" fill="#0f9e8e"/>
-  <polygon class="f f3" points="365,105 365,295 200,390 200,200" fill="#0b6b62"/>
+  <polygon class="f" points="200,10 365,105 200,200 35,105" fill="#4ade80"/>
+  <polygon class="f f2" points="35,105 200,200 200,390 35,295" fill="#16a34a"/>
+  <polygon class="f f3" points="365,105 365,295 200,390 200,200" fill="#15803d"/>
   <polygon class="f f4" points="200,62 274,105 200,148 126,105" fill="#ffffff"/>
   <path class="f f4" d="M200 200V390M200 200L35 105M200 200L365 105" stroke="#ffffff" stroke-width="10" fill="none"/>
 </svg>

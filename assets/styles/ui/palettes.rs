@@ -67,16 +67,16 @@ impl Tokens {
             sketch_mode_tint: 0.12,
             sketch_footer_icon_size: 15.0,
             font_section_tracking: 0.04,
-            app_bar: Color32::from_rgb(52, 56, 64),
-            app_bar_separator: Color32::from_rgb(136, 145, 160),
-            toolbar: Color32::from_rgb(246, 247, 249),
-            panel: Color32::from_rgb(250, 251, 252),
-            panel_header: Color32::from_rgb(236, 238, 242),
-            border: Color32::from_rgb(208, 212, 220),
-            text: Color32::from_rgb(38, 42, 50),
-            text_dim: Color32::from_rgb(110, 116, 128),
-            accent: Color32::from_rgb(0, 128, 128),
-            accent_soft: Color32::from_rgb(208, 236, 234),
+            app_bar: Color32::from_rgb(16, 62, 44),
+            app_bar_separator: Color32::from_rgb(104, 158, 128),
+            toolbar: Color32::from_rgb(243, 249, 245),
+            panel: Color32::from_rgb(248, 252, 249),
+            panel_header: Color32::from_rgb(230, 241, 234),
+            border: Color32::from_rgb(200, 218, 207),
+            text: Color32::from_rgb(26, 44, 35),
+            text_dim: Color32::from_rgb(98, 120, 107),
+            accent: Color32::from_rgb(21, 128, 61),
+            accent_soft: Color32::from_rgb(210, 240, 220),
             sketch_accent: icon_primary(crate::icon_svg::SKETCH_PRIMARY[0]),
             // Icon palette active-3 ramps; these accents have no compiled constants yet.
             surface_accent: Color32::from_rgb(164, 80, 0),
@@ -106,9 +106,9 @@ impl Tokens {
             agent_busy: Color32::from_rgb(108, 180, 240),
             error: Color32::from_rgb(214, 54, 54),
             warning: Color32::from_rgb(222, 150, 30),
-            icon: Color32::from_rgb(70, 78, 92),
-            timeline: Color32::from_rgb(232, 235, 240),
-            hover: Color32::from_rgb(226, 234, 246),
+            icon: Color32::from_rgb(44, 84, 64),
+            timeline: Color32::from_rgb(226, 238, 230),
+            hover: Color32::from_rgb(218, 237, 225),
             sel_face: Color32::from_rgb(76, 127, 203),
             sel_edge: Color32::from_rgb(0, 127, 255),
             sel_edge_rim: Color32::from_rgb(127, 191, 255),
@@ -201,7 +201,7 @@ impl Tokens {
             ],
             analysis: AnalysisColors::DEFAULT,
             icons: IconColors { highlight: Color32::WHITE, agent: Color32::from_rgb(168, 85, 247), marker_halo: Color32::from_black_alpha(150) },
-            logo: [Color32::from_rgb(96, 158, 236), Color32::from_rgb(58, 136, 238), Color32::from_rgb(55, 108, 197), Color32::WHITE],
+            logo: [Color32::from_rgb(74, 222, 128), Color32::from_rgb(22, 163, 74), Color32::from_rgb(21, 128, 61), Color32::WHITE],
         }
     }
     pub const fn dark() -> Tokens {
@@ -236,15 +236,15 @@ impl Tokens {
         t.sketch_mode_tint = 0.12;
         t.sketch_footer_icon_size = 15.0;
         t.font_section_tracking = 0.04;
-        t.app_bar = Color32::from_rgb(28, 31, 38);
-        t.toolbar = Color32::from_rgb(39, 43, 52);
-        t.panel = Color32::from_rgb(39, 43, 52);
-        t.panel_header = Color32::from_rgb(47, 52, 62);
-        t.border = Color32::from_rgb(63, 69, 82);
-        t.text = Color32::from_rgb(222, 226, 232);
-        t.text_dim = Color32::from_rgb(148, 155, 168);
-        t.accent = Color32::from_rgb(38, 166, 154);
-        t.accent_soft = Color32::from_rgb(28, 72, 70);
+        t.app_bar = Color32::from_rgb(12, 36, 26);
+        t.toolbar = Color32::from_rgb(24, 44, 34);
+        t.panel = Color32::from_rgb(24, 44, 34);
+        t.panel_header = Color32::from_rgb(31, 55, 43);
+        t.border = Color32::from_rgb(52, 82, 66);
+        t.text = Color32::from_rgb(222, 236, 228);
+        t.text_dim = Color32::from_rgb(146, 170, 156);
+        t.accent = Color32::from_rgb(52, 199, 105);
+        t.accent_soft = Color32::from_rgb(27, 78, 52);
         t.sketch_accent = icon_primary(crate::icon_svg::SKETCH_PRIMARY[1]);
         t.surface_accent = Color32::from_rgb(149, 104, 45);
         t.mesh_accent = Color32::from_rgb(133, 113, 0);
@@ -280,7 +280,7 @@ impl Tokens {
         t.error = Color32::from_rgb(240, 100, 96);
         t.warning = Color32::from_rgb(236, 170, 70);
         t.icon = Color32::from_rgb(208, 214, 226);
-        t.timeline = Color32::from_rgb(33, 37, 45);
+        t.timeline = Color32::from_rgb(19, 38, 29);
         t.hover = Color32::from_rgb(54, 61, 74);
         t.hover_edge_halo = Color32::from_rgb(203, 203, 203);
         t.origin_point = Color32::from_rgb(214, 215, 218);
