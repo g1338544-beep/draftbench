@@ -527,7 +527,23 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 enter |= expr_row(ui, "Tip Angle", &mut opts.tip_angle);
             }
             if !opts.tapped {
-                enter |= expr_row(ui, "Diameter", diameter);
+                // A standard bolt size gives the ISO 273 clearance hole; Custom types the diameter.
+                form_row(ui, "Size", |ui| {
+                    extra_choice(
+                        ui,
+                        &mut d.extra,
+                        "bolt",
+                        "hole_size",
+                        &[("Custom", "custom"), ("M3", "M3"), ("M4", "M4"), ("M5", "M5"), ("M6", "M6"), ("M8", "M8"), ("M10", "M10"), ("M12", "M12"), ("M16", "M16")],
+                    );
+                });
+                if d.extra.contains_key("bolt") {
+                    form_row(ui, "Fit", |ui| {
+                        extra_choice(ui, &mut d.extra, "fit", "hole_fit", &[("Normal", "normal"), ("Close", "close"), ("Loose", "loose")]);
+                    });
+                } else {
+                    enter |= expr_row(ui, "Diameter", diameter);
+                }
             }
             if *kind == 1 {
                 enter |= expr_row(ui, "Counterbore Ø", cb_diameter);
