@@ -54,6 +54,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "construct.plane.along_path", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "construct.plane.at_angle", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.split_body", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "solid.trim_body", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.scale", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.offset_face", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.thread", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -657,6 +658,16 @@ impl Dialog {
                 Kind::Split,
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
             ),
+            // Trim Body is a split that throws the other side away: the third pick is a planar
+            // face on the part to keep.
+            "solid.trim_body" => Dialog::new(
+                Kind::Split,
+                vec![
+                    SelInput::new("Body to trim", BODIES, false),
+                    SelInput::new("Trimming tool", PLANES | FACES | AXES, false),
+                    SelInput::new("Face on the part to keep", PLANAR_FACES, false),
+                ],
+            ),
             "solid.thread" => Dialog::new(
                 Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new() },
                 vec![SelInput::new("Cylindrical face", FACES, false)],
@@ -764,6 +775,9 @@ impl Dialog {
                 Dialog::new(kind, inputs)
             }
         };
+        if id == "solid.trim_body" {
+            d.extra.insert("trim".into(), json!(true));
+        }
         // Patterns of features picked in the timeline: the objects are features.
         if is_pattern(&d.kind)
             && s.selection.iter().any(|x| matches!(x, Sel::Feature { .. }))
@@ -3517,6 +3531,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 _ => return Err("pick a plane, a face or a sketch line".into()),
             };
+            if d.extra.get("trim").and_then(Value::as_bool).unwrap_or(false) {
+                need(2, "a planar face on the part to keep")?;
+                let mut p = p;
+                let Some(Sel::Face { body: kb, index, point }) = sels(d, 2).first() else { return Err("pick a planar face on the part to keep".into()) };
+                let (_, n) = planar_face(s, kb, *index).ok_or("the face to keep must be planar")?;
+                // A little inside the part, below the face.
+                let inside = *point - n * 0.3;
+                p["keep"] = pt(inside);
+                return Ok(vec![("solid.trim_body".into(), p)]);
+            }
             ("solid.split_body", p)
         }
         Kind::Scale { .. } => {

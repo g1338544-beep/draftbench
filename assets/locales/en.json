@@ -747,6 +747,7 @@
   "cmd.solid_replace_face": "Replace Face",
   "cmd.solid_rib": "Rib",
   "cmd.solid_split_face": "Split Face",
+  "cmd.solid_trim_body": "Trim Body",
   "cmd.solid_web": "Web",
   "cmd.surface_blend": "Blend Surface",
   "cmd.surface_boundary": "Boundary Surface",

@@ -66,6 +66,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // its plane is in the active component, where the copies go.
         "solid.mirror" => &[("plane", HerePlane)],
         "solid.split_body" => &[("plane", Plane), ("bodies", Body), ("body", Body)],
+        "solid.trim_body" => &[("plane", Plane), ("keep", Pick), ("bodies", Body), ("body", Body)],
         "plastic.boss" | "plastic.snap_fit" | "plastic.rest" => {
             &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
         }
