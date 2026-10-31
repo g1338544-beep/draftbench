@@ -310,6 +310,28 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
     if list.is_empty() || list.len() > 500 {
         return Err(bad(cmd, "`curves` must list 1…500 curves"));
     }
+    // `{sketch}` without `curve` means every curve of that sketch.
+    let mut expanded: Vec<Value> = Vec::new();
+    for v in list {
+        match (v.get("sketch"), v.get("curve")) {
+            (Some(key), None) => {
+                let key = match key {
+                    Value::Number(n) => n.to_string(),
+                    Value::String(x) => x.clone(),
+                    _ => return Err(bad(cmd, "`sketch` must be an id or a name")),
+                };
+                let f = s.doc.find_feature(&key).ok_or_else(|| bad(cmd, format!("no sketch `{key}`")))?;
+                let id = f.id;
+                let sk = s.doc.sketch(id)?;
+                expanded.extend(sk.curves.iter().take(500).map(|c| json!({"sketch": id, "curve": c.id})));
+            }
+            _ => expanded.push(v),
+        }
+    }
+    if expanded.is_empty() || expanded.len() > 500 {
+        return Err(bad(cmd, "`curves` must name 1…500 curves"));
+    }
+    let list = expanded;
     let mut out = Vec::new();
     for v in list {
         let LinkSource::SketchCurve { sketch, curve } = source(s, &v, cmd)? else {
