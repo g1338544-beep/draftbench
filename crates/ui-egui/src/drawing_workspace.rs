@@ -11,8 +11,20 @@ use solidcraft_engine::render::Camera;
 use crate::{SolveApp, theme::Tokens};
 
 const PAPERS: [&str; 5] = ["A0", "A1", "A2", "A3", "A4"];
+const SIZES: [(f32, f32); 5] = [(1189.0, 841.0), (841.0, 594.0), (594.0, 420.0), (420.0, 297.0), (297.0, 210.0)];
 const VIEWS: [(&str, &str); 7] =
-    [("front", "Front"), ("top", "Top"), ("right", "Right"), ("left", "Left"), ("back", "Back"), ("bottom", "Bottom"), ("iso", "Isometric")];
+    [("front", "Front"), ("top", "Top"), ("right", "Right"), ("left", "Left"), ("back", "Back"), ("bottom", "Bottom"), ("iso", "Isometric (3D)")];
+
+/// One view the user placed: its centre on the sheet in mm and how its lines are drawn.
+#[derive(Clone)]
+struct PlacedView {
+    view: usize,
+    x: f64,
+    y: f64,
+    scale: String,
+    dashed: bool,
+    dims: bool,
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Layer {
@@ -36,26 +48,32 @@ struct Sheet {
     height: f32,
     note: String,
     items: Vec<(Layer, Shape)>,
+    /// (placement index, centre x, centre y, width, height) of each view on the sheet, in mm.
+    boxes: Vec<(usize, f32, f32, f32, f32)>,
 }
 
 pub struct State {
     paper: usize,
     landscape: bool,
     first_angle: bool,
-    views: [bool; 7],
-    scale: String,
-    hidden: bool,
-    dimensions: bool,
+    placed: Vec<PlacedView>,
+    selected: Option<usize>,
     title: String,
+    number: String,
+    author: String,
+    date: String,
+    company: String,
+    notes: String,
     sheet: Option<Sheet>,
     error: Option<String>,
     design_camera: Option<(Camera, bool)>,
-    shown: Option<(u64, u32, u32)>,
-    /// Stages of an Update still to run (scene, then each view): one per frame, so the page
+    /// Stages of an Update still to run (the model, then each view): one per frame, so the page
     /// keeps painting and shows progress instead of freezing for the whole sheet.
     steps: Vec<String>,
     total: usize,
     painted: bool,
+    /// A view being dragged: its placement index and the grab offset from its centre, in mm.
+    drag: Option<(usize, f32, f32)>,
 }
 
 impl Default for State {
@@ -64,18 +82,21 @@ impl Default for State {
             paper: 3,
             landscape: true,
             first_angle: true,
-            views: [true, true, false, false, false, false, false],
-            scale: String::new(),
-            hidden: false,
-            dimensions: true,
+            placed: Vec::new(),
+            selected: None,
             title: String::new(),
+            number: String::new(),
+            author: String::new(),
+            date: String::new(),
+            company: String::new(),
+            notes: String::new(),
             sheet: None,
             error: None,
             design_camera: None,
-            shown: None,
             steps: Vec::new(),
             total: 0,
             painted: false,
+            drag: None,
         }
     }
 }
@@ -85,24 +106,35 @@ pub fn active(app: &SolveApp) -> bool {
 }
 
 fn params(st: &State) -> Value {
-    let views: Vec<&str> = VIEWS.iter().zip(st.views).filter(|(_, on)| *on).map(|((n, _), _)| *n).collect();
-    let mut p = json!({
+    let placements: Vec<Value> = st
+        .placed
+        .iter()
+        .map(|v| {
+            let mut o = json!({
+                "view": VIEWS[v.view.min(6)].0,
+                "x": v.x,
+                "y": v.y,
+                "hidden": if v.dashed { "dashed" } else { "omit" },
+                "dims": v.dims,
+            });
+            if let Ok(k) = v.scale.trim().parse::<f64>()
+                && k.is_finite()
+                && k > 0.0
+            {
+                o["scale"] = json!(k);
+            }
+            o
+        })
+        .collect();
+    json!({
         "paper": PAPERS[st.paper.min(4)],
         "orientation": if st.landscape { "landscape" } else { "portrait" },
         "projection": if st.first_angle { "first" } else { "third" },
-        "views": views,
-        "hidden": if st.hidden { "dashed" } else { "omit" },
-        "dimensions": st.dimensions,
+        "placements": placements,
         "title": st.title,
+        "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "note": st.notes},
         "tolerance": 0.5,
-    });
-    if let Ok(k) = st.scale.trim().parse::<f64>()
-        && k.is_finite()
-        && k > 0.0
-    {
-        p["scale"] = json!(k);
-    }
-    p
+    })
 }
 
 fn pt(v: &Value) -> Option<Pos2> {
@@ -135,22 +167,39 @@ fn parse(v: &Value) -> Option<Sheet> {
         };
         items.push((layer, shape));
     }
-    let note = v.get("summary").map(|s| format!("{} · scale {}", s["paper"].as_str().unwrap_or(""), s["scale"].as_str().unwrap_or(""))).unwrap_or_default();
-    Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items })
+    let note = v.get("summary").map(|s| s["paper"].as_str().unwrap_or("").to_string()).unwrap_or_default();
+    let boxes = v
+        .pointer("/summary/boxes")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|b| {
+                    let n = |k: &str| b.get(k).and_then(Value::as_f64).map(|x| x as f32);
+                    Some((b.get("index")?.as_u64()? as usize, n("x")?, n("y")?, n("w")?, n("h")?))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items, boxes })
 }
 
-/// Start an Update: the model first, then each wanted view, one stage per frame.
+/// Start an Update: the model first, then each placed view, one stage per frame.
 fn begin(app: &mut SolveApp) {
     let mut steps = vec!["scene".to_string()];
-    steps.extend(VIEWS.iter().zip(app.drawing.views).filter(|(_, on)| *on).map(|((n, _), _)| n.to_string()));
+    for v in &app.drawing.placed {
+        let name = VIEWS[v.view.min(6)].0.to_string();
+        if !steps.contains(&name) {
+            steps.push(name);
+        }
+    }
     app.drawing.total = steps.len();
     app.drawing.steps = steps;
     app.drawing.painted = false;
     app.drawing.error = None;
 }
 
-/// Compute the sheet now (the heavy step) and frame it.
-pub fn update(app: &mut SolveApp) {
+/// Compose the sheet from what is already computed (cheap) without moving the camera.
+fn refresh(app: &mut SolveApp) {
     let p = params(&app.drawing);
     match app.run("drawing.sheet", p) {
         Ok(v) => match parse(&v) {
@@ -165,8 +214,31 @@ pub fn update(app: &mut SolveApp) {
             app.drawing.error = Some(e);
         }
     }
+}
+
+/// Compose the sheet and frame it.
+pub fn update(app: &mut SolveApp) {
+    refresh(app);
     fit(app);
-    app.drawing.shown = Some((app.session.revision, 0, 0));
+}
+
+fn add_view(app: &mut SolveApp, view: usize) {
+    let (mut w, mut h) = SIZES[app.drawing.paper.min(4)];
+    if !app.drawing.landscape {
+        std::mem::swap(&mut w, &mut h);
+    }
+    let n = app.drawing.placed.len();
+    let (col, row) = ((n % 3) as f32, (n / 3) as f32);
+    app.drawing.placed.push(PlacedView {
+        view,
+        x: f64::from(w * (0.22 + 0.28 * col)),
+        y: f64::from(h * (0.68 - 0.3 * row.min(1.0))),
+        scale: String::new(),
+        dashed: false,
+        dims: true,
+    });
+    app.drawing.selected = Some(n);
+    begin(app);
 }
 
 /// A flat top-down orthographic camera on the sheet: pan and zoom only.
@@ -232,9 +304,11 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             crate::ui_kit::scope(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let mut changed = false;
+                    let mut dirty = false;
+                    let mut add: Option<usize> = None;
+                    let mut remove: Option<usize> = None;
                     ui.heading("Drawing");
-                    ui.small("Views are projected from the visible bodies. Pan and zoom like the model view.");
+                    ui.small("Add the views you want, then drag each one on the sheet.");
                     ui.separator();
                     ui.label("Paper");
                     let current = PAPERS[app.drawing.paper.min(4)];
@@ -242,32 +316,67 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         for (i, name) in PAPERS.iter().enumerate() {
                             if crate::ui_kit::list_picker(ui, name, name, i == app.drawing.paper).clicked() {
                                 app.drawing.paper = i;
-                                changed = true;
+                                dirty = true;
                                 ui.close();
                             }
                         }
                     });
-                    changed |= crate::ui_kit::checkbox(ui, "Landscape", &mut app.drawing.landscape).changed();
-                    changed |= crate::ui_kit::checkbox(ui, "First-angle projection (ISO)", &mut app.drawing.first_angle).changed();
+                    dirty |= crate::ui_kit::checkbox(ui, "Landscape", &mut app.drawing.landscape).changed();
+                    dirty |= crate::ui_kit::checkbox(ui, "First-angle projection (ISO)", &mut app.drawing.first_angle).changed();
                     ui.separator();
-                    ui.label("Views");
-                    for (i, (_, label)) in VIEWS.iter().enumerate() {
-                        changed |= crate::ui_kit::checkbox(ui, label, &mut app.drawing.views[i]).changed();
+                    ui.label("Views on the sheet");
+                    crate::ui_kit::dropdown_menu(ui, "drawing_add_view", "Add view…", |ui| {
+                        for (i, (_, label)) in VIEWS.iter().enumerate() {
+                            if crate::ui_kit::list_picker(ui, label, label, false).clicked() {
+                                add = Some(i);
+                                ui.close();
+                            }
+                        }
+                    });
+                    for i in 0..app.drawing.placed.len() {
+                        let name = VIEWS[app.drawing.placed[i].view.min(6)].1;
+                        let selected = app.drawing.selected == Some(i);
+                        if ui.add(egui::Button::selectable(selected, format!("{}. {name}", i + 1))).clicked() {
+                            app.drawing.selected = Some(i);
+                        }
+                        if selected {
+                            let v = &mut app.drawing.placed[i];
+                            ui.label("Scale (blank = fit, 0.5 = 1:2, 2 = 2:1)");
+                            dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_scale", i)), &mut v.scale, "auto", false, 12).changed();
+                            dirty |= crate::ui_kit::checkbox(ui, "Hidden lines (dashed)", &mut v.dashed).changed();
+                            dirty |= crate::ui_kit::checkbox(ui, "Overall dimensions", &mut v.dims).changed();
+                            if crate::ui_kit::button(ui, "Remove view", crate::ui_kit::Button::Small).clicked() {
+                                remove = Some(i);
+                            }
+                        }
                     }
                     ui.separator();
-                    ui.label("Scale (blank = best fit, 0.5 = 1:2, 2 = 2:1)");
-                    changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_scale"), &mut app.drawing.scale, "auto", false, 12).changed();
-                    changed |= crate::ui_kit::checkbox(ui, "Hidden lines (dashed)", &mut app.drawing.hidden).changed();
-                    changed |= crate::ui_kit::checkbox(ui, "Overall dimensions", &mut app.drawing.dimensions).changed();
-                    ui.label("Title");
-                    changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_title"), &mut app.drawing.title, "", false, 80).changed();
-                    ui.separator();
-                    if crate::ui_kit::button(ui, "Update drawing", crate::ui_kit::Button::Normal).clicked() {
-                        begin(app);
+                    ui.label("Title block");
+                    for (label, key) in [
+                        ("Title", 0),
+                        ("Drawing number", 1),
+                        ("Drawn by", 2),
+                        ("Date", 3),
+                        ("Company", 4),
+                        ("Notes (separate lines with |)", 5),
+                    ] {
+                        ui.label(label);
+                        let d = &mut app.drawing;
+                        let field = match key {
+                            0 => &mut d.title,
+                            1 => &mut d.number,
+                            2 => &mut d.author,
+                            3 => &mut d.date,
+                            4 => &mut d.company,
+                            _ => &mut d.notes,
+                        };
+                        dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_block", key)), field, "", false, 80).changed();
                     }
+                    ui.separator();
                     if crate::ui_kit::button(ui, "Export DXF (AutoCAD)…", crate::ui_kit::Button::Normal).clicked() {
                         let name = format!("{}-drawing.dxf", app.session.doc.name);
                         let mut p = params(&app.drawing);
+                        p["tolerance"] = json!(0.15);
                         app.pick_save(&name, &["dxf"], move |app, path| {
                             let Some(path) = path else { return };
                             p["path"] = json!(path);
@@ -279,19 +388,62 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if crate::ui_kit::button(ui, "Back to Design", crate::ui_kit::Button::Normal).clicked() {
                         leave(app);
                     }
-                    if changed {
-                        // Settings are applied with Update: the sheet is heavy to compute.
-                        app.drawing.shown = None;
-                    }
-                    if app.drawing.shown.is_none() {
-                        ui.small("Settings changed — press Update drawing.");
-                    }
                     if let Some(e) = &app.drawing.error {
                         ui.colored_label(Tokens::get().error, e.as_str());
+                    }
+                    if let Some(i) = remove {
+                        app.drawing.placed.remove(i);
+                        app.drawing.selected = None;
+                        dirty = true;
+                    }
+                    if let Some(view) = add {
+                        add_view(app, view);
+                    } else if dirty && app.drawing.steps.is_empty() {
+                        refresh(app);
                     }
                 });
             });
         });
+}
+
+/// Sheet millimetres ↔ screen pixels: the camera looks straight down, so it is affine.
+struct Map {
+    origin: Pos2,
+    ax: f32,
+    ay: f32,
+    bx: f32,
+    by: f32,
+}
+
+impl Map {
+    fn to_screen(&self, p: Pos2) -> Pos2 {
+        self.origin + vec2(p.x * self.ax + p.y * self.bx, p.x * self.ay + p.y * self.by)
+    }
+    fn to_sheet(&self, q: Pos2) -> Option<Pos2> {
+        let d = q - self.origin;
+        let det = self.ax * self.by - self.bx * self.ay;
+        (det.abs() > 1e-12).then(|| pos2((d.x * self.by - self.bx * d.y) / det, (self.ax * d.y - self.ay * d.x) / det))
+    }
+    fn px_per_mm(&self) -> f32 {
+        self.ax.hypot(self.ay)
+    }
+}
+
+fn sheet_map(app: &SolveApp, rect: Rect, extent: f32) -> Option<Map> {
+    let cam = app.cam;
+    let (w, h) = (f64::from(rect.width()), f64::from(rect.height().max(1.0)));
+    let radius = f64::from(extent) * 2.0 + cam.distance;
+    let at = |x: f64, y: f64| cam.to_screen(Vec3::new(x, y, 0.0), w, h, radius);
+    let (o, ex, ey) = (at(0.0, 0.0)?, at(1.0, 0.0)?, at(0.0, 1.0)?);
+    let m = Map {
+        origin: rect.min + vec2(o.0 as f32, o.1 as f32),
+        ax: (ex.0 - o.0) as f32,
+        ay: (ex.1 - o.1) as f32,
+        bx: (ey.0 - o.0) as f32,
+        by: (ey.1 - o.1) as f32,
+    };
+    let px = m.px_per_mm();
+    (px.is_finite() && px > 0.0).then_some(m)
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -299,10 +451,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.viewport.rect = Some(rect);
     crate::viewport::refresh_layout(app, ui.ctx().pixels_per_point());
     let response = ui.interact(rect, ui.id().with("drawing_sheet"), Sense::click_and_drag());
-    crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, Color32::from_gray(58));
     if !app.drawing.steps.is_empty() {
+        crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
         let done = app.drawing.total - app.drawing.steps.len();
         let next = app.drawing.steps.first().cloned().unwrap_or_default();
         let label = if next == "scene" { "preparing the model".to_string() } else { format!("{next} view") };
@@ -332,25 +484,40 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         return;
     }
+    let extent = app.drawing.sheet.as_ref().map(|s| s.width.hypot(s.height)).unwrap_or(500.0);
+    let map = sheet_map(app, rect, extent);
+
+    // Dragging a placed view moves it; any other drag navigates (pan/zoom) as in the model view.
+    if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
+        let hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).copied();
+        if response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            && let Some(b) = hit(s)
+        {
+            app.drawing.drag = Some((b.0, b.1 - s.x, b.2 - s.y));
+            app.drawing.selected = Some(b.0);
+        } else if response.clicked()
+            && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+        {
+            app.drawing.selected = hit(s).map(|b| b.0);
+        }
+    }
+    if app.drawing.drag.is_none() {
+        crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
+    }
+
     let Some(sheet) = app.drawing.sheet.as_ref() else {
-        let msg = app.drawing.error.clone().unwrap_or_else(|| "Press Update drawing to draw the views".into());
+        let msg = match (&app.drawing.error, app.drawing.placed.is_empty()) {
+            (Some(e), _) => e.clone(),
+            (None, true) => "Add a view in the panel on the right".to_string(),
+            (None, false) => "Computing…".to_string(),
+        };
         painter.text(rect.center(), egui::Align2::CENTER_CENTER, msg, egui::FontId::proportional(Tokens::get().font_heading), Color32::from_gray(210));
         return;
     };
-    // The camera looks straight down at the sheet, so sheet millimetres map affinely to pixels.
-    let cam = app.cam;
-    let (w, h) = (f64::from(rect.width()), f64::from(rect.height().max(1.0)));
-    let radius = f64::from(sheet.width.hypot(sheet.height)) * 2.0 + cam.distance;
-    let at = |x: f64, y: f64| cam.to_screen(Vec3::new(x, y, 0.0), w, h, radius);
-    let (Some(o), Some(ex), Some(ey)) = (at(0.0, 0.0), at(1.0, 0.0), at(0.0, 1.0)) else { return };
-    let (ax, ay) = ((ex.0 - o.0) as f32, (ex.1 - o.1) as f32);
-    let (bx, by) = ((ey.0 - o.0) as f32, (ey.1 - o.1) as f32);
-    let origin = rect.min + vec2(o.0 as f32, o.1 as f32);
-    let map = |p: Pos2| origin + vec2(p.x * ax + p.y * bx, p.x * ay + p.y * by);
-    let px_per_mm = ax.hypot(ay);
-    if !px_per_mm.is_finite() || px_per_mm <= 0.0 {
-        return;
-    }
+    let Some(m) = sheet_map(app, rect, extent) else { return };
+    let px_per_mm = m.px_per_mm();
+    let map = |p: Pos2| m.to_screen(p);
     let paper = Rect::from_two_pos(map(pos2(0.0, 0.0)), map(pos2(sheet.width, sheet.height)));
     painter.rect_filled(paper.translate(vec2(4.0, 4.0)), 0.0, Color32::from_black_alpha(90));
     painter.rect_filled(paper, 0.0, Color32::WHITE);
@@ -391,6 +558,24 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Frames of the placed views: the selected one stands out; a dragged one follows the pointer.
+    let accent = Tokens::get().accent;
+    for b in &sheet.boxes {
+        let selected = app.drawing.selected == Some(b.0);
+        let dragging = app.drawing.drag.map(|d| d.0) == Some(b.0);
+        let (cx, cy) = if dragging {
+            match (app.drawing.drag, response.interact_pointer_pos().and_then(|q| m.to_sheet(q))) {
+                (Some(d), Some(s)) => (s.x + d.1, s.y + d.2),
+                _ => (b.1, b.2),
+            }
+        } else {
+            (b.1, b.2)
+        };
+        if selected || dragging {
+            let r = Rect::from_two_pos(map(pos2(cx - b.3 / 2.0 - 3.0, cy - b.4 / 2.0 - 3.0)), map(pos2(cx + b.3 / 2.0 + 3.0, cy + b.4 / 2.0 + 3.0)));
+            painter.rect_stroke(r, 0.0, Stroke::new(1.5, accent), egui::StrokeKind::Outside);
+        }
+    }
     painter.text(
         rect.left_bottom() + vec2(12.0, -10.0),
         egui::Align2::LEFT_BOTTOM,
@@ -398,6 +583,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         egui::FontId::proportional(Tokens::get().font_body),
         Color32::from_gray(220),
     );
+    let (sw, sh) = (sheet.width, sheet.height);
+    if let Some((index, ox, oy)) = app.drawing.drag
+        && response.drag_stopped()
+    {
+        let target = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
+        app.drawing.drag = None;
+        if let (Some(s), Some(v)) = (target, app.drawing.placed.get_mut(index)) {
+            v.x = f64::from((s.x + ox).clamp(0.0, sw));
+            v.y = f64::from((s.y + oy).clamp(0.0, sh));
+            refresh(app);
+        }
+    } else if app.drawing.drag.is_some() && !response.dragged() {
+        app.drawing.drag = None;
+    }
 }
 
 fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {

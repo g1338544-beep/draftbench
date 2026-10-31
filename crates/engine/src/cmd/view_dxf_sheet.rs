@@ -19,7 +19,7 @@ pub(super) const SPEC: CommandSpec = CommandSpec::new(CMD, "Export Drawing Sheet
 );
 
 const MARGIN: f64 = 10.0;
-const TITLE_H: f64 = 28.0;
+const TITLE_H: f64 = 36.0;
 const TEXT_H: f64 = 3.5;
 /// The standard scales, model to paper, largest first.
 const SCALES: [f64; 17] = [50.0, 20.0, 10.0, 5.0, 2.0, 1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002];
@@ -76,6 +76,86 @@ fn line(layer: &str, a: Vec2, b: Vec2, entities: &mut Vec<DxfEntity>) {
 fn rect(layer: &str, lo: Vec2, hi: Vec2, entities: &mut Vec<DxfEntity>) {
     let points = vec![lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y), lo];
     entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Polyline { points } });
+}
+
+/// Views placed by hand: `placements: [{view, x, y, scale?, hidden?: dashed|omit, dims?}]`,
+/// x and y the view's centre on the sheet in mm. Without a scale a view gets the largest standard
+/// scale that fits a quarter of the free area.
+#[allow(clippy::too_many_arguments)]
+fn manual(
+    p: &Value,
+    scene: &meshes::Scene,
+    parts: &[sketch::Part],
+    key: Key,
+    list: &[Value],
+    sheet: (f64, f64),
+    first_angle: bool,
+    title: String,
+    path: Option<String>,
+) -> Result<Built> {
+    let (sheet_w, sheet_h) = sheet;
+    let default_dims = p.get("dimensions").and_then(Value::as_bool).unwrap_or(false);
+    let mut entities: Vec<DxfEntity> = Vec::new();
+    let mut boxes = Vec::new();
+    let mut names = Vec::new();
+    let mut any_dashed = false;
+    for (index, item) in list.iter().take(12).enumerate() {
+        let name = item.get("view").and_then(Value::as_str).ok_or_else(|| bad(CMD, "each placement needs a view"))?;
+        let view = StandardView::parse(name).ok_or_else(|| bad(CMD, format!("unknown view `{name}`")))?;
+        let dashed = match item.get("hidden").and_then(Value::as_str).unwrap_or("omit") {
+            "dashed" => true,
+            "omit" => false,
+            _ => return Err(bad(CMD, "hidden must be omit or dashed")),
+        };
+        let all = view_lines(scene, parts, view, key)?;
+        if all.lo.x > all.hi.x {
+            continue;
+        }
+        let (w, h) = (all.hi.x - all.lo.x, all.hi.y - all.lo.y);
+        let scale = match item.get("scale").and_then(Value::as_f64) {
+            Some(k) if k.is_finite() && (1e-4..=1e3).contains(&k) => k,
+            Some(_) => return Err(bad(CMD, "scale must be 0.0001…1000")),
+            None => {
+                let (aw, ah) = ((sheet_w - 2.0 * MARGIN - 44.0) / 2.0, (sheet_h - 2.0 * MARGIN - TITLE_H - 44.0) / 2.0);
+                let fit = (aw / w.max(1e-9)).min(ah / h.max(1e-9));
+                SCALES.iter().copied().find(|k| *k <= fit).unwrap_or(0.0002)
+            }
+        };
+        let num = |k: &str, d: f64| item.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e5).unwrap_or(d);
+        let (x, y) = (num("x", sheet_w / 2.0), num("y", sheet_h / 2.0 + TITLE_H / 2.0));
+        let c = Vec2::new((all.lo.x + all.hi.x) / 2.0, (all.lo.y + all.hi.y) / 2.0);
+        let to_sheet = |q: Vec2| Vec2::new(x + (q.x - c.x) * scale, y + (q.y - c.y) * scale);
+        for (a, b, hidden) in all.lines.iter() {
+            if *hidden && !dashed {
+                continue;
+            }
+            any_dashed |= *hidden;
+            line(if *hidden { "HIDDEN" } else { "VISIBLE" }, to_sheet(*a), to_sheet(*b), &mut entities);
+        }
+        let dims = item.get("dims").and_then(Value::as_bool).unwrap_or(default_dims) && view != StandardView::Iso;
+        let (lo, hi) = (to_sheet(all.lo), to_sheet(all.hi));
+        if dims {
+            let off = 10.0;
+            let yy = lo.y - off;
+            line("DIM", Vec2::new(lo.x, lo.y - 2.0), Vec2::new(lo.x, yy - 2.0), &mut entities);
+            line("DIM", Vec2::new(hi.x, lo.y - 2.0), Vec2::new(hi.x, yy - 2.0), &mut entities);
+            line("DIM", Vec2::new(lo.x, yy), Vec2::new(hi.x, yy), &mut entities);
+            text("DIM", Vec2::new((lo.x + hi.x) / 2.0, yy + 1.2), TEXT_H, trim_mm(w), &mut entities);
+            let xx = lo.x - off;
+            line("DIM", Vec2::new(lo.x - 2.0, lo.y), Vec2::new(xx - 2.0, lo.y), &mut entities);
+            line("DIM", Vec2::new(lo.x - 2.0, hi.y), Vec2::new(xx - 2.0, hi.y), &mut entities);
+            line("DIM", Vec2::new(xx, lo.y), Vec2::new(xx, hi.y), &mut entities);
+            entities.push(DxfEntity {
+                layer: "DIM".into(),
+                shape: DxfShape::Text { at: Vec2::new(xx - 1.2, (lo.y + hi.y) / 2.0), height: TEXT_H, angle_deg: 90.0, text: trim_mm(h) },
+            });
+        }
+        text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), TEXT_H, format!("{}  {}", view_name(view), ratio_label(scale)), &mut entities);
+        boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));
+        names.push(view_name(view).to_string());
+    }
+    let entities = projection::connect(entities);
+    finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, names, path, boxes)
 }
 
 struct Built {
@@ -143,6 +223,10 @@ fn build(s: &mut Session, p: &Value) -> Result<Built> {
     };
     let key = cache_key(s, tolerance);
     let (scene, parts) = scene_and_parts(s, tolerance, key)?;
+
+    if let Some(list) = p.get("placements").and_then(Value::as_array) {
+        return manual(p, &scene, &parts, key, list, (sheet_w, sheet_h), first_angle, title, path.map(str::to_string));
+    }
 
     // Project each view with its own orthographic camera (each is kept until the model changes,
     // so a view computed once, e.g. by `warm`, costs nothing the next time).
@@ -243,22 +327,67 @@ fn build(s: &mut Session, p: &Value) -> Result<Built> {
     }
     let mut entities = projection::connect(entities);
 
+    finish(
+        p,
+        (sheet_w, sheet_h),
+        entities,
+        title,
+        ratio_label(scale),
+        first_angle,
+        dashed,
+        placed.iter().map(|v| view_name(v.view).to_string()).collect(),
+        path.map(str::to_string),
+        Vec::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish(
+    p: &Value,
+    sheet: (f64, f64),
+    mut entities: Vec<DxfEntity>,
+    title: String,
+    scale_text: String,
+    first_angle: bool,
+    dashed: bool,
+    names: Vec<String>,
+    path: Option<String>,
+    boxes: Vec<Value>,
+) -> Result<Built> {
+    let (sheet_w, sheet_h) = sheet;
     // Border and title block.
     rect("SHEET", Vec2::new(MARGIN, MARGIN), Vec2::new(sheet_w - MARGIN, sheet_h - MARGIN), &mut entities);
     let block_w = 190.0_f64.min(sheet_w - 2.0 * MARGIN);
     let (bx0, by0) = (sheet_w - MARGIN - block_w, MARGIN);
-    rect("SHEET", Vec2::new(bx0, by0), Vec2::new(sheet_w - MARGIN, by0 + TITLE_H), &mut entities);
-    line("SHEET", Vec2::new(bx0, by0 + TITLE_H / 2.0), Vec2::new(sheet_w - MARGIN, by0 + TITLE_H / 2.0), &mut entities);
-    line("SHEET", Vec2::new(bx0 + block_w * 0.62, by0), Vec2::new(bx0 + block_w * 0.62, by0 + TITLE_H / 2.0), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w / 2.0, by0 + TITLE_H * 0.75 - 1.5), 5.0, if title.is_empty() { "Untitled".into() } else { title }, &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.31, by0 + TITLE_H * 0.25 - 1.2), TEXT_H, format!("Scale {}", ratio_label(scale)), &mut entities);
+    let row = TITLE_H / 3.0;
+    let right = sheet_w - MARGIN;
+    rect("SHEET", Vec2::new(bx0, by0), Vec2::new(right, by0 + TITLE_H), &mut entities);
+    line("SHEET", Vec2::new(bx0, by0 + row), Vec2::new(right, by0 + row), &mut entities);
+    line("SHEET", Vec2::new(bx0, by0 + 2.0 * row), Vec2::new(right, by0 + 2.0 * row), &mut entities);
+    for f in [0.4, 0.7] {
+        line("SHEET", Vec2::new(bx0 + block_w * f, by0), Vec2::new(bx0 + block_w * f, by0 + 2.0 * row), &mut entities);
+    }
+    let field = |key: &str| -> String { p.get("block").and_then(|b| b.get(key)).and_then(Value::as_str).unwrap_or("").chars().take(60).collect() };
+    let cap = |label: &str, value: String| if value.is_empty() { String::new() } else { format!("{label} {value}") };
+    let company = field("company");
+    text("TEXT", Vec2::new(bx0 + block_w / 2.0, by0 + 2.0 * row + row * 0.3), 5.0, if title.is_empty() { "Untitled".into() } else { title }, &mut entities);
+    if !company.is_empty() {
+        text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row + row * 0.3), TEXT_H, company, &mut entities);
+    }
+    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row + row * 0.3), TEXT_H, cap("No.", field("number")), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.85, by0 + row + row * 0.3), TEXT_H, cap("Date", field("date")), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row * 0.3), TEXT_H, cap("Scale", scale_text.clone()), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row * 0.3), TEXT_H, cap("By", field("author")), &mut entities);
     text(
         "TEXT",
-        Vec2::new(bx0 + block_w * 0.81, by0 + TITLE_H * 0.25 - 1.2),
+        Vec2::new(bx0 + block_w * 0.85, by0 + row * 0.3),
         TEXT_H,
         format!("{} {} - mm", str_(p, "paper").unwrap_or("A3").to_ascii_uppercase(), if first_angle { "1st angle" } else { "3rd angle" }),
         &mut entities,
     );
+    for n in field("note").split('|').filter(|n| !n.trim().is_empty()).take(3).enumerate() {
+        text("TEXT", Vec2::new(bx0 - 2.0 - 40.0, by0 + 4.0 + 5.0 * n.0 as f64), TEXT_H, n.1.trim().to_string(), &mut entities);
+    }
 
     // Layer colours: AutoCAD colour numbers 1…255 (1 red, 2 yellow, 3 green, 4 cyan, 5 blue,
     // 6 magenta, 7 white/black, 8 dark grey), by layer name in lower case.
@@ -277,8 +406,8 @@ fn build(s: &mut Session, p: &Value) -> Result<Built> {
     if dashed {
         layers.push(DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", colour("hidden", 8)?) });
     }
-    let summary = json!({"paper": str_(p, "paper").unwrap_or("A3"), "scale": ratio_label(scale), "views": placed.iter().map(|v| view_name(v.view)).collect::<Vec<_>>(), "units": "mm"});
-    Ok(Built { sheet: (sheet_w, sheet_h), layers, entities, summary, path: path.map(str::to_string) })
+    let summary = json!({"paper": str_(p, "paper").unwrap_or("A3"), "scale": scale_text, "views": names, "units": "mm", "boxes": boxes});
+    Ok(Built { sheet: (sheet_w, sheet_h), layers, entities, summary, path })
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
