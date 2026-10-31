@@ -113,7 +113,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("split_face")
         .params(
-            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal)",
+            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal, or along `along`: [x,y,z] direction)",
         ),
     CommandSpec::new("solid.split_body", "Split Body", split_body)
         .at("SOLID", "MODIFY")
@@ -1637,6 +1637,7 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             plane: xy(),
             tool: Some(solidcraft_doc::FaceAt { body: BodyName(tb), point: Position(point) }),
             sketch: None,
+            along: None,
         }
     } else if p.get("sketch").is_some_and(|v| !v.is_null()) {
         let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
@@ -1646,10 +1647,17 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             plane: xy(),
             tool: None,
             sketch: Some(SketchId(sketch)),
+            along: match p.get("along").filter(|v| !v.is_null()) {
+                None => None,
+                Some(v) => match crate::params::vec3(v).filter(|d| d.len() > 1e-9) {
+                    Some(d) => Some(Position(d)),
+                    None => return Err(bad(cmd, "`along` must be a direction [x, y, z]")),
+                },
+            },
         }
     } else {
         let plane = plane_param(s, p.get("plane"), cmd)?;
-        FeatureKind::SplitFace { faces: faces.into_iter().map(FacePick).collect(), body: body.map(BodyName), plane, tool: None, sketch: None }
+        FeatureKind::SplitFace { faces: faces.into_iter().map(FacePick).collect(), body: body.map(BodyName), plane, tool: None, sketch: None, along: None }
     };
     add_feature(s, p, kind)
 }

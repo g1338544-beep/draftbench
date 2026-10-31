@@ -70,6 +70,8 @@ pub const MODIFIERS: &[ToolModifiers] = &[
 thread_local! {
     /// Shift held this frame.
     static SHIFT: Cell<bool> = const { Cell::new(false) };
+    /// Shift held: Project To Surface runs normal to the surface (not along the sketch normal).
+    static NORMAL_DIR: Cell<bool> = const { Cell::new(false) };
     /// Glyphs drawn this frame (constraint id, screen centre) and the selected one.
     static GLYPHS: RefCell<Vec<(String, Pos2)>> = const { RefCell::new(Vec::new()) };
     static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -637,7 +639,7 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.constrainer" => "Constrain: click one or two entities; right-click to apply",
             "sketch.constraint.polygon" => "Polygon: click the lines of a closed chain; right-click to apply",
             "sketch.centerline" => "Centerline: click lines",
-            "sketch.project_to_surface" => "Project to surface: click curves of other sketches, right-click, then click the face",
+            "sketch.project_to_surface" => "Project to surface: click curves of other sketches, right-click, then click the face (hold Shift while clicking the face to project normal to the surface)",
             "sketch.intersection_curve" => "Intersection curve: click two faces",
             "sketch.spun_profile" => "Spun profile: click the body, then the axis line",
             _ => return None,
@@ -975,7 +977,8 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 if staged {
                     if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some()) {
                         let curves: Vec<Value> = tool.picks.iter().filter(|x| *x != "|").filter_map(|x| serde_json::from_str(x).ok()).collect();
-                        let _ = app.run(cmd, json!({"curves": curves, "face": r["face"], "body": r["body"]}));
+                        let direction = if NORMAL_DIR.with(|c| c.get()) { "normal" } else { "sketch" };
+                        let _ = app.run(cmd, json!({"curves": curves, "face": r["face"], "body": r["body"], "direction": direction}));
                         tool.picks.clear();
                     }
                 } else if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("curve").is_some()) {
@@ -1428,6 +1431,8 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let held = crate::tool_modifiers::Held::from_modifiers(ui.input(|i| i.modifiers));
     let iso = crate::tool_modifiers::resolve(&[], crate::tool_modifiers::descriptor("sketch.isoparametric_curve"), held, Trigger::Press);
     SHIFT.with(|c| c.set(iso.contains(ModAction::IsoCurveAlternate)));
+    // Project To Surface: Shift while clicking the face projects normal to the surface.
+    NORMAL_DIR.with(|c| c.set(ui.input(|i| i.modifiers.shift)));
     glyphs(app, painter, proj, ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)));
     snap_hint(app, painter, proj);
     combs(app, painter, proj);

@@ -842,6 +842,9 @@ pub enum FeatureKind {
         tool: Option<FaceAt>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sketch: Option<SketchId>,
+        /// With `sketch`: the direction the curves are swept along (none: the sketch's normal).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        along: Option<Position>,
     },
     /// Scale bodies about a point (uniform, or per axis).
     Scale {

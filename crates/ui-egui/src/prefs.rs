@@ -380,7 +380,7 @@ preference_settings! {
     nav: String = "solidworks".into(), 1;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
-    free_orbit: bool = false, 1 => check_tr("nav.free_orbit.label");
+    free_orbit: bool = true, 1 => check_tr("nav.free_orbit.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), 1;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.

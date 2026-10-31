@@ -5739,7 +5739,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             apply_traced(st, f, made, *operation, &[])
         }
-        FeatureKind::SplitFace { faces, body, plane, tool, sketch } => {
+        FeatureKind::SplitFace { faces, body, plane, tool, sketch, along } => {
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mut picked: Vec<usize> = Vec::new();
@@ -5768,7 +5768,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
                     }
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Curves { plane: ss.plane, curves, along: None })?
+                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Curves { plane: ss.plane, curves, along: along.as_ref().map(|a| a.0) })?
                 }
                 (None, None) => {
                     let pl = doc.resolve_plane_in(vals, plane, 0, Some(st))?;
