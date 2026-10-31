@@ -99,47 +99,23 @@ pub(crate) fn breadcrumb(p: &egui::Painter, c: egui::Pos2, col: Color32) {
 }
 
 pub(crate) fn brand_mark(p: &egui::Painter, c: Pos2) {
-    let s = 20.0 / 412.217;
-    let m = |pts: &[(f32, f32)]| -> Vec<egui::Pos2> { pts.iter().map(|&(x, y)| pos2(c.x + (x - 178.5) * s, c.y + (y - 206.1) * s)).collect() };
-    // egui only fills convex shapes, so each face is a few overlapping convex pieces.
+    // Draftbench mark: an isometric block with a sketch-plane window cut into its top face.
+    let s = 20.0 / 380.0;
+    let m = |pts: &[(f32, f32)]| -> Vec<egui::Pos2> { pts.iter().map(|&(x, y)| pos2(c.x + (x - 200.0) * s, c.y + (y - 200.0) * s)).collect() };
+    let [light, mid, dark, _] = crate::theme::Tokens::get().logo;
+    let gap = crate::theme::Tokens::get().app_bar;
     let face = |col: Color32, pts: &[(f32, f32)]| {
         p.add(egui::Shape::convex_polygon(m(pts), col, Stroke::NONE));
     };
-    // The faces are separated by gaps that show the application bar, not by white lines.
-    let [light, mid, dark, _] = crate::theme::Tokens::get().logo;
-    let edge_col = crate::theme::Tokens::get().app_bar;
-    face(light, &[(3.5, 105.9), (177.0, 5.8), (263.4, 55.6), (263.8, 156.0), (177.0, 406.4)]);
-    face(light, &[(177.0, 206.1), (263.8, 156.0), (350.5, 206.2), (350.5, 306.3), (177.0, 406.4)]);
-    face(mid, &[(3.5, 105.9), (177.0, 206.1), (177.0, 406.4)]);
-    face(mid, &[(3.5, 105.9), (3.5, 205.7), (90.3, 256.2), (177.0, 206.1)]);
-    face(mid, &[(177.0, 206.1), (90.3, 256.2), (90.0, 356.2), (177.0, 406.4)]);
-    face(dark, &[(264.1, 155.8), (177.0, 206.1), (177.0, 406.4), (263.8, 256.2)]);
-    face(dark, &[(263.8, 256.2), (350.5, 206.2), (350.5, 306.3), (177.0, 406.4)]);
-    face(dark, &[(177.0, 206.1), (177.0, 406.4), (350.5, 306.3)]);
-    face(dark, &[(263.8, 55.9), (263.8, 156.0), (177.1, 105.9)]);
-    // White edge lines.
-    let edge = Stroke::new(10.0 * s, edge_col);
-    let line = |pts: &[(f32, f32)]| {
-        p.add(egui::Shape::line(m(pts), edge));
-    };
-    line(&[(263.8, 55.9), (177.1, 105.9), (263.8, 156.0), (263.8, 256.2), (350.6, 206.1)]);
-    line(&[(5.0, 105.9), (178.5, 206.1), (178.5, 406.4)]);
-    line(&[(177.0, 206.1), (263.8, 156.0)]);
-    p.add(egui::Shape::closed_line(
-        m(&[
-            (178.5, 5.8),
-            (5.0, 105.9),
-            (5.0, 206.1),
-            (91.7, 256.2),
-            (91.7, 356.4),
-            (178.5, 406.4),
-            (352.0, 306.3),
-            (352.0, 206.1),
-            (265.2, 156.0),
-            (265.2, 55.9),
-        ]),
-        edge,
-    ));
+    face(light, &[(200.0, 10.0), (365.0, 105.0), (200.0, 200.0), (35.0, 105.0)]);
+    face(mid, &[(35.0, 105.0), (200.0, 200.0), (200.0, 390.0), (35.0, 295.0)]);
+    face(dark, &[(365.0, 105.0), (365.0, 295.0), (200.0, 390.0), (200.0, 200.0)]);
+    // The sketch window and the seams between faces show the application bar.
+    face(gap, &[(200.0, 62.0), (274.0, 105.0), (200.0, 148.0), (126.0, 105.0)]);
+    let seam = Stroke::new(10.0 * s, gap);
+    p.line_segment([m(&[(200.0, 200.0)])[0], m(&[(200.0, 390.0)])[0]], seam);
+    p.line_segment([m(&[(200.0, 200.0)])[0], m(&[(35.0, 105.0)])[0]], seam);
+    p.line_segment([m(&[(200.0, 200.0)])[0], m(&[(365.0, 105.0)])[0]], seam);
 }
 
 pub(crate) fn cross(p: &egui::Painter, r: Rect, s: Stroke) {
