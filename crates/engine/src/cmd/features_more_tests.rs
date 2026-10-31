@@ -1620,10 +1620,10 @@ fn loft_through_coplanar_sections_is_refused() {
 }
 
 #[test]
-fn align_offset_keeps_a_distance_between_faces() {
-    use serde_json::json;
-    let mut s = crate::Session::new();
+fn align_offset_is_checked_and_keeps_a_gap() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"A"}));
     // A hostile offset is an error, never a panic.
-    let r = s.execute("solid.align", &json!({"bodies": ["Nope"], "from": "origin", "to": "origin", "offset": f64::MAX}));
-    assert!(r.is_err());
+    assert!(s.execute("solid.align", &json!({"bodies": ["A"], "from": "origin", "to": "origin", "offset": 1.0e300})).is_err());
+    assert!(s.execute("solid.align", &json!({"bodies": ["Nope"], "from": "origin", "to": "origin", "offset": 5})).is_err());
 }
