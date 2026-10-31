@@ -612,7 +612,7 @@ mod web {
                         // Thumbnails of saves and start-page cards.
                         solidcraft_ui_egui::gpu::install_cpu_picture_renderer();
                         let (sender, receiver) = std::sync::mpsc::channel();
-                        let mut app = SolveApp::new(Session::default(), services).with_control(receiver);
+                        let mut app = SolveApp::new(no_auto_project(Session::default()), services).with_control(receiver);
                         if let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))) {
                             app.load_prefs(&p);
                         }
@@ -674,4 +674,12 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     eprintln!("solidcraft-web only runs in the browser: build it with `trunk build --release` in apps/solidcraft-web");
+}
+
+/// A new sketch starts empty: face edges are not projected into it (the purple lines) unless the
+/// user turns "Project face edges into new sketches" on in Preferences.
+#[cfg(target_arch = "wasm32")]
+fn no_auto_project(mut session: Session) -> Session {
+    session.auto_project = false;
+    session
 }

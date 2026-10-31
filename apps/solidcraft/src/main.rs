@@ -651,7 +651,7 @@ fn main() -> eframe::Result {
             solidcraft_ui_egui::fonts::setup_bundled_fonts(&cc.egui_ctx);
             solidcraft_ui_egui::fonts::load_system_fonts_in_background(&cc.egui_ctx);
             mark("fonts");
-            let mut app = SolveApp::new(Session::default(), services(cc));
+            let mut app = SolveApp::new(no_auto_project(Session::default()), services(cc));
             app.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
             app.custom_titlebar = CUSTOM_TITLEBAR;
             // Windows: the OS hit test offers the resize border, at the window's DPI, from the
@@ -909,4 +909,11 @@ mod msaa_tests {
             }
         }
     }
+}
+
+/// A new sketch starts empty: face edges are not projected into it (the purple lines) unless the
+/// user turns "Project face edges into new sketches" on in Preferences.
+fn no_auto_project(mut session: Session) -> Session {
+    session.auto_project = false;
+    session
 }
