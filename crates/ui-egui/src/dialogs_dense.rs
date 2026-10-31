@@ -541,9 +541,21 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     form_row(ui, "Fit", |ui| {
                         extra_choice(ui, &mut d.extra, "fit", "hole_fit", &[("Normal", "normal"), ("Close", "close"), ("Loose", "loose")]);
                     });
+                    // Choosing a size or fit fills the diameter with the ISO 273 clearance hole; the
+                    // field stays editable afterwards.
+                    let size = d.extra.get("bolt").and_then(Value::as_str).unwrap_or("").to_string();
+                    let fit = d.extra.get("fit").and_then(Value::as_str).unwrap_or("normal").to_string();
+                    let key = format!("{size}/{fit}");
+                    if d.extra.get("bolt_sync").and_then(Value::as_str) != Some(key.as_str()) {
+                        if let Some(v) = iso_clearance(&size, &fit) {
+                            *diameter = format!("{v} mm");
+                        }
+                        d.extra.insert("bolt_sync".into(), json!(key));
+                    }
                 } else {
-                    enter |= expr_row(ui, "Diameter", diameter);
+                    d.extra.remove("bolt_sync");
                 }
+                enter |= expr_row(ui, "Diameter", diameter);
             }
             if *kind == 1 {
                 enter |= expr_row(ui, "Counterbore Ø", cb_diameter);
@@ -1184,3 +1196,23 @@ mod all_tests;
 #[cfg(test)]
 #[path = "dialogs_sketch_tests.rs"]
 mod sketch_tests;
+
+/// The ISO 273 clearance hole (mm) for a metric size: close, normal (medium) or loose (coarse).
+fn iso_clearance(size: &str, fit: &str) -> Option<f64> {
+    let row: [f64; 3] = match size {
+        "M3" => [3.2, 3.4, 3.6],
+        "M4" => [4.3, 4.5, 4.8],
+        "M5" => [5.3, 5.5, 5.8],
+        "M6" => [6.4, 6.6, 7.0],
+        "M8" => [8.4, 9.0, 10.0],
+        "M10" => [10.5, 11.0, 12.0],
+        "M12" => [13.0, 13.5, 14.5],
+        "M16" => [17.0, 17.5, 18.5],
+        _ => return None,
+    };
+    Some(match fit {
+        "close" => row[0],
+        "loose" => row[2],
+        _ => row[1],
+    })
+}

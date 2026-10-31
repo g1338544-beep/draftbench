@@ -3656,13 +3656,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             for place in places {
                 let mut params = place;
                 if !opts.tapped {
-                    match d.extra.get("bolt").and_then(Value::as_str) {
-                        Some(size) => {
-                            params["clearance"] = json!(size);
-                            params["fit"] = json!(d.extra.get("fit").and_then(Value::as_str).unwrap_or("normal"));
-                        }
-                        None => params["diameter"] = json!(diameter),
-                    }
+                    // The diameter field holds the size, whether typed or filled from a bolt size.
+                    params["diameter"] = json!(diameter);
                 }
                 params["type"] = json!(ty);
                 if to_object_on(&d.inputs) {
