@@ -15,7 +15,7 @@ use crate::{Result, Session};
 pub(super) const CMD: &str = "file.export_drawing_dxf";
 
 pub(super) const SPEC: CommandSpec = CommandSpec::new(CMD, "Export Drawing Sheet as DXF", export).icon("export").noundo().params(
-    "paper?: A0|A1|A2|A3|A4 (default A3); orientation?: landscape|portrait (default landscape); views?: [front, top, right, left, bottom, back, iso] (default front, top, right); projection?: first|third (default first angle, the ISO layout); scale?: number (model-to-paper factor, 0.5 = 1:2; default: the largest standard scale that fits); hidden?: omit|dashed (default dashed); dimensions?: bool (default true: overall sizes); title?: text; path?: .dxf file (else returns dxf text). Visible placed bodies projected as orthographic views on one sheet, in mm, with border and title block.",
+    "paper?: A0|A1|A2|A3|A4 (default A3); orientation?: landscape|portrait (default landscape); views?: [front, top, right, left, bottom, back, iso] (default front, top, right); projection?: first|third (default first angle, the ISO layout); scale?: number (model-to-paper factor, 0.5 = 1:2; default: the largest standard scale that fits); hidden?: omit|dashed (default dashed); dimensions?: bool (default true: overall sizes); title?: text; colors?: {visible, hidden, dim, sheet, text}: AutoCAD colour numbers 1-255 for each layer (defaults 7, 8, 3, 7, 7); path?: .dxf file (else returns dxf text). Visible placed bodies projected as orthographic views on one sheet, in mm, with border and title block.",
 );
 
 const MARGIN: f64 = 10.0;
@@ -264,9 +264,22 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         &mut entities,
     );
 
-    let mut layers = vec![DxfLayer::new("VISIBLE", 7), DxfLayer::new("DIM", 3), DxfLayer::new("SHEET", 7), DxfLayer::new("TEXT", 7)];
+    // Layer colours: AutoCAD colour numbers 1…255 (1 red, 2 yellow, 3 green, 4 cyan, 5 blue,
+    // 6 magenta, 7 white/black, 8 dark grey), by layer name in lower case.
+    let colour = |key: &str, default: i16| -> Result<i16> {
+        match p.get("colors").and_then(|c| c.get(key)) {
+            None => Ok(default),
+            Some(v) => v.as_i64().filter(|n| (1..=255).contains(n)).map(|n| n as i16).ok_or_else(|| bad(CMD, format!("colors.{key} must be 1…255"))),
+        }
+    };
+    let mut layers = vec![
+        DxfLayer::new("VISIBLE", colour("visible", 7)?),
+        DxfLayer::new("DIM", colour("dim", 3)?),
+        DxfLayer::new("SHEET", colour("sheet", 7)?),
+        DxfLayer::new("TEXT", colour("text", 7)?),
+    ];
     if dashed {
-        layers.push(DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", 8) });
+        layers.push(DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", colour("hidden", 8)?) });
     }
     let dxf = solidcraft_io::write_dxf_drawing(&layers, &entities);
     let mut result = json!({"paper": str_(p, "paper").unwrap_or("A3"), "scale": ratio_label(scale), "views": placed.iter().map(|v| view_name(v.view)).collect::<Vec<_>>(), "units": "mm"});
