@@ -32,7 +32,7 @@ use solidcraft_engine::sketch::PatternAlignment;
 
 use crate::SolveApp;
 use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind};
-use crate::selection::{AXES, CURVES, FACES, SKETCH_POINTS, SelInput};
+use crate::selection::{AXES, CURVES, EDGES, FACES, SKETCH_POINTS, SelInput};
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::ui_kit;
 use crate::viewport::{Hit, Proj};
@@ -164,7 +164,8 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         Mod::Scale { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Base point", SKETCH_POINTS, false)],
         Mod::Offset { .. } => vec![SelInput::new("Curves", CURVES, true)],
         Mod::ProjectCurve { .. } => {
-            vec![SelInput::new("Curves to project", CURVES, true), SelInput::new("Object to project to", FACES, false)]
+            // Sketch curves (2D) and edges of the model (3D) both project.
+            vec![SelInput::new("Curves to project", CURVES | EDGES, true), SelInput::new("Object to project to", FACES, false)]
         }
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Mirror line", AXES, false)],
@@ -860,10 +861,40 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
         }
         Mod::ProjectCurve { dir, associative } => {
             let curves = curve_ids(inputs, 0);
-            if curves.is_empty() {
-                return Err("Select the curves to project first".into());
+            let edges: Vec<(&String, Vec3)> =
+                items(inputs, 0).iter().filter_map(|x| if let Sel::Edge { body, point, .. } = x { Some((body, *point)) } else { None }).collect();
+            if curves.is_empty() && edges.is_empty() {
+                return Err("Select the curves or edges to project first".into());
             }
-            let Some(Sel::Face { body, point, .. }) = items(inputs, 1).first() else { return Err("Select the face to project onto".into()) };
+            let Some(Sel::Face { body, point, index }) = items(inputs, 1).first() else { return Err("Select the face to project onto".into()) };
+            // Onto a flat face the picked curves and edges are copied into a new sketch on that face.
+            if app.session.active_sketch.is_none()
+                && let Some((_, normal)) = crate::dialogs::planar_face(&app.session, body, *index)
+                && normal.len() > 0.5
+            {
+                let state = app.session.world_state();
+                let mut refs: Vec<Value> = Vec::new();
+                if !curves.is_empty() {
+                    let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
+                    let picked = extra.get("tool_sketch").and_then(Value::as_u64);
+                    let sketch = match picked {
+                        Some(k) if holding.contains(&k) => k,
+                        _ if holding.len() == 1 => holding.first().copied().ok_or("pick the curves in the viewport")?,
+                        _ => return Err("Pick sketch curves from one sketch".into()),
+                    };
+                    refs.extend(curves.iter().map(|c| json!({"sketch": sketch, "curve": c})));
+                }
+                refs.extend(edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})));
+                let project = json!({"refs": refs});
+                return Ok(vec![
+                    ("sketch.create".to_string(), json!({"plane": {"face": [point.x, point.y, point.z]}, "name": "Projected curves"})),
+                    ("sketch.project".to_string(), project),
+                    ("sketch.finish".to_string(), json!({})),
+                ]);
+            }
+            if curves.is_empty() {
+                return Err("Edges project onto a flat face; pick a flat face, or pick sketch curves".into());
+            }
             // The sketch the curves belong to: the one a pick came from, else the only one holding them.
             let state = app.session.world_state();
             let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
