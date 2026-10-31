@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Mate</title>
+  <path d="M38.19 27.76L49.00 34.00L49.00 46.48L38.19 40.24Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M59.81 27.76L49.00 34.00L49.00 46.48L59.81 40.24Z" fill="#8e9faf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M49.00 21.52L59.81 27.76L49.00 34.00L38.19 27.76Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M4.19 27.76L15.00 34.00L15.00 46.48L4.19 40.24Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M25.81 27.76L15.00 34.00L15.00 46.48L25.81 40.24Z" fill="#236ead" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15.00 21.52L25.81 27.76L15.00 34.00L4.19 27.76Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M25 36L37 36" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linecap="round"/>
+  <path d="M32 30L38 36L32 42" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64.00 61.00">
+  <title>Project Curve</title>
+  <path d="M9.14 38.16L32.00 51.36L32.00 58.40L9.14 45.20Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M54.86 38.16L32.00 51.36L32.00 58.40L54.86 45.20Z" fill="#8e9faf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.00 24.96L54.86 38.16L32.00 51.36L9.14 38.16Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.61 37.72L23.61 26.28" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-dasharray="0.10 2.00" stroke-linecap="round"/>
+  <path d="M40.39 36.84L40.39 25.40" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-dasharray="0.10 2.00" stroke-linecap="round"/>
+  <path d="M24.38 21.44L23.83 22.49L23.37 23.49L23.05 24.41L22.96 25.19L23.14 25.82L23.61 26.28L24.41 26.55L25.50 26.66L26.86 26.61L28.44 26.43L30.18 26.16L32.00 25.84L33.82 25.52L35.56 25.25L37.14 25.07L38.50 25.02L39.59 25.13L40.39 25.40L40.86 25.86L41.04 26.49L40.95 27.27L40.63 28.19L40.17 29.19L39.62 30.24" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24.38 33.76L23.83 34.81L23.37 35.81L23.05 36.73L22.96 37.51L23.14 38.14L23.61 38.60L24.41 38.87L25.50 38.98L26.86 38.93L28.44 38.75L30.18 38.48L32.00 38.16L33.82 37.84L35.56 37.57L37.14 37.39L38.50 37.34L39.59 37.45L40.39 37.72L40.86 38.18L41.04 38.81L40.95 39.59L40.63 40.51L40.17 41.51L39.62 42.56" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
