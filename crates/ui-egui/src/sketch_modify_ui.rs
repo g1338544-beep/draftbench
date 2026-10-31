@@ -228,11 +228,11 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 /// Sketch modify inputs accept only the sketch being edited. Origin axes remain valid
 /// rectangular-pattern directions, while Hole continues using its separate POINTS mask.
 pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) -> Option<Sel> {
-    let active = session.active_sketch?;
-    // Project Curve takes curves of other sketches and a face of any body.
+    // Project Curve takes curves of any sketch and a face of any body, with or without a sketch open.
     if matches!(d.kind, Kind::SketchModify(Mod::ProjectCurve { .. })) {
         return d.active_input()?.accepts(hit, |_, _| false);
     }
+    let active = session.active_sketch?;
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } if *sketch != active => None,
         _ => d.active_input()?.accepts(hit, |_, _| false),
@@ -871,7 +871,20 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             };
             let list: Vec<Value> = curves.iter().map(|c| json!({"sketch": sketch, "curve": c})).collect();
             let direction = if *dir == 0 { "normal" } else { "sketch" };
-            ("sketch.project_to_surface", json!({"curves": list, "face": [point.x, point.y, point.z], "body": body, "direction": direction}))
+            let project = json!({"curves": list, "face": [point.x, point.y, point.z], "body": body, "direction": direction});
+            if app.session.active_sketch.is_some() {
+                return Ok(vec![("sketch.project_to_surface".to_string(), project)]);
+            }
+            // No sketch open: make one on the curves' own plane for the projected curves to live
+            // in, project, and close it again.
+            let sk = state.sketch(sketch).ok_or("the sketch of the curves is missing")?;
+            let (o, x, y) = (sk.plane.origin, sk.plane.x, sk.plane.y);
+            let plane = json!({"origin": [o.x, o.y, o.z], "x_dir": [x.x, x.y, x.z], "y_dir": [y.x, y.y, y.z]});
+            return Ok(vec![
+                ("sketch.create".to_string(), json!({"plane": plane, "name": "Projected curves"})),
+                ("sketch.project_to_surface".to_string(), project),
+                ("sketch.finish".to_string(), json!({})),
+            ]);
         }
     };
     if let Value::Object(m) = &mut params {

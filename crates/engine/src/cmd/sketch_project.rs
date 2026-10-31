@@ -32,7 +32,6 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.project_to_surface", "Project Curve", project_to_surface)
         .at("SKETCH", "CREATE")
         .icon("project_curve")
-        .enabled(in_sketch)
         .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?, direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.intersection_curve", "Intersection Curve", intersection_curve)
         .at("SKETCH", "CREATE")
