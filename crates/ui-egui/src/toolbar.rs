@@ -591,6 +591,17 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     app.start("file.export_view_dxf");
                     close = true;
                 }
+                if item_if(ui, "Export Drawing Sheet as DXF… (A3)", "", "export", shown) {
+                    let name = format!("{}-drawing.dxf", app.session.doc.name);
+                    app.pick_save(&name, &["dxf"], |app, path| {
+                        let Some(path) = path else { return };
+                        let title = app.session.doc.name.clone();
+                        if app.run("file.export_drawing_dxf", json!({"path": path, "paper": "A3", "title": title})).is_ok() {
+                            app.set_status(format!("Exported drawing sheet {path}"), false);
+                        }
+                    });
+                    close = true;
+                }
                 if item_if(ui, "Export OBJ…", "", "export", shown) {
                     export(app, "obj");
                     close = true;

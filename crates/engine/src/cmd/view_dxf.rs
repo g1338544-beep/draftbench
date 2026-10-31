@@ -7,6 +7,8 @@ mod meshes;
 mod progress;
 #[path = "view_dxf_projection.rs"]
 mod projection;
+#[path = "view_dxf_sheet.rs"]
+mod sheet;
 #[path = "view_dxf_sketch.rs"]
 pub(super) mod sketch;
 
@@ -20,7 +22,7 @@ use crate::params::{bad, str_};
 use crate::{Result, Session};
 
 const CMD: &str = "file.export_view_dxf";
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Current View as DXF", export)
+pub static COMMANDS: &[CommandSpec] = &[sheet::SPEC, CommandSpec::new(CMD, "Export Current View as DXF", export)
     .icon("export")
     .noundo()
     .params("camera: Camera (current view); hidden?: omit|dashed (default omit); tolerance?: 0.0001..1 mm (curve chord tolerance, default 0.01); path?: .dxf file (else returns dxf text). Visible placed bodies and shown sketches' profile curves (no construction geometry, points, dimensions or constraints); 2D LINE/LWPOLYLINE entities on VISIBLE/HIDDEN layers (sketch curves on SKETCH), mm; finished sketches are hidden behind bodies, the active sketch is drawn on top; perspective projected onto the camera target plane; no viewport crop or overlays.")];
