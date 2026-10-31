@@ -504,6 +504,11 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 let item = |ui: &mut egui::Ui, label: &str, key: &str, icon: &str| item_if(ui, label, key, icon, true);
                 // Insert, Save and Export act on the design, which Home hides.
                 let shown = design_shown(app);
+                if item(ui, &format!("{}…", app.tr("ui.preferences")), if cfg!(target_os = "macos") { "Cmd+," } else { "Ctrl+," }, "settings") {
+                    app.prefs_window.open = true;
+                    close = true;
+                }
+                ui.separator();
                 if item(ui, app.tr("ui.new_design"), "Ctrl+N", "new") {
                     crate::documents::new_design(app);
                     close = true;
@@ -611,10 +616,6 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                         .clicked()
                 {
                     crate::install::start(app, offer);
-                    close = true;
-                }
-                if item(ui, &format!("{}…", app.tr("ui.preferences")), "", "settings") {
-                    app.prefs_window.open = true;
                     close = true;
                 }
                 if item(ui, &format!("{}…", app.tr("ui.keyboard_shortcuts")), "", "list") {
