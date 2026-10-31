@@ -453,7 +453,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                             });
                         }
                     });
-                    let exact = d.extra.get("fit").and_then(Value::as_str).is_none_or(|fit| fit == "exact");
+                    let exact = d.extra.get("hole_fit").and_then(Value::as_str).is_none_or(|fit| fit == "exact");
                     ui.add_enabled_ui(constant && exact, |ui| {
                         form_row(ui, "Corner", |ui| {
                             extra_choice(ui, &mut d.extra, "fi_corner", "corner", &[("Rolling", "rolling"), ("G2", "g2")]);
@@ -537,14 +537,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                         &[("Custom", "custom"), ("M3", "M3"), ("M4", "M4"), ("M5", "M5"), ("M6", "M6"), ("M8", "M8"), ("M10", "M10"), ("M12", "M12"), ("M16", "M16")],
                     );
                 });
-                if d.extra.contains_key("bolt") {
+                if d.extra.contains_key("hole_size") {
                     form_row(ui, "Fit", |ui| {
                         extra_choice(ui, &mut d.extra, "fit", "hole_fit", &[("Normal", "normal"), ("Close", "close"), ("Loose", "loose")]);
                     });
                     // Choosing a size or fit fills the diameter with the ISO 273 clearance hole; the
                     // field stays editable afterwards.
-                    let size = d.extra.get("bolt").and_then(Value::as_str).unwrap_or("").to_string();
-                    let fit = d.extra.get("fit").and_then(Value::as_str).unwrap_or("normal").to_string();
+                    let size = d.extra.get("hole_size").and_then(Value::as_str).unwrap_or("").to_string();
+                    let fit = d.extra.get("hole_fit").and_then(Value::as_str).unwrap_or("normal").to_string();
                     let key = format!("{size}/{fit}");
                     if d.extra.get("bolt_sync").and_then(Value::as_str) != Some(key.as_str()) {
                         if let Some(v) = iso_clearance(&size, &fit) {
