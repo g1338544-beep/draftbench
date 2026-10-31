@@ -92,8 +92,8 @@ const WALL_LABELS: [&str; 4] = ["Center", "Inside", "Outside", "Two Sides"];
 /// What an extrude's first input picks: profiles or planar faces, or curves too when thin.
 const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
-const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
-const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
+const HOLE_TYPES: [&str; 4] = ["simple", "counterbore", "countersink", "tapered"];
+const HOLE_LABELS: [&str; 4] = ["Simple", "Counterbore", "Countersink", "Tapered"];
 
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
@@ -4397,6 +4397,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::Hole { position, at, direction, diameter, depth, hole, points, thread, to } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults();
+            let mut taper: Option<String> = None;
             if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &mut k {
                 *dia = diameter.to_string();
                 opts.all = depth.is_none();
@@ -4423,10 +4424,17 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     HoleKind::Drilled { tip_angle } => {
                         opts.tip_angle = tip_angle.to_string();
                     }
+                    HoleKind::Tapered { taper_angle } => {
+                        *kind = 3;
+                        taper = Some(taper_angle.to_string());
+                    }
                     HoleKind::Simple => {}
                 }
             }
             d.kind = k;
+            if let Some(t) = taper {
+                d.extra.insert("taper_angle".into(), json!(t));
+            }
             match points {
                 Some(sp) if sp.single => {
                     // A Single hole at a sketch point: picked on its face where the point is now.

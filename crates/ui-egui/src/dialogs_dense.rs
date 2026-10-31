@@ -561,6 +561,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 enter |= expr_row(ui, "Counterbore Ø", cb_diameter);
                 enter |= expr_row(ui, "Counterbore depth", cb_depth);
             }
+            if *kind == 3 {
+                form_row(ui, "Taper angle (per side)", |ui| {
+                    enter |= extra_field(ui, &mut d.extra, "taper_angle", "1 deg");
+                });
+            }
             if *kind == 2 {
                 enter |= expr_row(ui, "Countersink Ø", cs_diameter);
                 enter |= expr_row(ui, "Countersink angle", cs_angle);

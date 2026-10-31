@@ -1982,6 +1982,11 @@ pub enum HoleKind {
         #[walk(length = "Counterbore depth")]
         cb_depth: Expr,
     },
+    /// A conical hole: `diameter` at the face, narrowing inwards by `taper_angle` on each side.
+    Tapered {
+        #[walk(angle = "Taper angle")]
+        taper_angle: Expr,
+    },
     Countersink {
         #[walk(length = "Countersink diameter")]
         cs_diameter: Expr,

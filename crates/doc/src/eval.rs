@@ -3457,6 +3457,20 @@ fn hole_tools_and_prisms(
             tools.push(cyl(rc, -dc, top, "cbore")?);
             tools.push(cyl(r, bottom, top, "bore")?);
         }
+        HoleKind::Tapered { taper_angle } => {
+            let half = val(vals, taper_angle, Kind::Angle)?;
+            if !(half > 1e-6 && half < 0.5) {
+                return Err(DocError::Invalid("the taper angle (per side) must be between 0 and about 28 degrees".into()));
+            }
+            // A cone from just above the face down to the bottom: `diameter` is its width at the face.
+            let r_top = r + top * half.tan();
+            let len = top - bottom;
+            if r_top - len * half.tan() <= r * 0.02 {
+                return Err(DocError::Invalid("the taper closes before the hole's depth: use a smaller angle or less depth".into()));
+            }
+            let top_plane = plane.offset(top);
+            tools.push((crate::lineage::part_tool(kernel::extrude_tapered(&top_plane, &disc(r_top), len, -1.0, -half)?, "bore"), None));
+        }
         HoleKind::Countersink { cs_diameter, cs_angle } => {
             let (rc, half) = (val(vals, cs_diameter, Kind::Length)? / 2.0, val(vals, cs_angle, Kind::Angle)? / 2.0);
             if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
