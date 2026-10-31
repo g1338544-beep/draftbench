@@ -377,7 +377,7 @@ preference_settings! {
     /// Units of new designs.
     default_units: String = "mm".into(), 0;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
-    nav: String = "fusion".into(), 1;
+    nav: String = "solidworks".into(), 1;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, 1 => check_tr("nav.free_orbit.label");
