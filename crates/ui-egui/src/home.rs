@@ -596,6 +596,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.hyperlink_to(app.tr("home.documentation"), crate::help::DOCS_URL);
                 ui.hyperlink_to(app.tr("home.report_issue"), "https://github.com/g1338544-beep/draftbench/issues/new");
                 ui.hyperlink_to(app.tr("home.whats_new"), "https://github.com/g1338544-beep/draftbench/releases");
+                if ui.link(crate::i18n::tr_label("Run script")).clicked() {
+                    crate::script_panel::open(app);
+                }
                 if ui.link(app.tr("ui.keyboard_shortcuts")).clicked() {
                     app.keymap.open = true;
                     app.keymap.read_only = true;

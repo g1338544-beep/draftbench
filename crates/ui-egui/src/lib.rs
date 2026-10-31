@@ -13,6 +13,7 @@ pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
 pub mod bom_panel;
+pub mod script_panel;
 pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
@@ -387,6 +388,8 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    /// The Run Script window, when open.
+    pub script: Option<script_panel::ScriptPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -548,6 +551,7 @@ impl SolveApp {
             params: None,
             design_properties: None,
             bom: None,
+            script: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -1725,6 +1729,7 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
+        script_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
