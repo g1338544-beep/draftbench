@@ -121,7 +121,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
     CommandSpec::new("solid.trim_body", "Trim Body", trim_body)
         .at("SOLID", "MODIFY")
-        .icon("split_body")
+        .icon("trim_body")
         .params("body: name; keep?: [x,y,z] a point inside the part of the body to keep (the rest is thrown away; without it a plane or planar face tool keeps the side its normal points away from, `reverse`: bool keeps the other); plane | tool: {body, point} | sketch + line: the cutting tool, as for solid.split_body"),
     CommandSpec::new("solid.press_pull", "Press Pull", press_pull)
         .at("SOLID", "MODIFY")

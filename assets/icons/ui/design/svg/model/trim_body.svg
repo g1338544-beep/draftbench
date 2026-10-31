@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Trim Body</title>
+  <path d="M8.62 45.50L8.62 18.50L20.31 25.25L20.31 52.25Z" fill="#b8c3cf"/>
+  <path d="M32.00 5.00L43.69 11.75L20.31 25.25L8.62 18.50Z" fill="#e2e8ef"/>
+  <path d="M43.69 38.75L20.31 52.25L20.31 25.25L43.69 11.75Z" fill="#328bd3"/>
+  <path d="M32.00 5.00L43.69 11.75L43.69 38.75L20.31 52.25L8.62 45.50L8.62 18.50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M43.69 11.75L20.31 25.25L20.31 52.25L43.69 38.75Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.62 18.50L20.31 25.25" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.00 59.00L32.00 32.00" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M32.00 59.00L32.00 32.00" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2.6 3.4"/>
+  <path d="M32.00 32.00L55.38 18.50" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M32.00 32.00L55.38 18.50" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2.6 3.4"/>
+  <path d="M32.00 32.00L20.31 25.25" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M32.00 32.00L20.31 25.25" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2.6 3.4"/>
+  <path d="M32.00 59.00L20.31 52.25" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M32.00 59.00L20.31 52.25" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2.6 3.4"/>
+  <path d="M32.00 59.00L55.38 45.50" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M32.00 59.00L55.38 45.50" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2.6 3.4"/>
+  <path d="M55.38 45.50L55.38 18.50" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M55.38 45.50L55.38 18.50" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2.6 3.4"/>
+  <path d="M55.38 18.50L43.69 11.75" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round" />
+  <path d="M55.38 18.50L43.69 11.75" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2.6 3.4"/>
+</svg>

@@ -267,6 +267,7 @@ thread	false
 torus	false
 trace	false
 trim	false
+trim_body	false
 undo	false
 unfold	false
 update	false
