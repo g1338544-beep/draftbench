@@ -38,7 +38,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build the web app
         working-directory: apps/solidcraft-web
-        run: trunk build --release --public-url ./
+        run: DRAFTBENCH_BUILD="${GITHUB_SHA::7}" trunk build --release --public-url ./
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

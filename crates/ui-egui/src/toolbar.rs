@@ -464,7 +464,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.painter().text(
                 pos2(r.right() - 12.0 - captions, r.center().y),
                 Align2::RIGHT_CENTER,
-                format!("v{}", crate::update::current_version()),
+                // The web build also says which commit it is, so a stale cached copy is easy to spot.
+                match option_env!("DRAFTBENCH_BUILD").filter(|b| !b.is_empty()) {
+                    Some(build) => format!("v{} · {build}", crate::update::current_version()),
+                    None => format!("v{}", crate::update::current_version()),
+                },
                 FontId::proportional(t.font_small),
                 t.app_bar_text,
             );
