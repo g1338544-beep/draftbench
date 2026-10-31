@@ -90,7 +90,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &["solid.move", "solid.mirror", "solid.pattern.rectangular", "solid.align", "solid.pattern.circular", "solid.pattern.path"],
     },
     Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
-    Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 1, ids: &["construct.plane.offset"] },
+    Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 2, ids: &["construct.plane.offset", "sketch.project_to_surface"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
     Section { tab: "SURFACE", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] },
@@ -234,7 +234,6 @@ pub const SECTIONS: &[Section] = &[
             "sketch.project",
             "sketch.intersect",
             "sketch.include_3d",
-            "sketch.project_to_surface",
             "sketch.intersection_curve",
             "sketch.spun_profile",
             "sketch.isoparametric_curve",
@@ -626,7 +625,7 @@ mod tests {
             ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.hole"]),
             ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull"]),
             ("ARRANGE", vec!["solid.move", "solid.mirror", "solid.pattern.rectangular"]),
-            ("CONSTRUCT", vec!["construct.plane.offset"]),
+            ("CONSTRUCT", vec!["construct.plane.offset", "sketch.project_to_surface"]),
         ] {
             let (cmds, n) = layout("MODEL", panel, &specs).unwrap();
             assert_eq!(cmds.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), expected);
