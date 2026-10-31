@@ -110,8 +110,13 @@ pub(crate) fn brand_mark(p: &egui::Painter, c: Pos2) {
     face(light, &[(200.0, 10.0), (365.0, 105.0), (200.0, 200.0), (35.0, 105.0)]);
     face(mid, &[(35.0, 105.0), (200.0, 200.0), (200.0, 390.0), (35.0, 295.0)]);
     face(dark, &[(365.0, 105.0), (365.0, 295.0), (200.0, 390.0), (200.0, 200.0)]);
+    // Light catches the left half of the top face and the upper part of the orange face.
+    face(Color32::from_white_alpha(46), &[(200.0, 10.0), (200.0, 200.0), (35.0, 105.0)]);
+    face(Color32::from_white_alpha(26), &[(35.0, 105.0), (200.0, 200.0), (200.0, 250.0), (35.0, 155.0)]);
     // The sketch window and the seams between faces show the application bar.
     face(gap, &[(200.0, 62.0), (274.0, 105.0), (200.0, 148.0), (126.0, 105.0)]);
+    // A small orange diamond sits in the window: the sketch point.
+    face(light, &[(200.0, 88.0), (222.0, 105.0), (200.0, 122.0), (178.0, 105.0)]);
     let seam = Stroke::new(10.0 * s, gap);
     p.line_segment([m(&[(200.0, 200.0)])[0], m(&[(200.0, 390.0)])[0]], seam);
     p.line_segment([m(&[(200.0, 200.0)])[0], m(&[(35.0, 105.0)])[0]], seam);
