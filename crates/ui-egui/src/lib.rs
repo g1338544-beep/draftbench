@@ -78,6 +78,7 @@ pub mod icons;
 pub mod inference;
 pub mod install;
 pub mod issue_report;
+pub mod copy_drag;
 pub mod joint_drag;
 pub mod keymap;
 mod linked_source;

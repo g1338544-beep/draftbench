@@ -2445,6 +2445,33 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held =
         crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, primary_nav.is_some() || mode.is_some());
     crate::select_other::hover_override(app);
+    // Space, tapped (not held to pan): pick a view orientation.
+    {
+        static SPACE_USED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let (down, any_down, released) = ui.input(|i| {
+            (
+                i.key_down(egui::Key::Space),
+                i.pointer.any_down(),
+                i.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Space, pressed: false, .. })),
+            )
+        });
+        if down && any_down {
+            SPACE_USED.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if released {
+            let used = SPACE_USED.swap(false, std::sync::atomic::Ordering::Relaxed);
+            if !used
+                && inside
+                && app.tool.is_none()
+                && app.dialog.is_none()
+                && app.viewport.context_menu.is_none()
+                && !ui.ctx().wants_keyboard_input()
+                && !crate::drawing_workspace::active(app)
+            {
+                crate::context_menu::open_for(app, hover.unwrap_or(rect.center()), crate::context_menu::Target::ViewPicker);
+            }
+        }
+    }
     let painter = ui.painter_at(rect);
     // Background gradient.
     let (top, bot) = match VIEWPORT_BG.load(std::sync::atomic::Ordering::Relaxed) {
@@ -2924,8 +2951,34 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::joint_drag::active(app) && (resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down())) {
         crate::joint_drag::end(app);
     }
+    // Ctrl + drag on a body copies it.
+    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_none() && !held {
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && mods.ctrl
+            && let Some(a) = ui.input(|i| i.pointer.press_origin())
+            && rect.contains(a)
+            && !crate::shell::covered(app, a)
+            && !axes.contains(a)
+        {
+            crate::copy_drag::start(app, &proj, a);
+        }
+        if crate::copy_drag::active()
+            && resp.dragged_by(egui::PointerButton::Primary)
+            && let Some(p) = hover
+        {
+            crate::copy_drag::to(&proj, p);
+        }
+    }
+    if crate::copy_drag::active() {
+        crate::copy_drag::paint(&painter, &proj);
+        if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+            let released = resp.drag_stopped();
+            crate::copy_drag::end(app, released);
+        }
+    }
     // Box selection: a primary drag on the model when no navigation mode is on.
     if app.tool.is_none()
+        && !crate::copy_drag::active()
         && !held
         && primary_nav.is_none()
         && mode.is_none()

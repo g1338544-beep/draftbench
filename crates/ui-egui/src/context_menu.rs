@@ -73,6 +73,8 @@ pub enum Target {
     Workspace,
     /// The Named Views folder, and one view (saved or standard) in it.
     NamedViews,
+    /// Space: the view orientation picker.
+    ViewPicker,
     NamedView {
         name: String,
     },
@@ -355,6 +357,19 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
+        Target::ViewPicker => [
+            ("Front", "front"),
+            ("Back", "back"),
+            ("Left", "left"),
+            ("Right", "right"),
+            ("Top", "top"),
+            ("Bottom", "bottom"),
+            ("Isometric", "iso"),
+            ("Fit", "fit"),
+        ]
+        .into_iter()
+        .map(|(label, view)| act("ui.viewTo", label, "").with(json!({ "view": view })))
+        .collect(),
         Target::Section => crate::browser::section_items(app),
         Target::Joint { id } => joint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
@@ -1304,6 +1319,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.editCanvas" | "ui.calibrateCanvas" => {
             if let Some(c) = id_of(&p, "canvas") {
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, item.id == "ui.calibrateCanvas"));
+            }
+        }
+        "ui.viewTo" => {
+            if let Some(v) = p.get("view").and_then(Value::as_str) {
+                app.animate_view(v);
             }
         }
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),
