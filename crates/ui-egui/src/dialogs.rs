@@ -3514,7 +3514,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let p = match sels(d, 1).first() {
                 Some(Sel::Plane { name }) => json!({"body": body, "plane": name}),
                 Some(Sel::Face { body: b, index, point }) => match planar_face(s, b, *index) {
-                    Some((_, n)) => json!({"body": body, "plane": {"origin": pt(*point), "normal": pt(n)}}),
+                    Some((_, n)) => {
+                        // Distance moves the cutting plane along the face normal.
+                        let text = d.extra.get("distance").and_then(Value::as_str).unwrap_or("0");
+                        let dist: f64 = text.trim().trim_end_matches("mm").trim().parse().map_err(|_| "Distance must be a number in mm".to_string())?;
+                        if !dist.is_finite() || dist.abs() > 1.0e6 {
+                            return Err("Distance must be a finite number in mm".into());
+                        }
+                        json!({"body": body, "plane": {"origin": pt(*point + n * dist), "normal": pt(n)}})
+                    }
                     None => json!({"body": body, "tool": {"body": b, "point": pt(*point)}}),
                 },
                 // A straight sketch line, in the sketch it was picked in (#1552).
