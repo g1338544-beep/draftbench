@@ -2440,7 +2440,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let enter_applies =
         !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. }) && !matches!(&d.kind, Kind::Motion(k) if k.wide());
     let report_active = app.issue_report.draft.is_some();
-    if !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
+    // A middle-button click (not a drag, which orbits) is OK, as in NX.
+    let middle_click = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Middle));
+    if !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || middle_click || (enter_free && nothing_focused)) {
         ok = true;
     }
     if !report_active && esc && !app.esc_handled {
