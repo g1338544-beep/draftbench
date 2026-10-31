@@ -754,6 +754,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);
+            // The faces slide along this direction; a plane moved sideways does not change the part.
+            form_row(ui, "Direction", |ui| {
+                extra_segments(ui, &mut d.extra, "move_dir", &[("Normal", "normal"), ("X", "x"), ("Y", "y"), ("Z", "z")]);
+            });
         }
         Kind::Thread { designation, length, suggested, of } => {
             let mut full = length.trim().is_empty();

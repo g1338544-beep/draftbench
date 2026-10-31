@@ -741,7 +741,7 @@
   "cmd.solid_bounding_solid": "Bounding Solid",
   "cmd.solid_emboss": "Emboss",
   "cmd.solid_move": "Move/Copy",
-  "cmd.solid_offset_face": "Offset Face",
+  "cmd.solid_offset_face": "Move Face",
   "cmd.solid_press_pull": "Press Pull",
   "cmd.solid_remove": "Remove",
   "cmd.solid_replace_face": "Replace Face",

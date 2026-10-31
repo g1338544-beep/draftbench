@@ -118,7 +118,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Scale { factor, .. }) {
             factor: String = "2".into() => factor.to_string(),
         } => json!({"factor": factor});
-        OffsetFaces("solid.offset_face", "OFFSET FACE", [("Faces", PLANAR_FACES, true)],
+        OffsetFaces("solid.offset_face", "MOVE FACE", [("Faces", PLANAR_FACES, true)],
             FeatureKind::OffsetFace { distance, .. }) {
             distance: String = "2 mm".into() => distance.to_string(),
         } => json!({"distance": distance});
@@ -3758,6 +3758,34 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     };
     let mut params = params;
     d.kind.fill_simple_params(&mut params);
+    // Move Face along an axis: a planar face moved by t along a direction shifts its plane by
+    // t times the cosine between that direction and the face normal.
+    if matches!(d.kind, Kind::OffsetFaces { .. })
+        && let Some(axis) = d.extra.get("move_dir").and_then(Value::as_str).and_then(|a| match a {
+            "x" => Some(Vec3::X),
+            "y" => Some(Vec3::Y),
+            "z" => Some(Vec3::Z),
+            _ => None,
+        })
+    {
+        let mut factor: Option<f64> = None;
+        for sel in sels(d, 0) {
+            if let Sel::Face { body, index, .. } = sel {
+                let (_, n) = planar_face(s, body, *index).ok_or("pick planar faces to move")?;
+                let f = n.dot(axis);
+                if f.abs() < 1e-6 {
+                    return Err("a face parallel to that direction does not change when it slides along it".into());
+                }
+                if factor.is_some_and(|g| (g - f).abs() > 1e-6) {
+                    return Err("pick faces that face the same way, or move them one group at a time".into());
+                }
+                factor = Some(f);
+            }
+        }
+        if let (Some(f), Some(dist)) = (factor, params.get("distance").and_then(Value::as_str).map(str::to_string)) {
+            params["distance"] = json!(format!("({dist}) * {f}"));
+        }
+    }
     if let Value::Object(m) = &mut params {
         for (k, v) in &d.extra {
             m.entry(k.clone()).or_insert_with(|| v.clone());
