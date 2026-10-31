@@ -15,7 +15,7 @@ use crate::{Result, Session};
 pub(super) const CMD: &str = "file.export_drawing_dxf";
 
 pub(super) const SPEC: CommandSpec = CommandSpec::new(CMD, "Export Drawing Sheet as DXF", export).icon("export").noundo().params(
-    "paper?: A0|A1|A2|A3|A4 (default A3); orientation?: landscape|portrait (default landscape); views?: [front, top, right, left, bottom, back, iso] (default front, top, right); projection?: first|third (default first angle, the ISO layout); scale?: number (model-to-paper factor, 0.5 = 1:2; default: the largest standard scale that fits); hidden?: omit|dashed (default dashed); dimensions?: bool (default true: overall sizes); title?: text; colors?: {visible, hidden, dim, sheet, text}: AutoCAD colour numbers 1-255 for each layer (defaults 7, 8, 3, 7, 7); path?: .dxf file (else returns dxf text). Visible placed bodies projected as orthographic views on one sheet, in mm, with border and title block.",
+    "paper?: A0|A1|A2|A3|A4 (default A3); orientation?: landscape|portrait (default landscape); views?: [front, top, right, left, bottom, back, iso] (default front, top, right); projection?: first|third (default first angle, the ISO layout); scale?: number (model-to-paper factor, 0.5 = 1:2; default: the largest standard scale that fits); hidden?: omit|dashed (default dashed); dimensions?: bool (default true: overall sizes); title?: text; tolerance?: 0.001..2 mm (curve chord tolerance, default 0.15; smaller is smoother and slower); colors?: {visible, hidden, dim, sheet, text}: AutoCAD colour numbers 1-255 for each layer (defaults 7, 8, 3, 7, 7); path?: .dxf file (else returns dxf text). Visible placed bodies projected as orthographic views on one sheet, in mm, with border and title block.",
 );
 
 const MARGIN: f64 = 10.0;
@@ -127,7 +127,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if !sketch::exportable(s) {
         return Err(bad(CMD, "no visible bodies or sketches to export"));
     }
-    let tolerance = 0.01;
+    // Coarser than the single-view export: a sheet holds several views, and in the browser every
+    // one is computed on the page's own thread.
+    let tolerance = match p.get("tolerance") {
+        None => 0.15,
+        Some(v) => v.as_f64().filter(|t| (0.001..=2.0).contains(t)).ok_or_else(|| bad(CMD, "tolerance must be 0.001..2 mm"))?,
+    };
     progress::Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
     let scene = meshes::prepare(s, tolerance)?;
     let parts = sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?;
