@@ -378,6 +378,8 @@ preference_settings! {
     default_units: String = "mm".into(), 0;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "solidworks".into(), 1;
+    /// Graphics area background as `#rrggbb`; empty keeps the theme's own.
+    viewport_bg: String = String::new(), 1;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = true, 1 => check_tr("nav.free_orbit.label");
@@ -1471,6 +1473,14 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 app.ui.visual_style = selected as u8;
             });
             ui_kit::checkbox(ui, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
+            ui_kit::row(ui, app.tr_label("Background"), |ui| {
+                for (label, hex) in [("Theme", ""), ("Slate", "#2e3440"), ("Black", "#101214"), ("Grey", "#9aa3ad"), ("Light", "#e6e9ee"), ("White", "#ffffff")] {
+                    let on = app.preferences.viewport_bg == hex;
+                    if ui.selectable_label(on, crate::i18n::tr_label(label)).clicked() {
+                        app.preferences.viewport_bg = hex.to_string();
+                    }
+                }
+            });
             ui.add_enabled_ui(app.ui.show_grid, |ui| {
                 setting::grid_follows_view(app, ui);
             });

@@ -3593,11 +3593,37 @@ fn loose_end_markers(
 /// dark or the light theme and a colour vision mode, from the tokens the window draws with, so the
 /// picture matches the window. The light theme's tokens (Off) are the engine's own colours, so a light
 /// render is unchanged.
+/// The background the user picked for the graphics area: `0x01RRGGBB`, or 0 for the theme's own.
+static VIEWPORT_BG: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// A `#rrggbb` colour; anything else is no colour.
+pub(crate) fn parse_hex_colour(text: &str) -> Option<[u8; 3]> {
+    let s = text.trim().trim_start_matches('#');
+    if s.len() != 6 {
+        return None;
+    }
+    let n = u32::from_str_radix(s, 16).ok()?;
+    Some([(n >> 16) as u8, (n >> 8) as u8, n as u8])
+}
+
+/// Use `hex` (`#rrggbb`) as the graphics area's background; empty or invalid goes back to the theme's.
+pub(crate) fn set_viewport_bg(hex: &str) {
+    let v = parse_hex_colour(hex).map_or(0, |[r, g, b]| 0x0100_0000 | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b));
+    VIEWPORT_BG.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> solidcraft_engine::view::Palette {
     let t = Tokens::themed(dark, mode);
     let rgb = |c: Color32| Rgb(c.r(), c.g(), c.b());
+    let picked = VIEWPORT_BG.load(std::sync::atomic::Ordering::Relaxed);
+    let background = if picked == 0 {
+        (rgb(t.viewport_top), rgb(t.viewport_bottom))
+    } else {
+        let c = Rgb((picked >> 16) as u8, (picked >> 8) as u8, picked as u8);
+        (c, c)
+    };
     solidcraft_engine::view::Palette {
-        background: (rgb(t.viewport_top), rgb(t.viewport_bottom)),
+        background,
         grid: rgb(t.grid),
         grid_major: rgb(t.grid_major),
         edge: rgb(t.body_edge),
