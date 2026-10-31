@@ -172,6 +172,7 @@ pub mod preview;
 mod primitive_units_tests;
 pub mod recovery_ui;
 pub mod ref_images;
+pub mod drawing_workspace;
 pub mod render_workspace;
 #[cfg(test)]
 mod revolve_edit_tests;
@@ -380,6 +381,7 @@ pub struct SolveApp {
     saving: Option<save_job::Saving>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
+    pub drawing: drawing_workspace::State,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
     /// The Change Parameters window, when open.
@@ -546,6 +548,7 @@ impl SolveApp {
             saving: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
+            drawing: drawing_workspace::State::default(),
             tool: None,
             dialog: None,
             params: None,
@@ -1291,6 +1294,10 @@ impl SolveApp {
             self.flat_view.fitted = false;
             return;
         }
+        if drawing_workspace::active(self) {
+            drawing_workspace::fit(self);
+            return;
+        }
         if render_workspace::active(self) {
             self.cancel_view_animation();
             match solidcraft_engine::product_scene::extract(&self.session) {
@@ -1379,7 +1386,7 @@ impl SolveApp {
             self.animate_view("fit");
             return;
         }
-        if render_workspace::active(self) {
+        if render_workspace::active(self) || drawing_workspace::active(self) {
             // The Render preview frames its product scene (see `fit_view`).
             self.fit_view();
             return;
@@ -1396,6 +1403,10 @@ impl SolveApp {
         // The flat pattern is a 2D view: Fit and Home frame it, and the Design camera stays put.
         if dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home") {
             self.flat_view.fitted = false;
+            return;
+        }
+        if drawing_workspace::active(self) && matches!(v, "fit" | "home") {
+            self.fit_view();
             return;
         }
         if render_workspace::active(self) && matches!(v, "fit" | "home") {
@@ -1638,7 +1649,7 @@ impl SolveApp {
             }
         }
         let floating = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel).floating();
-        let show_timeline = self.ui.show_timeline && !render_workspace::active(self);
+        let show_timeline = self.ui.show_timeline && !render_workspace::active(self) && !drawing_workspace::active(self);
         let left_timeline = show_timeline && self.preferences.timeline_left;
         timeline_left::animate_folds(self, ui.ctx());
         if !floating {
@@ -1699,6 +1710,9 @@ impl SolveApp {
         if render_workspace::active(self) {
             render_workspace::panel(self, ui);
         }
+        if drawing_workspace::active(self) {
+            drawing_workspace::panel(self, ui);
+        }
         if self.ui.show_browser {
             browser::browser(self, ui);
         }
@@ -1748,6 +1762,8 @@ impl SolveApp {
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if render_workspace::active(self) {
             render_workspace::show(self, ui);
+        } else if drawing_workspace::active(self) {
+            drawing_workspace::show(self, ui);
         } else {
             viewport::show(self, ui);
         }

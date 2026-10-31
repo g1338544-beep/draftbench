@@ -443,6 +443,9 @@ pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
 }
 
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
+    if crate::drawing_workspace::active(app) {
+        return vec!["DRAWING"];
+    }
     if crate::render_workspace::active(app) {
         return vec!["RENDER"];
     }
@@ -459,7 +462,7 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
 /// Select contextual tabs on entry (or a different sheet body), allowing the other tabs to
 /// remain usable for the rest of that context. Sketch takes precedence over sheet metal.
 pub fn sync_context(app: &mut crate::SolveApp) {
-    if crate::render_workspace::active(app) {
+    if crate::render_workspace::active(app) || crate::drawing_workspace::active(app) {
         return;
     }
     let context = app.session.active_sketch.map(|id| format!("sketch:{id}")).or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")));

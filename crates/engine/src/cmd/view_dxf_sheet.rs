@@ -78,7 +78,15 @@ fn rect(layer: &str, lo: Vec2, hi: Vec2, entities: &mut Vec<DxfEntity>) {
     entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Polyline { points } });
 }
 
-fn export(s: &mut Session, p: &Value) -> Result<Value> {
+struct Built {
+    sheet: (f64, f64),
+    layers: Vec<DxfLayer>,
+    entities: Vec<DxfEntity>,
+    summary: Value,
+    path: Option<String>,
+}
+
+fn build(s: &mut Session, p: &Value) -> Result<Built> {
     let (pw, ph) = paper(str_(p, "paper").unwrap_or("A3")).ok_or_else(|| bad(CMD, "paper must be A0, A1, A2, A3 or A4"))?;
     let (sheet_w, sheet_h) = match str_(p, "orientation").unwrap_or("landscape") {
         "landscape" => (pw, ph),
@@ -286,16 +294,47 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if dashed {
         layers.push(DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", colour("hidden", 8)?) });
     }
-    let dxf = solidcraft_io::write_dxf_drawing(&layers, &entities);
-    let mut result = json!({"paper": str_(p, "paper").unwrap_or("A3"), "scale": ratio_label(scale), "views": placed.iter().map(|v| view_name(v.view)).collect::<Vec<_>>(), "units": "mm"});
-    if let Some(path) = path {
-        solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
-        solidcraft_io::write_atomic(std::path::Path::new(path), dxf.as_bytes(), false).map_err(|e| crate::EngineError::Other(e.to_string()))?;
+    let summary = json!({"paper": str_(p, "paper").unwrap_or("A3"), "scale": ratio_label(scale), "views": placed.iter().map(|v| view_name(v.view)).collect::<Vec<_>>(), "units": "mm"});
+    Ok(Built { sheet: (sheet_w, sheet_h), layers, entities, summary, path: path.map(str::to_string) })
+}
+
+fn export(s: &mut Session, p: &Value) -> Result<Value> {
+    let b = build(s, p)?;
+    let dxf = solidcraft_io::write_dxf_drawing(&b.layers, &b.entities);
+    let mut result = b.summary;
+    if let Some(path) = b.path {
+        solidcraft_io::vfs::check(&path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
+        solidcraft_io::write_atomic(std::path::Path::new(&path), dxf.as_bytes(), false).map_err(|e| crate::EngineError::Other(e.to_string()))?;
         result["path"] = json!(path);
     } else {
         result["dxf"] = json!(dxf);
     }
     Ok(result)
+}
+
+pub(super) const PREVIEW: &str = "drawing.sheet";
+
+pub(super) const PREVIEW_SPEC: CommandSpec = CommandSpec::new(PREVIEW, "Drawing Sheet", preview).noundo().params(
+    "paper?: A0..A4, orientation?, projection?, views?, scale?, title?, hidden?, dimensions?, tolerance? (as file.export_drawing_dxf, without path)",
+);
+
+/// The sheet as plain JSON entities in millimetres, for the Drawing workspace to paint.
+fn preview(s: &mut Session, p: &Value) -> Result<Value> {
+    let b = build(s, p)?;
+    let pt = |v: Vec2| json!([v.x, v.y]);
+    let mut items = Vec::with_capacity(b.entities.len());
+    for e in b.entities.iter().take(200_000) {
+        let l = e.layer.to_lowercase();
+        items.push(match &e.shape {
+            DxfShape::Line(a, c) => json!({"layer": l, "line": [pt(*a), pt(*c)]}),
+            DxfShape::Polyline { points } => json!({"layer": l, "poly": points.iter().map(|q| pt(*q)).collect::<Vec<_>>()}),
+            DxfShape::Circle { c, r } => json!({"layer": l, "circle": [pt(*c), r]}),
+            DxfShape::Arc { c, r, a0, a1 } => json!({"layer": l, "arc": [pt(*c), r, a0, a1]}),
+            DxfShape::Text { at, height, text, .. } => json!({"layer": l, "text": text, "at": pt(*at), "h": height}),
+            _ => continue, // ellipses and splines are written to the DXF; the preview skips them
+        });
+    }
+    Ok(json!({"width": b.sheet.0, "height": b.sheet.1, "summary": b.summary, "items": items}))
 }
 
 fn view_name(v: StandardView) -> &'static str {

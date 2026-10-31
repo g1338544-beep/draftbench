@@ -144,6 +144,7 @@ pub fn invalidate_scene(app: &mut SolveApp) {
 }
 
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
+    crate::drawing_workspace::leave(app);
     if render {
         if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
             return Err("finish the current modelling operation before entering Render".into());
