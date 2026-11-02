@@ -1513,13 +1513,14 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             }
             for (label, which) in [("Part colour", 0), ("Selection colour", 1)] {
+                let reset_label = app.tr_label("Theme");
                 ui_kit::row(ui, app.tr_label(label), |ui| {
                     let slot = if which == 0 { &mut app.preferences.part_colour } else { &mut app.preferences.selection_colour };
                     let mut rgb = crate::viewport::parse_hex_colour(slot).unwrap_or(if which == 0 { [150, 160, 175] } else { [230, 150, 40] });
                     if ui_kit::color_field(ui, &mut rgb).changed() {
                         *slot = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
                     }
-                    if !slot.is_empty() && ui_kit::button(ui, app.tr_label("Theme"), ui_kit::Button::Small).clicked() {
+                    if !slot.is_empty() && ui_kit::button(ui, reset_label, ui_kit::Button::Small).clicked() {
                         slot.clear();
                     }
                 });
