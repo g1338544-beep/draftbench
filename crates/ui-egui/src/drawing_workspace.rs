@@ -155,6 +155,10 @@ pub struct State {
     mark_tool: bool,
     /// Centre lines placed between two picked lines (ends on the sheet), and the tool: the lines picked so far.
     clines: Vec<[f32; 4]>,
+    /// Rectangles (x0, y0, x1, y1 on the sheet) where centre lines were erased.
+    centre_cut: Vec<[f32; 4]>,
+    /// An erase drag in progress: where it started and where the pointer is.
+    erase: Option<(Pos2, Pos2)>,
     cline_tool: Option<Vec<(Pos2, Pos2)>>,
     dirty_marks: bool,
     /// Colour pictures of the model on the sheet, and the pictures drawn so far (key, RGB, texture).
@@ -237,6 +241,8 @@ impl Default for State {
             marks: Vec::new(),
             mark_tool: false,
             clines: Vec::new(),
+            centre_cut: Vec::new(),
+            erase: None,
             cline_tool: None,
             dirty_marks: false,
             shaded: Vec::new(),
@@ -284,6 +290,7 @@ impl State {
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
             "clines": self.clines,
+            "centre_cut": self.centre_cut,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch])).collect::<Vec<_>>(),
             "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
             "paper": self.paper, "landscape": self.landscape,
@@ -413,6 +420,8 @@ impl State {
         self.bom.clear();
         self.marks.clear();
         self.clines.clear();
+        self.centre_cut.clear();
+        self.erase = None;
         self.shaded.clear();
         self.selected = None;
         self.sel_dim = None;
@@ -472,6 +481,16 @@ impl State {
                     && [x, y, w, yaw, pitch].iter().all(|t| t.is_finite())
                 {
                     self.shaded.push(ShadedView { x: x as f32, y: y as f32, w: (w as f32).clamp(20.0, 800.0), yaw, pitch });
+                }
+            }
+        }
+        if let Some(list) = d.get("centre_cut").and_then(serde_json::Value::as_array) {
+            for m in list.iter().take(400) {
+                let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
+                if let [a, b, c, e] = n[..]
+                    && [a, b, c, e].iter().all(|t| t.is_finite() && t.abs() < 1e5)
+                {
+                    self.centre_cut.push([a as f32, b as f32, c as f32, e as f32]);
                 }
             }
         }
@@ -706,6 +725,7 @@ fn params(st: &State) -> Value {
         "block_cells": st.cells,
         "marks": st.marks,
         "clines": st.clines,
+        "centre_cut": st.centre_cut,
         "bom": st.bom.iter().filter(|r| r.iter().any(|c| !c.trim().is_empty())).collect::<Vec<_>>(),
         "bolt_circle": st.bolt,
         "hole_table": st.hole_table,
@@ -969,6 +989,45 @@ fn poly_circle(points: &[Pos2]) -> Option<(Pos2, f32)> {
     let round = points.iter().all(|q| ((*q - c).length() - r).abs() <= r * 0.03);
     let closed = (first - last).length() <= r * 0.3;
     (round && closed).then_some((c, r))
+}
+
+/// Does the segment `a`–`b` touch the rectangle `r` (x0, y0, x1, y1)?
+fn segment_in_rect(a: Pos2, b: Pos2, r: [f32; 4]) -> bool {
+    let (mut t0, mut t1) = (0.0_f32, 1.0_f32);
+    let d = b - a;
+    for (p, q) in [(-d.x, a.x - r[0]), (d.x, r[2] - a.x), (-d.y, a.y - r[1]), (d.y, r[3] - a.y)] {
+        if p.abs() < 1e-9 {
+            if q < 0.0 {
+                return false;
+            }
+        } else {
+            let t = q / p;
+            if p < 0.0 {
+                t0 = t0.max(t);
+            } else {
+                t1 = t1.min(t);
+            }
+            if t0 > t1 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Erase the centre lines and marks inside the frame (x0, y0, x1, y1): a click-sized frame takes the line under it.
+fn erase_centre(app: &mut SolveApp, mut r: [f32; 4]) {
+    let grow = 1.0;
+    if r[2] - r[0] < 0.5 && r[3] - r[1] < 0.5 {
+        r = [r[0] - grow, r[1] - grow, r[2] + grow, r[3] + grow];
+    }
+    app.drawing.marks.retain(|m| !(m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]));
+    app.drawing.clines.retain(|c| !segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r));
+    if app.drawing.centre_cut.len() < 400 {
+        app.drawing.centre_cut.push(r);
+    }
+    app.drawing.sel_centre = None;
+    app.drawing.dirty_marks = true;
 }
 
 fn dist_to_segment(p: Pos2, (a, b): (Pos2, Pos2)) -> f32 {
@@ -1891,6 +1950,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if response.double_clicked() {
                 app.drawing.text_edit = Some(i);
             }
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool)
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = pointer
+            && (centre_hit(s).is_some() || ui.input(|i| i.modifiers.ctrl))
+        {
+            // Drag from a centre line (or with Ctrl): a frame; the centre lines it touches are erased.
+            app.drawing.erase = Some((s, s));
+            app.drawing.selected = None;
+            app.drawing.sel_dim = None;
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
@@ -1906,6 +1974,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.sel_centre = centre_hit(s);
             app.drawing.selected = if app.drawing.sel_centre.is_some() { None } else { hit(s).map(|b| b.0) };
             app.drawing.sel_dim = None;
+        }
+    }
+    // Erasing centre lines: the frame follows the pointer; letting go removes what it touches.
+    if let (Some((from, _)), Some(m)) = (app.drawing.erase, &map) {
+        if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)) {
+            app.drawing.erase = Some((from, s));
+        }
+        if response.drag_stopped() || !response.dragged() {
+            if let Some((a, b)) = app.drawing.erase.take() {
+                erase_centre(app, [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)]);
+            }
         }
     }
     // Dragging a dimension point: it jumps to the nearest corner, end, centre or centre-line point.
@@ -1958,6 +2037,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.drag_dim = None;
             refresh(app);
         }
+    }
+    if let Some((a, b)) = app.drawing.sel_centre
+        && !ui.ctx().egui_wants_keyboard_input()
+        && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+    {
+        app.drawing.sel_centre = None;
+        erase_centre(app, [a.x.min(b.x) - 0.05, a.y.min(b.y) - 0.05, a.x.max(b.x) + 0.05, a.y.max(b.y) + 0.05]);
     }
     if let Some(i) = app.drawing.sel_dim
         && !ui.ctx().egui_wants_keyboard_input()
@@ -2136,7 +2222,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -2424,6 +2510,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             painter.circle(map(q), 5.0, Color32::WHITE, Stroke::new(2.0, accent));
             painter.text(map(q) + vec2(7.0, -7.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(Tokens::get().font_body), accent);
         }
+    }
+    if let Some((a, b)) = app.drawing.erase {
+        let r = Rect::from_two_pos(map(a), map(b));
+        painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(220, 60, 60, 40));
+        painter.rect_stroke(r, 0.0, Stroke::new(1.5, Color32::from_rgb(220, 60, 60)), egui::StrokeKind::Inside);
     }
     if let Some((a, b)) = app.drawing.sel_centre {
         let accent = Tokens::get().accent;

@@ -795,7 +795,25 @@ fn finish(
             }
         }
     }
-    // The parts list (BOM) over the title block: header at the bottom, items counted upward.
+    // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go.
+    if let Some(cuts) = p.get("centre_cut").and_then(Value::as_array) {
+        let frames: Vec<[f64; 4]> = cuts
+            .iter()
+            .take(400)
+            .filter_map(|c| {
+                let n: Vec<f64> = c.as_array()?.iter().filter_map(Value::as_f64).collect();
+                match n[..] {
+                    [a, b, c, d] if [a, b, c, d].iter().all(|v| v.is_finite() && v.abs() < 1e5) => Some([a, b, c, d]),
+                    _ => None,
+                }
+            })
+            .collect();
+        entities.retain(|e| match (&e.shape, e.layer.as_str()) {
+            (DxfShape::Line(a, b), "CENTER") => !frames.iter().any(|r| touches(*a, *b, *r)),
+            _ => true,
+        });
+    }
+: header at the bottom, items counted upward.
     if let Some(rows) = p.get("bom").and_then(Value::as_array).filter(|r| !r.is_empty()) {
         let edges = [0.0, 0.10, 0.56, 0.68, 1.0];
         let rh = 7.0;
@@ -898,6 +916,30 @@ fn preview(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 type Key = (u64, usize, u64, u64);
+
+/// Does the segment `a`–`b` touch the rectangle `r` (x0, y0, x1, y1)?
+fn touches(a: Vec2, b: Vec2, r: [f64; 4]) -> bool {
+    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    for (p, q) in [(-dx, a.x - r[0]), (dx, r[2] - a.x), (-dy, a.y - r[1]), (dy, r[3] - a.y)] {
+        if p.abs() < 1e-12 {
+            if q < 0.0 {
+                return false;
+            }
+        } else {
+            let t = q / p;
+            if p < 0.0 {
+                t0 = t0.max(t);
+            } else {
+                t1 = t1.min(t);
+            }
+            if t0 > t1 {
+                return false;
+            }
+        }
+    }
+    true
+}
 
 fn turn(all: &Projected, quarter: usize) -> std::rc::Rc<Projected> {
     let rot = |q: Vec2| match quarter % 4 {
