@@ -102,9 +102,10 @@ pub enum SaveTarget {
 /// the browser's storage; anything else is a download.
 pub fn save_target(api: bool, design: bool) -> SaveTarget {
     match (design, api) {
-        (false, _) => SaveTarget::Download,
-        (true, true) => SaveTarget::Disk,
+        // Any file the browser can pick a name for: the user names it, as in a desktop app.
+        (_, true) => SaveTarget::Disk,
         (true, false) => SaveTarget::Browser,
+        (false, false) => SaveTarget::Download,
     }
 }
 
@@ -116,8 +117,21 @@ pub fn opens_design(extensions: &[&str]) -> bool {
 
 /// The file type a Save As dialog offers for `name`: (description, MIME type, extension).
 pub fn save_type(name: &str) -> (&'static str, &'static str, &'static str) {
-    let json = std::path::Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
-    if json { ("Plain JSON design", "application/json", ".json") } else { ("SolidCraft design", "application/octet-stream", ".solidcraft") }
+    let ext = std::path::Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "json" => ("Plain JSON design", "application/json", ".json"),
+        "dxf" => ("AutoCAD drawing (DXF)", "application/octet-stream", ".dxf"),
+        "pdf" => ("PDF document", "application/pdf", ".pdf"),
+        "step" => ("STEP model", "application/octet-stream", ".step"),
+        "stp" => ("STEP model", "application/octet-stream", ".stp"),
+        "stl" => ("STL mesh", "application/octet-stream", ".stl"),
+        "3mf" => ("3MF model", "application/octet-stream", ".3mf"),
+        "obj" => ("OBJ mesh", "application/octet-stream", ".obj"),
+        "glb" => ("glTF binary", "application/octet-stream", ".glb"),
+        "svg" => ("SVG image", "image/svg+xml", ".svg"),
+        "png" => ("PNG image", "image/png", ".png"),
+        _ => ("SolidCraft design", "application/octet-stream", ".solidcraft"),
+    }
 }
 
 /// Is this a cancelled dialog (the browser's `AbortError`)? Not an error to show.
@@ -608,7 +622,7 @@ mod tests {
     fn save_as_chooses_between_the_disk_the_browsers_storage_and_a_download() {
         assert_eq!(save_target(true, true), SaveTarget::Disk);
         assert_eq!(save_target(false, true), SaveTarget::Browser);
-        assert_eq!(save_target(true, false), SaveTarget::Download);
+        assert_eq!(save_target(true, false), SaveTarget::Disk);
         assert_eq!(save_target(false, false), SaveTarget::Download);
     }
 
