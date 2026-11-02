@@ -689,6 +689,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             enter |= expr_row(ui, "Angle", angle);
         }
         Kind::Mirror => {
+            // One plane picked: Distance moves it along its normal. Two planes: the middle one is used.
+            form_row(ui, "Distance", |ui| {
+                enter |= extra_field(ui, &mut d.extra, "distance", "0 mm");
+            });
             // Feature replay retains the source operation; Join is for body copies.
             if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
                 form_row(ui, "Operation", |ui| {

@@ -615,7 +615,7 @@ impl Dialog {
                 d
             }
             "solid.mirror" => {
-                Dialog::new(Kind::Mirror, vec![SelInput::new("Objects", BODIES, true), SelInput::new("Mirror Plane", PLANES | PLANAR_FACES, false)])
+                Dialog::new(Kind::Mirror, vec![SelInput::new("Objects", BODIES, true), SelInput::new("Mirror Plane", PLANES | PLANAR_FACES, false), SelInput::new("Second Plane (middle)", PLANES | PLANAR_FACES, false)])
             }
             "solid.rib" | "solid.web" => Dialog::new(
                 Kind::Rib { web: id == "solid.web", thickness: "2 mm".into(), depth: String::new(), flip: false, normal: false },
@@ -1601,6 +1601,20 @@ fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
             let (_, n) = planar_face(s, body, *index)?;
             Some(json!({"origin": pt(*point), "normal": pt(n)}))
         }
+        _ => None,
+    }
+}
+
+/// A plane or planar face as a point on it and its unit normal.
+fn plane_frame(s: &Session, sel: Option<&Sel>) -> Option<(Vec3, Vec3)> {
+    match sel? {
+        Sel::Plane { name } => match name.as_str() {
+            "XY" => Some((Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0))),
+            "XZ" => Some((Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0))),
+            "YZ" => Some((Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0))),
+            _ => None,
+        },
+        Sel::Face { body, index, point } => planar_face(s, body, *index).map(|(_, n)| (*point, n)),
         _ => None,
     }
 }
@@ -3323,7 +3337,33 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Mirror => {
             need(0, "objects")?;
             need(1, "the mirror plane")?;
-            let plane = plane_value(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
+            let plane = if let Some(second) = sels(d, 2).first() {
+                // Two plates picked: mirror in the plane midway between them.
+                let (o1, n1) = plane_frame(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
+                let (o2, n2) = plane_frame(s, Some(second)).ok_or("the second plane must be a plane or a planar face")?;
+                if n1.dot(n2).abs() < 1.0 - 1e-6 {
+                    return Err("the two planes must be parallel to find the middle".into());
+                }
+                let half = (o2 - o1).dot(n1) * 0.5;
+                if !half.is_finite() {
+                    return Err("the two planes are not valid".into());
+                }
+                json!({"origin": pt(o1 + n1 * half), "normal": pt(n1)})
+            } else {
+                let one = plane_value(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
+                let text = d.extra.get("distance").and_then(Value::as_str).unwrap_or("0");
+                let dist: f64 = if text.trim().is_empty() { 0.0 } else { text.trim().trim_end_matches("mm").trim().parse().map_err(|_| "Distance must be a number in mm".to_string())? };
+                if !dist.is_finite() || dist.abs() > 1.0e6 {
+                    return Err("Distance must be a finite number in mm".into());
+                }
+                if dist == 0.0 {
+                    one
+                } else {
+                    // One plane picked: move it along its normal by the distance.
+                    let (o, n) = plane_frame(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
+                    json!({"origin": pt(o + n * dist), "normal": pt(n)})
+                }
+            };
             let mut p = json!({"plane": plane});
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.mirror", p)
