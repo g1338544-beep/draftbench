@@ -247,6 +247,8 @@ pub struct State {
     mark_tool: bool,
     /// The Erase Centre tool: a click or a dragged frame removes the centre lines and marks it touches.
     erase_tool: bool,
+    /// Whether a view placed from the Base View window shows its hidden lines (dashed).
+    base_dashed: bool,
     /// Centre lines placed between two picked lines (ends on the sheet), and the tool: the lines picked so far.
     clines: Vec<[f32; 4]>,
     /// Rectangles (x0, y0, x1, y1 on the sheet) where centre lines were erased.
@@ -344,6 +346,7 @@ impl Default for State {
             marks: Vec::new(),
             mark_tool: false,
             erase_tool: false,
+            base_dashed: true,
             clines: Vec::new(),
             centre_cut: Vec::new(),
             cl_drag: None,
@@ -985,7 +988,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str) -> Option<Sheet> {
         x: 150.0,
         y: 150.0,
         scale: scale.to_string(),
-        dashed: true,
+        dashed: app.drawing.base_dashed,
         dims: false,
         section: None,
         align: None,
@@ -1397,8 +1400,13 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             refresh(app);
         }
         "drawing.ribbon.hidden" => {
-            let on = !app.drawing.placed.is_empty() && app.drawing.placed.iter().all(|v| v.dashed);
-            app.drawing.placed.iter_mut().for_each(|v| v.dashed = !on);
+            // The selected view only; with none selected, every view.
+            if let Some(v) = app.drawing.selected.and_then(|i| app.drawing.placed.get_mut(i)) {
+                v.dashed = !v.dashed;
+            } else {
+                let on = !app.drawing.placed.is_empty() && app.drawing.placed.iter().all(|v| v.dashed);
+                app.drawing.placed.iter_mut().for_each(|v| v.dashed = !on);
+            }
             refresh(app);
         }
         "drawing.ribbon.scale" => app.drawing.scale_edit = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()),
@@ -1559,6 +1567,7 @@ fn base_window(app: &mut SolveApp, ctx: &egui::Context) {
     let Some((mut view, mut scale)) = app.drawing.base.clone() else { return };
     let mut orient = false;
     let mut close = false;
+    let mut dashed = app.drawing.base_dashed;
     let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_base"), "base", "Base View").show_body(ctx, |ui| {
         ui.label("Model view to use");
         view_buttons(ui, &mut view);
@@ -1567,12 +1576,14 @@ fn base_window(app: &mut SolveApp, ctx: &egui::Context) {
         }
         ui.label("Scale");
         scale_picker(ui, "base_scale", &mut scale);
+        crate::ui_kit::checkbox(ui, "Show hidden lines (dashed)", &mut dashed);
         ui.small("Click the sheet to place the view. Click again for another; Close ends.");
         close = crate::ui_kit::button(ui, "Close", crate::ui_kit::Button::Small).clicked();
     });
     if orient {
         app.drawing.orient = Some(["1".into(), "-1".into(), "1".into()]);
     }
+    app.drawing.base_dashed = dashed;
     app.drawing.base = if closed || close { None } else { Some((view, scale)) };
 }
 
@@ -2230,7 +2241,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let Some((view, scale)) = app.drawing.base.clone()
         && view <= 6
     {
-        let key = format!("{view}|{scale}|{}|{}", app.drawing.paper, app.drawing.first_angle);
+        let key = format!("{view}|{scale}|{}|{}|{}", app.drawing.paper, app.drawing.first_angle, app.drawing.base_dashed);
         if app.drawing.base_preview.as_ref().is_none_or(|(k, _)| *k != key) {
             let made = make_preview(app, view, &scale);
             app.drawing.base_preview = Some((key, made));
@@ -2763,6 +2774,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && response.clicked_by(egui::PointerButton::Primary)
         && let Some(at) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
     {
+        let base_dashed = app.drawing.base_dashed;
         if view == 7 {
             add_model_view(app);
         } else {
@@ -2772,6 +2784,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             v.x = f64::from(at.x);
             v.y = f64::from(at.y);
             v.scale = scale;
+            v.dashed = base_dashed;
         }
         refresh(app);
         return;
