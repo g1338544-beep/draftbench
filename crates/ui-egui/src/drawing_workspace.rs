@@ -57,6 +57,8 @@ struct PlacedView {
     /// Projected from another view: its index, and whether it sits beside it (shares the y
     /// position) rather than above or below it (shares x).
     align: Option<(usize, bool)>,
+    /// A view taken from the 3D window's camera: its yaw and pitch (the view number is then 6).
+    custom: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -202,7 +204,7 @@ impl State {
             designs.insert(
                 design.chars().take(120).collect(),
                 json!({
-                    "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h]))})).collect::<Vec<_>>(),
+                    "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p]))})).collect::<Vec<_>>(),
                     "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text})).collect::<Vec<_>>(),
                     "title": self.title, "number": self.number, "notes": self.notes,
                 }),
@@ -303,6 +305,10 @@ impl State {
                         let axis = a.first()?.as_u64().filter(|n| *n <= 2)? as usize;
                         Some((axis, a.get(1)?.as_str()?.chars().take(12).collect()))
                     }),
+                    custom: v.get("custom").and_then(serde_json::Value::as_array).and_then(|a| {
+                        let (y, p) = (a.first()?.as_f64()?, a.get(1)?.as_f64()?);
+                        (y.is_finite() && p.is_finite()).then_some((y, p))
+                    }),
                     align: v.get("align").and_then(serde_json::Value::as_array).and_then(|a| {
                         Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?))
                     }),
@@ -350,6 +356,10 @@ fn params(st: &State) -> Value {
                 "dims": v.dims,
                 "center": st.centre,
             });
+            if let Some((yaw, pitch)) = v.custom {
+                o["yaw"] = json!(yaw);
+                o["pitch"] = json!(pitch);
+            }
             if let Some((parent, horizontal)) = v.align {
                 o["align"] = json!([parent, horizontal]);
                 if v.scale.trim().is_empty() {
@@ -470,7 +480,10 @@ fn parse(v: &Value) -> Option<Sheet> {
 fn begin(app: &mut SolveApp) {
     let mut steps = vec!["scene".to_string()];
     for v in &app.drawing.placed {
-        let name = VIEWS[v.view.min(6)].0.to_string();
+        let name = match v.custom {
+            Some((yaw, pitch)) => format!("custom:{yaw:.5}:{pitch:.5}"),
+            None => VIEWS[v.view.min(6)].0.to_string(),
+        };
         if !steps.contains(&name) {
             steps.push(name);
         }
@@ -526,6 +539,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         dims: true,
         section: None,
         align: None,
+        custom: None,
     });
     app.drawing.selected = Some(n);
     begin(app);
@@ -627,6 +641,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
         "drawing.ribbon.top" => add_view(app, 1),
         "drawing.ribbon.right" => add_view(app, 2),
         "drawing.ribbon.iso" => add_view(app, 6),
+        "drawing.ribbon.model" => add_model_view(app),
         "drawing.ribbon.dimension" => app.drawing.dim_tool = Some((0, Vec::new())),
         "drawing.ribbon.centre" => {
             app.drawing.centre = !app.drawing.centre;
@@ -666,6 +681,16 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
         "drawing.ribbon.close" => leave(app),
         _ => {}
     }
+}
+
+/// A view as the 3D window showed the model when Drawing was entered.
+fn add_model_view(app: &mut SolveApp) {
+    let Some((cam, _)) = app.drawing.design_camera else { return };
+    add_view(app, 6);
+    if let Some(v) = app.drawing.placed.last_mut() {
+        v.custom = Some((cam.yaw, cam.pitch));
+    }
+    begin(app);
 }
 
 /// A flat top-down orthographic camera on the sheet: pan and zoom only.
@@ -822,7 +847,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     });
                     for i in 0..app.drawing.placed.len() {
-                        let name = VIEWS[app.drawing.placed[i].view.min(6)].1;
+                        let name = if app.drawing.placed[i].custom.is_some() { "Model view (as in 3D)" } else { VIEWS[app.drawing.placed[i].view.min(6)].1 };
                         let selected = app.drawing.selected == Some(i);
                         if ui.add(egui::Button::selectable(selected, format!("{}. {name}", i + 1))).clicked() {
                             app.drawing.selected = Some(i);
@@ -1358,6 +1383,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dims: true,
                     section: None,
                     align: Some((parent, horizontal)),
+                    custom: None,
                 });
                 app.drawing.selected = Some(n);
                 app.drawing.proj_tool = None;

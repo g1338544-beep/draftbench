@@ -260,7 +260,7 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "RENDER", panel: "SCENE", promoted: 2, ids: &["render.scene"] },
     Section { tab: "RENDER", panel: "IMAGE", promoted: 1, ids: &["render.start"] },
-    Section { tab: "DRAWING", panel: "VIEWS", promoted: 5, ids: &["drawing.ribbon.front", "drawing.ribbon.top", "drawing.ribbon.right", "drawing.ribbon.iso", "drawing.ribbon.projected"] },
+    Section { tab: "DRAWING", panel: "VIEWS", promoted: 6, ids: &["drawing.ribbon.front", "drawing.ribbon.top", "drawing.ribbon.right", "drawing.ribbon.iso", "drawing.ribbon.model", "drawing.ribbon.projected"] },
     Section { tab: "DRAWING", panel: "ANNOTATE", promoted: 2, ids: &["drawing.ribbon.dimension", "drawing.ribbon.centre"] },
     Section { tab: "DRAWING", panel: "EDIT", promoted: 3, ids: &["drawing.ribbon.hidden", "drawing.ribbon.scale", "drawing.ribbon.delete"] },
     Section { tab: "DRAWING", panel: "SHEET", promoted: 3, ids: &["drawing.ribbon.fit", "drawing.ribbon.export", "drawing.ribbon.close"] },

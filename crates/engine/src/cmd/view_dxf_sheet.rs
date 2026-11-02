@@ -121,6 +121,11 @@ fn manual(
     for (index, item) in list.iter().take(12).enumerate() {
         let name = item.get("view").and_then(Value::as_str).ok_or_else(|| bad(CMD, "each placement needs a view"))?;
         let view = StandardView::parse(name).ok_or_else(|| bad(CMD, format!("unknown view `{name}`")))?;
+        // A view taken from the model's own camera (what the 3D window shows): its angles.
+        let custom = match (item.get("yaw").and_then(Value::as_f64), item.get("pitch").and_then(Value::as_f64)) {
+            (Some(y), Some(p)) if y.is_finite() && p.is_finite() => Some((y, p)),
+            _ => None,
+        };
         let dashed = match item.get("hidden").and_then(Value::as_str).unwrap_or("omit") {
             "dashed" => true,
             "omit" => false,
@@ -140,7 +145,7 @@ fn manual(
         let mut section_at = 0.0;
         let all = if let Some((axis, at)) = section {
             section_at = at.unwrap_or_else(|| middle(scene, axis));
-            let cut = cut_outline(scene, view, axis, section_at);
+            let cut = cut_outline(scene, custom.unwrap_or_else(|| view.angles()), axis, section_at);
             if cut.is_empty() {
                 return Err(bad(CMD, "the section plane does not cut any visible body"));
             }
@@ -153,7 +158,7 @@ fn manual(
             }
             std::rc::Rc::new(Projected { lines: cut.into_iter().map(|(a, b)| (a, b, false)).collect(), lo, hi })
         } else {
-            view_lines(scene, parts, view, key)?
+            view_lines(scene, parts, view, custom, key)?
         };
         if all.lo.x > all.hi.x {
             continue;
@@ -270,7 +275,7 @@ fn manual(
         }
         let caption = match section {
             Some((axis, _)) => format!("Section {}={}  {}", ["X", "Y", "Z"].get(axis).copied().unwrap_or("?"), trim_mm(section_at), ratio_label(scale)),
-            None => format!("{}  {}", view_name(view), ratio_label(scale)),
+            None => format!("{}  {}", if custom.is_some() { "Model view" } else { view_name(view) }, ratio_label(scale)),
         };
         text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, caption, &mut entities);
         scales.insert(index, scale);
@@ -370,8 +375,7 @@ fn middle(scene: &meshes::Scene, axis: usize) -> f64 {
 }
 
 /// Where the plane `axis = at` cuts the bodies, projected with `view`: loose segments.
-fn cut_outline(scene: &meshes::Scene, view: StandardView, axis: usize, at: f64) -> Vec<(Vec2, Vec2)> {
-    let (yaw, pitch) = view.angles();
+fn cut_outline(scene: &meshes::Scene, (yaw, pitch): (f64, f64), axis: usize, at: f64) -> Vec<(Vec2, Vec2)> {
     let cam = Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
     let (right, up, _) = cam.basis();
     let along = |v: Vec3| match axis {
@@ -520,7 +524,7 @@ fn build(s: &mut Session, p: &Value) -> Result<Built> {
     // so a view computed once, e.g. by `warm`, costs nothing the next time).
     let mut placed: Vec<Placed> = Vec::new();
     for view in &views {
-        let all = view_lines(&scene, &parts, *view, key)?;
+        let all = view_lines(&scene, &parts, *view, None, key)?;
         if all.lo.x > all.hi.x {
             continue; // nothing visible from this side
         }
@@ -767,7 +771,7 @@ struct Cache {
     key: Option<Key>,
     scene: Option<std::rc::Rc<meshes::Scene>>,
     parts: Option<std::rc::Rc<Vec<sketch::Part>>>,
-    views: std::collections::BTreeMap<&'static str, std::rc::Rc<Projected>>,
+    views: std::collections::BTreeMap<String, std::rc::Rc<Projected>>,
 }
 
 thread_local! {
@@ -799,15 +803,23 @@ fn scene_and_parts(s: &Session, tolerance: f64, key: Key) -> Result<(std::rc::Rc
     Ok((scene, parts))
 }
 
-fn view_lines(scene: &meshes::Scene, parts: &[sketch::Part], view: StandardView, key: Key) -> Result<std::rc::Rc<Projected>> {
-    let name = view_name(view);
+/// The key a view is kept under: its name, or its angles for a view taken from the model's camera.
+fn view_key(view: StandardView, custom: Option<(f64, f64)>) -> String {
+    match custom {
+        Some((yaw, pitch)) => format!("custom:{yaw:.5}:{pitch:.5}"),
+        None => view_name(view).to_string(),
+    }
+}
+
+fn view_lines(scene: &meshes::Scene, parts: &[sketch::Part], view: StandardView, custom: Option<(f64, f64)>, key: Key) -> Result<std::rc::Rc<Projected>> {
+    let name = view_key(view, custom);
     if let Some(found) = CACHE.with(|c| {
         let c = c.borrow();
-        if c.key == Some(key) { c.views.get(name).cloned() } else { None }
+        if c.key == Some(key) { c.views.get(&name).cloned() } else { None }
     }) {
         return Ok(found);
     }
-    let (yaw, pitch) = view.angles();
+    let (yaw, pitch) = custom.unwrap_or_else(|| view.angles());
     let cam = Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
     let drawing = projection::drawing(scene, parts, &cam).map_err(|e| bad(CMD, e))?;
     let mut lines: Vec<(Vec2, Vec2, bool)> = Vec::new();
@@ -844,9 +856,13 @@ fn warm(s: &mut Session, p: &Value) -> Result<Value> {
     let key = cache_key(s, tolerance);
     let (scene, parts) = scene_and_parts(s, tolerance, key)?;
     let stage = str_(p, "warm").unwrap_or("scene");
-    if stage != "scene" {
+    if let Some(angles) = stage.strip_prefix("custom:") {
+        let mut it = angles.split(':').filter_map(|v| v.parse::<f64>().ok().filter(|x| x.is_finite()));
+        let (Some(yaw), Some(pitch)) = (it.next(), it.next()) else { return Err(bad(PREVIEW, "bad model view")) };
+        view_lines(&scene, &parts, StandardView::Iso, Some((yaw, pitch)), key)?;
+    } else if stage != "scene" {
         let view = StandardView::parse(stage).ok_or_else(|| bad(PREVIEW, format!("unknown view `{stage}`")))?;
-        view_lines(&scene, &parts, view, key)?;
+        view_lines(&scene, &parts, view, None, key)?;
     }
     Ok(json!({"warmed": stage}))
 }
