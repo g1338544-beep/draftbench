@@ -79,6 +79,8 @@ struct PlacedView {
     align: Option<(usize, bool)>,
     /// A view taken from the 3D window's camera: its yaw and pitch (the view number is then 6).
     custom: Option<(f64, f64)>,
+    /// Quarter turns (counter-clockwise) the view is turned on the sheet: a side view beside the top view.
+    rot: u8,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -277,7 +279,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p]))})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -437,6 +439,7 @@ impl State {
                     align: v.get("align").and_then(serde_json::Value::as_array).and_then(|a| {
                         Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?))
                     }),
+                    rot: v.get("rot").and_then(serde_json::Value::as_u64).map_or(0, |n| (n % 4) as u8),
                 });
             }
         }
@@ -648,6 +651,9 @@ fn params(st: &State) -> Value {
                 "dims": v.dims,
                 "center": st.centre,
             });
+            if v.rot % 4 != 0 {
+                o["rot"] = json!(v.rot % 4);
+            }
             if let Some((yaw, pitch)) = v.custom {
                 o["yaw"] = json!(yaw);
                 o["pitch"] = json!(pitch);
@@ -832,11 +838,12 @@ fn add_view(app: &mut SolveApp, view: usize) {
         x: f64::from(w * (0.22 + 0.28 * col)),
         y: f64::from(h * (0.68 - 0.3 * row.min(1.0))),
         scale: String::new(),
-        dashed: false,
+        dashed: true,
         dims: true,
         section: None,
         align: None,
         custom: None,
+        rot: 0,
     });
     app.drawing.selected = Some(n);
     begin(app);
@@ -2250,6 +2257,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     section: None,
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
+                    rot: if free && matches!(view, 2 | 3) && app.drawing.placed.get(parent).is_some_and(|v| matches!(v.view, 1 | 5)) { if dx >= 0.0 { 1 } else { 3 } } else { 0 },
                 });
                 app.drawing.selected = Some(n);
                 app.drawing.proj_tool = None;
@@ -2286,10 +2294,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 sheet
                     .items
                     .iter()
-                    .filter_map(|(l, sh)| match (l, sh) {
-                        (Layer::Visible | Layer::Hidden, Shape::Line(a, b)) => Some((dist_to_segment(c, (*a, *b)), (*a, *b))),
-                        _ => None,
+                    .flat_map(|(l, sh)| -> Vec<(Pos2, Pos2)> {
+                        match (l, sh) {
+                            (Layer::Visible | Layer::Hidden, Shape::Line(a, b)) => vec![(*a, *b)],
+                            (Layer::Visible | Layer::Hidden, Shape::Poly(pts)) => pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).collect(),
+                            _ => Vec::new(),
+                        }
                     })
+                    .map(|seg| (dist_to_segment(c, seg), seg))
                     .filter(|(d, _)| *d <= tol)
                     .min_by(|x, y| x.0.total_cmp(&y.0))
                     .map(|(_, seg)| seg)
