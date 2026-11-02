@@ -637,9 +637,9 @@ mod tests {
 
     #[test]
     fn the_save_dialog_offers_the_type_of_the_name() {
-        assert_eq!(save_type("Plate.solidcraft").2, ".solidcraft");
+        assert_eq!(save_type("Plate.draftnew").2, ".draftnew");
         assert_eq!(save_type("Plate.JSON").2, ".json");
-        assert_eq!(save_type("Plate").2, ".solidcraft");
+        assert_eq!(save_type("Plate").2, ".draftnew");
     }
 
     #[test]
