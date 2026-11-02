@@ -83,6 +83,8 @@ struct PlacedView {
     rot: u8,
     /// The caption under the view: `None` = the automatic one (name and scale), an empty text hides it.
     label: Option<String>,
+    /// Drawn in 3D colour behind its lines (the 3D View button): same place and scale as the view.
+    colour: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -119,11 +121,13 @@ struct ShadedView {
     style: u8,
     /// How close the camera sits: smaller fills the frame more.
     zoom: f32,
+    /// Half the picture's height in model mm (a view's colour picture at the view's scale); 0 = use `zoom`.
+    world_half: f32,
 }
 
 impl ShadedView {
     fn new(x: f32, y: f32, w: f32, yaw: f64, pitch: f64) -> Self {
-        ShadedView { x, y, w, yaw, pitch, ratio: 0.75, bg: 0, style: 0, zoom: 0.8 }
+        ShadedView { x, y, w, yaw, pitch, ratio: 0.75, bg: 0, style: 0, zoom: 0.8, world_half: 0.0 }
     }
 }
 
@@ -442,7 +446,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -616,6 +620,7 @@ impl State {
                     }),
                     rot: v.get("rot").and_then(serde_json::Value::as_u64).map_or(0, |n| (n % 4) as u8),
                     label: v.get("label").and_then(serde_json::Value::as_str).map(|t| t.chars().take(80).collect()),
+                    colour: v.get("colour").and_then(serde_json::Value::as_bool).unwrap_or(false),
                 });
             }
         }
@@ -721,7 +726,7 @@ impl State {
 
 /// Where the picture of a shaded view is kept: its camera, size and the state of the design.
 fn shaded_key(app: &SolveApp, v: &ShadedView) -> String {
-    format!("{:.4}/{:.4}/{:.0}/{:.3}/{}/{}/{:.3}/{}", v.yaw, v.pitch, v.w, v.ratio, v.bg, v.style, v.zoom, app.session.log.len())
+    format!("{:.4}/{:.4}/{:.2}/{:.3}/{}/{}/{:.3}/{:.3}/{}", v.yaw, v.pitch, v.w, v.ratio, v.bg, v.style, v.zoom, v.world_half, app.session.log.len())
 }
 
 /// The picture of a shaded view, drawn now if it is not in the cache. One CPU render of the whole
@@ -739,7 +744,12 @@ fn shaded_picture(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
     cam.yaw = v.yaw;
     cam.pitch = v.pitch;
     cam.fit(&bounds);
-    cam.distance *= f64::from(v.zoom.clamp(0.2, 3.0));
+    if v.world_half > 0.0 {
+        // Orthographic: the picture's half height is 0.4 of the distance.
+        cam.distance = f64::from(v.world_half) / 0.4;
+    } else {
+        cam.distance *= f64::from(v.zoom.clamp(0.2, 3.0));
+    }
     let mut scene = solidcraft_engine::view::scene_with_guides(&app.session, &cam, None, solidcraft_engine::view::Guides { grid: false, axes: false });
     match v.style {
         1 => scene.lines.clear(),
@@ -759,16 +769,59 @@ fn shaded_picture(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
     };
     let picture: Picture = std::sync::Arc::new((canvas.rgba.clone(), canvas.w, canvas.h));
     app.drawing.shaded_cache.retain(|c| !c.0.ends_with(&format!("/{}", app.session.log.len())) || c.0 != key);
-    if app.drawing.shaded_cache.len() >= 10 {
+    if app.drawing.shaded_cache.len() >= 16 {
         app.drawing.shaded_cache.remove(0);
     }
     app.drawing.shaded_cache.push((key, picture.clone(), None));
     Some(picture)
 }
 
+/// The camera angles of a placed view.
+fn view_angles(v: &PlacedView) -> (f64, f64) {
+    use solidcraft_engine::render::StandardView as Sv;
+    match (v.custom, v.view) {
+        (Some(c), _) => c,
+        (None, 0) => Sv::Front.angles(),
+        (None, 1) => Sv::Top.angles(),
+        (None, 2) => Sv::Right.angles(),
+        (None, 3) => Sv::Left.angles(),
+        (None, 4) => Sv::Back.angles(),
+        (None, 5) => Sv::Bottom.angles(),
+        _ => Sv::Iso.angles(),
+    }
+}
+
+/// The 3D colour pictures of views that have it on: each sits on its view's box at the view's
+/// scale, so it moves and rescales with the view. Turned and section views have none.
+fn colour_views(app: &SolveApp) -> Vec<(usize, ShadedView)> {
+    let Some(sh) = app.drawing.sheet.as_ref() else { return Vec::new() };
+    app.drawing
+        .placed
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.colour && p.rot == 0 && p.section.is_none())
+        .filter_map(|(i, p)| {
+            let b = sh.boxes.iter().find(|b| b.0 == i)?;
+            let k = sh.scales.iter().find(|s| s.0 == i)?.1;
+            if !(k.is_finite() && k > 0.0) || !(b.3.is_finite() && b.4.is_finite()) {
+                return None;
+            }
+            let (fw, fh) = ((b.3 * 1.1).max(5.0), (b.4 * 1.1).max(5.0));
+            let (yaw, pitch) = view_angles(p);
+            let mut v = ShadedView::new(b.1, b.2, fw, yaw, pitch);
+            v.ratio = fh / fw;
+            v.bg = 2;
+            v.style = 1;
+            v.world_half = fh / 2.0 / k;
+            Some((i, v))
+        })
+        .collect()
+}
+
 /// Draw one missing picture per frame and give each its texture.
 fn ensure_shaded(app: &mut SolveApp, ctx: &egui::Context) {
-    let views = app.drawing.shaded.clone();
+    let mut views = app.drawing.shaded.clone();
+    views.extend(colour_views(app).into_iter().map(|(_, v)| v));
     let mut pending = false;
     for v in &views {
         let key = shaded_key(app, v);
@@ -1071,6 +1124,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         custom: None,
         rot: 0,
         label: None,
+        colour: false,
     });
     app.drawing.selected = Some(n);
     begin(app);
@@ -1091,6 +1145,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         custom: None,
         rot,
         label: None,
+        colour: false,
     });
     let mut p = params(&app.drawing);
     app.drawing.placed.pop();
@@ -1507,33 +1562,18 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             refresh(app);
         }
         "drawing.ribbon.view3d" => {
-            use solidcraft_engine::render::StandardView as Sv;
-            let picked = app.drawing.selected.filter(|i| *i < app.drawing.placed.len());
-            let boxed = picked.and_then(|i| app.drawing.sheet.as_ref().and_then(|sh| sh.boxes.iter().find(|b| b.0 == i).copied()));
-            match (picked, boxed) {
-                (Some(i), Some(b)) if app.drawing.shaded.len() < 6 => {
-                    let v = &app.drawing.placed[i];
-                    let angles = match (v.custom, v.view) {
-                        (Some(c), _) => c,
-                        (None, 0) => Sv::Front.angles(),
-                        (None, 1) => Sv::Top.angles(),
-                        (None, 2) => Sv::Right.angles(),
-                        (None, 3) => Sv::Left.angles(),
-                        (None, 4) => Sv::Back.angles(),
-                        (None, 5) => Sv::Bottom.angles(),
-                        _ => Sv::Iso.angles(),
-                    };
-                    // A picture frame about the size of the view's, close enough for the model to fill it
-                    // (Zoom and Height in the panel change it).
-                    let width = (b.3.max(b.4) * 1.1).clamp(60.0, 600.0);
-                    let mut pic = ShadedView::new(b.1, b.2, width, angles.0, angles.1);
-                    pic.bg = 1;
-                    pic.zoom = 0.5;
-                    app.drawing.shaded.push(pic);
-                    remove_view(app, i);
-                    refresh(app);
+            // 3D View: the selected view in 3D colour, where it is (again to turn it off).
+            match app.drawing.selected.filter(|i| *i < app.drawing.placed.len()) {
+                Some(i) => {
+                    let unsupported = app.drawing.placed.get(i).is_some_and(|v| v.rot != 0 || v.section.is_some());
+                    if unsupported {
+                        app.set_status("3D colour is not available for a turned or section view".to_string(), true);
+                    } else if let Some(v) = app.drawing.placed.get_mut(i) {
+                        v.colour = !v.colour;
+                        refresh(app);
+                    }
                 }
-                _ => add_shaded_view(app),
+                None => app.set_status("Select a view first, then 3D View".to_string(), true),
             }
         }
         "drawing.ribbon.scale" => app.drawing.scale_edit = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()),
@@ -1705,7 +1745,7 @@ fn base_window(app: &mut SolveApp, ctx: &egui::Context) {
         ui.label("Scale");
         scale_picker(ui, "base_scale", &mut scale);
         crate::ui_kit::checkbox(ui, "Show hidden lines (dashed)", &mut dashed);
-        crate::ui_kit::checkbox(ui, "Colour 3D picture (shaded, not in DXF)", &mut shaded);
+        crate::ui_kit::checkbox(ui, "3D colour (shaded, not in DXF)", &mut shaded);
         ui.small("Click the sheet to place the view. Click again for another; Close ends.");
         close = crate::ui_kit::button(ui, "Close", crate::ui_kit::Button::Small).clicked();
     });
@@ -2448,7 +2488,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if app.drawing.cline_tool.is_none()
         && let Some((view, scale)) = app.drawing.base.clone()
         && view <= 6
-        && !app.drawing.base_shaded
     {
         let key = format!("{view}|{scale}|{}|{}|{}", app.drawing.paper, app.drawing.first_angle, app.drawing.base_dashed);
         if app.drawing.base_preview.as_ref().is_none_or(|(k, _)| *k != key) {
@@ -2947,6 +2986,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         Layer::Text => Stroke::new(1.0, Color32::BLACK),
         Layer::Center => Stroke::new(1.0, colour_of(cols[2])),
     };
+    // 3D colour views: the picture under the view's lines.
+    for (_, v) in colour_views(app) {
+        let key = shaded_key(app, &v);
+        if let Some(tex) = app.drawing.shaded_cache.iter().find(|c| c.0 == key).and_then(|c| c.2.as_ref()) {
+            let h = v.w * v.ratio;
+            let r = Rect::from_two_pos(map(pos2(v.x - v.w / 2.0, v.y + h / 2.0)), map(pos2(v.x + v.w / 2.0, v.y - h / 2.0)));
+            painter.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+    }
     for (layer, shape) in &sheet.items {
         let s = stroke(*layer);
         match shape {
@@ -3067,6 +3115,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
                     label: None,
+                    colour: false,
                     rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
                         (true, 2 | 3, 1 | 5) => if dx >= 0.0 { 1 } else { 3 },
                         (true, 1 | 5, 2 | 3) => if dy >= 0.0 { 1 } else { 3 },
@@ -3085,7 +3134,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && view <= 6
     {
         if let Some(at) = response.hover_pos().and_then(|q| m.to_sheet(q))
-            && !app.drawing.base_shaded
             && let Some((_, Some(pv))) = &app.drawing.base_preview
         {
             paint_preview(&painter, &m, pv, at);
@@ -3098,27 +3146,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let Some(at) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
     {
         let base_dashed = app.drawing.base_dashed;
-        if app.drawing.base_shaded {
-            // A colour picture from the chosen direction, as the 3D window would show it.
-            use solidcraft_engine::render::StandardView as Sv;
-            let (yaw, pitch) = match view {
-                0 => Sv::Front.angles(),
-                1 => Sv::Top.angles(),
-                2 => Sv::Right.angles(),
-                3 => Sv::Left.angles(),
-                4 => Sv::Back.angles(),
-                5 => Sv::Bottom.angles(),
-                6 => Sv::Iso.angles(),
-                _ => app.drawing.design_camera.map_or_else(|| Sv::Iso.angles(), |(c, _)| (c.yaw, c.pitch)),
-            };
-            if app.drawing.shaded.len() < 6 {
-                let sw = app.drawing.sheet.as_ref().map_or(420.0, |sh| sh.width);
-                let mut v = ShadedView::new(at.x, at.y, (sw * 0.3).clamp(40.0, 300.0), yaw, pitch);
-                v.bg = 1;
-                app.drawing.shaded.push(v);
-            }
-            return;
-        }
+        let base_shaded = app.drawing.base_shaded;
         if view == 7 {
             add_model_view(app);
         } else {
@@ -3129,6 +3157,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             v.y = f64::from(at.y);
             v.scale = scale;
             v.dashed = base_dashed;
+            v.colour = base_shaded;
         }
         refresh(app);
         return;
@@ -3678,7 +3707,8 @@ fn sheet_page(sheet: &Sheet, cols: [u8; 4], images: Vec<(Picture, [f32; 4])>) ->
 
 /// The colour pictures on the sheet on screen, drawn if need be, with where each sits on the paper.
 fn pdf_images(app: &mut SolveApp) -> Vec<(Picture, [f32; 4])> {
-    let views = app.drawing.shaded.clone();
+    let mut views = colour_views(app).into_iter().map(|(_, v)| v).collect::<Vec<_>>();
+    views.extend(app.drawing.shaded.iter().copied());
     views
         .iter()
         .filter_map(|v| {
