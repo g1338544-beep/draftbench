@@ -1240,7 +1240,8 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
         angle += 180.0;
         up = Vec2::new(-up.x, -up.y);
     }
-    let centre = Vec2::new((p1.x + p2.x) / 2.0 + up.x * 1.2, (p1.y + p2.y) / 2.0 + up.y * 1.2);
+    let slide = d.get("slide").and_then(Value::as_f64).filter(|v| v.is_finite()).unwrap_or(0.0).clamp(-5000.0, 5000.0);
+    let centre = Vec2::new((p1.x + p2.x) / 2.0 + dir.x * slide + up.x * 1.2, (p1.y + p2.y) / 2.0 + dir.y * slide + up.y * 1.2);
     entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: centre, height: th, angle_deg: angle.rem_euclid(360.0), text: text_value } });
 }
 
