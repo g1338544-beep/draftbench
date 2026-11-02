@@ -140,6 +140,10 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         rows.push(("Density", format!("{:.3} g/cm³", number(b, "density_g_cm3"))));
     }
     rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));
+    if total.get("mass_kg").is_some() {
+        rows.push(("Mass (kg)", format!("{:.4} kg", number(total, "mass_kg"))));
+        rows.push(("Weight", format!("{:.3} N", number(total, "weight_n"))));
+    }
     rows.push(("Volume", crate::prefs::show_mm(app, number(total, "volume_mm3"), 3)));
     rows.push(("Area", crate::prefs::show_mm(app, number(total, "area_mm2"), 2)));
     let geometry = if total.get("center_of_mass").is_some() { Some(total) } else { bodies.first().filter(|_| bodies.len() == 1) };
@@ -155,6 +159,11 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
                 a.iter().zip(z).map(|(a, z)| crate::prefs::show_mm_bare(app, z.as_f64().unwrap_or(0.0) - a.as_f64().unwrap_or(0.0))).collect();
             rows.push(("Bounding box", format!("{} {unit}", d.join(" × "))));
         }
+    }
+    if let Some(i) = total.get("inertia_kg_mm2").and_then(Value::as_array) {
+        let n = |k: usize| i.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
+        rows.push(("Moments of inertia (kg·mm², about center of mass)", format!("Ixx {:.3}  Iyy {:.3}  Izz {:.3}", n(0), n(1), n(2))));
+        rows.push(("Products of inertia (kg·mm²)", format!("Ixy {:.3}  Iyz {:.3}  Ixz {:.3}", n(3), n(4), n(5))));
     }
     rows.push(("Faces / edges / vertices", format!("{} / {} / {}", total["faces"], total["edges"], total["vertices"])));
     let heading = crate::i18n::format("properties.title", &[("name", &title)]);

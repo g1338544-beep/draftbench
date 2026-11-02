@@ -894,6 +894,13 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() {
             return;
         }
+        if id == "inspect.mass_properties" {
+            match self.session.execute(id, &json!({})) {
+                Ok(v) => self.menu.props = Some(("Mass properties".into(), v)),
+                Err(e) => self.set_status(e.to_string(), true),
+            }
+            return;
+        }
         if id.starts_with("drawing.ribbon.") {
             drawing_workspace::ribbon(self, id);
             return;

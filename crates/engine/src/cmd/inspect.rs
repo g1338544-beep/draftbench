@@ -1,6 +1,7 @@
 //! Inspection: measure bodies, describe the document, sketches and model topology.
 
 use serde_json::{Value, json};
+use solidcraft_geom::Vec3;
 use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
@@ -14,6 +15,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("I")
         .noundo()
         .params("bodies?: [names] (default all); or items: [1-2 selections] → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+    CommandSpec::new("inspect.mass_properties", "Mass Properties", measure).at("SOLID", "INSPECT").icon("measure").noundo().params(
+        "bodies?: [names] (default all). Volume, area, mass (g and kg), weight (N), centre of mass and the moments of inertia (kg·mm², about the centre of mass) of each body and in total, from each body's material",
+    ),
     CommandSpec::new("document.inspect", "Inspect Design", inspect).icon("inspect").noundo().params("measure?: bool (include body measurements)"),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).icon("inspect").noundo().params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", model_edges).icon("inspect").noundo().params("body: name"),
@@ -92,6 +96,13 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b["material"] = json!(s.doc.materials.get(source).cloned().unwrap_or_else(|| "Default".into()));
             b["density_g_cm3"] = json!(rho);
             b["mass_g"] = json!(v * rho / 1000.0);
+            b["mass_kg"] = json!(v * rho / 1.0e6);
+            b["weight_n"] = json!(v * rho / 1.0e6 * 9.80665);
+            let raw = second_moments(&body.mesh());
+            b["raw_moments"] = json!(raw);
+            let m = v * rho * 1.0e-6;
+            let c = b["center_of_mass"].as_array().map(|a| [0, 1, 2].map(|i| a.get(i).and_then(Value::as_f64).unwrap_or(0.0))).unwrap_or([0.0; 3]);
+            b["inertia_kg_mm2"] = json!(inertia_about(&raw, rho * 1.0e-6, m, c));
         }
     }
     if !want.is_empty() && bodies.len() != want.len() {
@@ -132,9 +143,64 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let te: u64 = bodies.iter().filter_map(|b| b["edges"].as_u64()).sum();
     let tvx: u64 = bodies.iter().filter_map(|b| b["vertices"].as_u64()).sum();
     let tm: f64 = bodies.iter().filter_map(|b| b["mass_g"].as_f64()).sum();
-    Ok(
-        json!({"body_count": bodies.len(), "bodies": bodies, "total": {"volume_mm3": tv, "area_mm2": ta, "mass_g": tm, "faces": tf, "edges": te, "vertices": tvx}}),
-    )
+    // Totals about the common centre of mass: each body's moments about the origin, in its own density.
+    let mut sum = [0.0f64; 6];
+    let (mut mass_kg, mut first) = (0.0f64, Vec3::ZERO);
+    for b in &bodies {
+        let (Some(raw), Some(m), Some(c)) = (b["raw_moments"].as_array(), b["mass_kg"].as_f64(), b["center_of_mass"].as_array()) else { continue };
+        let rho = b["density_g_cm3"].as_f64().unwrap_or(0.0) * 1.0e-6;
+        for (k, slot) in sum.iter_mut().enumerate() {
+            *slot += raw.get(k).and_then(Value::as_f64).unwrap_or(0.0) * rho;
+        }
+        let c = Vec3::new(c.first().and_then(Value::as_f64).unwrap_or(0.0), c.get(1).and_then(Value::as_f64).unwrap_or(0.0), c.get(2).and_then(Value::as_f64).unwrap_or(0.0));
+        first += c * m;
+        mass_kg += m;
+    }
+    let centre = if mass_kg > 0.0 { first / mass_kg } else { Vec3::ZERO };
+    let total_inertia = inertia_from(sum, mass_kg, [centre.x, centre.y, centre.z]);
+    for b in &mut bodies {
+        if let Some(o) = b.as_object_mut() {
+            o.remove("raw_moments");
+        }
+    }
+    Ok(json!({"body_count": bodies.len(), "bodies": bodies, "total": {"volume_mm3": tv, "area_mm2": ta, "mass_g": tm, "mass_kg": mass_kg, "weight_n": mass_kg * 9.80665, "center_of_mass": [centre.x, centre.y, centre.z], "inertia_kg_mm2": total_inertia, "faces": tf, "edges": te, "vertices": tvx}}))
+}
+
+/// The volume integrals of a closed mesh (mm): ∫x², ∫y², ∫z², ∫xy, ∫yz, ∫xz, about the origin,
+/// from the tetrahedra the triangles make with it.
+fn second_moments(mesh: &solidcraft_geom::Mesh) -> [f64; 6] {
+    let mut m = [0.0f64; 6];
+    for t in &mesh.triangles {
+        let Some([a, b, c]) = mesh.tri(t) else { continue };
+        let v = a.dot(b.cross(c)) / 6.0;
+        let q = |i: fn(Vec3) -> f64, j: fn(Vec3) -> f64| v / 20.0 * (i(a) * j(a) + i(b) * j(b) + i(c) * j(c) + (i(a) + i(b) + i(c)) * (j(a) + j(b) + j(c)));
+        let (x, y, z): (fn(Vec3) -> f64, fn(Vec3) -> f64, fn(Vec3) -> f64) = (|p| p.x, |p| p.y, |p| p.z);
+        m[0] += q(x, x);
+        m[1] += q(y, y);
+        m[2] += q(z, z);
+        m[3] += q(x, y);
+        m[4] += q(y, z);
+        m[5] += q(x, z);
+    }
+    m
+}
+
+/// Moments of inertia [Ixx, Iyy, Izz, Ixy, Iyz, Ixz] (products with the sign of the tensor) about
+/// the centre `c`, from the raw integrals, the density in kg/mm³ and the mass in kg.
+fn inertia_about(raw: &[f64; 6], rho: f64, mass: f64, c: [f64; 3]) -> [f64; 6] {
+    inertia_from((*raw).map(|v| v * rho), mass, c)
+}
+
+fn inertia_from(m: [f64; 6], mass: f64, c: [f64; 3]) -> [f64; 6] {
+    let (xx, yy, zz, xy, yz, xz) = (m[0], m[1], m[2], m[3], m[4], m[5]);
+    [
+        yy + zz - mass * (c[1] * c[1] + c[2] * c[2]),
+        xx + zz - mass * (c[0] * c[0] + c[2] * c[2]),
+        xx + yy - mass * (c[0] * c[0] + c[1] * c[1]),
+        -(xy - mass * c[0] * c[1]),
+        -(yz - mass * c[1] * c[2]),
+        -(xz - mass * c[0] * c[2]),
+    ]
 }
 
 fn sketch_json(s: &Session, id: u64) -> Option<Value> {
