@@ -194,12 +194,37 @@ fn manual(
         let (x, y) = (num("x", sheet_w / 2.0), num("y", sheet_h / 2.0 + TITLE_H / 2.0));
         let c = Vec2::new((all.lo.x + all.hi.x) / 2.0, (all.lo.y + all.hi.y) / 2.0);
         let to_sheet = |q: Vec2| Vec2::new(x + (q.x - c.x) * scale, y + (q.y - c.y) * scale);
+        // A hole's rim arrives as many short chords: draw each round loop as one circle, which
+        // keeps it smooth at any zoom and gives it a centre to snap to.
+        let (seen, hid) = if section.is_none() {
+            (
+                loops(all.lines.iter().filter(|l| !l.2).map(|l| (l.0, l.1)).collect()),
+                if dashed { loops(all.lines.iter().filter(|l| l.2).map(|l| (l.0, l.1)).collect()) } else { Vec::new() },
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        let on_loop = |set: &[(Vec2, f64)], a: Vec2, b: Vec2| {
+            set.iter().any(|(c, r)| {
+                let tol = 1e-3 * r + 1e-9;
+                (a.dist(*c) - r).abs() <= tol && (b.dist(*c) - r).abs() <= tol && a.dist(b) <= 0.8 * r
+            })
+        };
         for (a, b, hidden) in all.lines.iter() {
             if *hidden && !dashed {
                 continue;
             }
+            if on_loop(if *hidden { &hid } else { &seen }, *a, *b) {
+                continue;
+            }
             any_dashed |= *hidden;
             line(if *hidden { "HIDDEN" } else { "VISIBLE" }, to_sheet(*a), to_sheet(*b), &mut entities);
+        }
+        for (set, layer) in [(&seen, "VISIBLE"), (&hid, "HIDDEN")] {
+            for (c, r) in set.iter().filter(|(c, r)| c.is_finite() && r.is_finite() && *r > 1e-6) {
+                any_dashed |= layer == "HIDDEN";
+                entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Circle { c: to_sheet(*c), r: *r * scale } });
+            }
         }
         let angles = custom.unwrap_or_else(|| view.angles());
         let letter = char::from(b'A' + cuts.len().min(25) as u8);

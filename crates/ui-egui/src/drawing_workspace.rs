@@ -2275,6 +2275,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let pts: Vec<Pos2> = arc_points(*c, *r, 0.0, 360.0).into_iter().map(map).collect();
                 if *layer == Layer::Center {
                     painter.extend(egui::Shape::dashed_line(&pts, s, 14.0, 4.0));
+                } else if *layer == Layer::Hidden {
+                    painter.extend(egui::Shape::dashed_line(&pts, s, 6.0, 4.0));
                 } else {
                     painter.add(egui::Shape::line(pts, s));
                 }
@@ -2677,7 +2679,7 @@ fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
     while end <= a0 {
         end += 360.0;
     }
-    let steps = (((end - a0) / 6.0).ceil() as usize).clamp(2, 120);
+    let steps = (((end - a0) / 1.5).ceil() as usize).clamp(2, 480);
     (0..=steps)
         .map(|i| {
             let t = (a0 + (end - a0) * i as f32 / steps as f32).to_radians();
