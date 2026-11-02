@@ -2465,7 +2465,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && app.tool.is_none()
                 && app.dialog.is_none()
                 && app.viewport.context_menu.is_none()
-                && !ui.ctx().wants_keyboard_input()
+                && !ui.ctx().egui_wants_keyboard_input()
                 && !crate::drawing_workspace::active(app)
             {
                 crate::context_menu::open_for(app, hover.unwrap_or(rect.center()), crate::context_menu::Target::ViewPicker);
