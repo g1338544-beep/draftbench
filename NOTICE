@@ -35,11 +35,11 @@ Dassault Systèmes; Onshape and Creo are trademarks of PTC; Blender is a tradema
 Foundation. Product names appear only to describe compatibility, such as the mouse navigation
 presets in Preferences › Navigation and file formats from public specifications.
 
-Draftbench (derived work)
-This program, Draftbench, is a modified version of SolidCraft
+DraftNew (derived work)
+This program, DraftNew, is a modified version of SolidCraft
 (https://github.com/tangency-labs/solidcraft), used under the MIT License. The
 SolidCraft copyright and licence notices above and in LICENSE-MIT / LICENSE-APACHE are retained.
 Changes: product display name, window and About text, web manifest, and the default accent
 colours. Internal crate names, the .solidcraft file format and environment variables are unchanged
 so that designs stay compatible with upstream. "SolidCraft" is the name of the upstream project;
-Draftbench is not affiliated with or endorsed by its maintainers.
+DraftNew is not affiliated with or endorsed by its maintainers.

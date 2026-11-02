@@ -402,7 +402,7 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
         },
         s("id"),
         block(&format!(
-            "Draftbench {} ({}, built {})\nOS: {} {}\n{}",
+            "DraftNew {} ({}, built {})\nOS: {} {}\n{}",
             field(app, "version"),
             field(app, "commit"),
             field(app, "built"),

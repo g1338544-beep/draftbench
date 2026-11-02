@@ -537,7 +537,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // A banner: the name, what it is for, and the two ways in just below.
             egui::Frame::new().fill(t.accent_soft).corner_radius(t.radius_md).inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("Draftbench").size(crate::theme::Tokens::get().font_display * 1.25).semibold().color(t.text));
+                ui.label(RichText::new("DraftNew").size(crate::theme::Tokens::get().font_display * 1.25).semibold().color(t.text));
                 ui.add_space(t.space_8);
                 ui.label(
                     RichText::new(crate::i18n::tr_label("Parametric 3D design in your browser: sketch, extrude, assemble."))

@@ -300,7 +300,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.painter().text(
                 pos2(left + 36.0, r.center().y),
                 Align2::LEFT_CENTER,
-                "Draftbench",
+                "DraftNew",
                 crate::fonts::semibold(t.font_heading),
                 t.app_bar_text,
             );

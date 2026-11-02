@@ -513,7 +513,7 @@ fn app_viewport() -> Result<egui::ViewportBuilder, eframe::Error> {
     let icon =
         egui::IconData { rgba: app_icon::rgba(64).map_err(|e| eframe::Error::AppCreation(std::io::Error::other(e).into()))?, width: 64, height: 64 };
     Ok(egui::ViewportBuilder::default()
-        .with_title("Draftbench")
+        .with_title("DraftNew")
         .with_icon(icon)
         .with_inner_size([1600.0, 1000.0])
         .with_min_inner_size([960.0, 600.0])
@@ -816,7 +816,7 @@ fn no_window(error: eframe::Error, tried_cpu: bool, settings: Option<&std::path:
     }
     let _ = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
-        .set_title("Draftbench could not start")
+        .set_title("DraftNew could not start")
         .set_description(startup::no_window_message(&error.to_string(), settings))
         .set_buttons(rfd::MessageButtons::Ok)
         .show();

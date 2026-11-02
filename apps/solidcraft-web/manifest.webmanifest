@@ -1,6 +1,6 @@
 {
-  "name": "Draftbench",
-  "short_name": "Draftbench",
+  "name": "DraftNew",
+  "short_name": "DraftNew",
   "description": "Open-source parametric CAD built in Rust.",
   "start_url": "./",
   "scope": "./",

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="240" height="240" role="img" aria-labelledby="t">
-  <title id="t">Draftbench</title>
+  <title id="t">DraftNew</title>
   <style>
     .f{opacity:0;animation:in .6s ease-out forwards}
     .f2{animation-delay:.5s}.f3{animation-delay:1s}.f4{animation-delay:1.5s}

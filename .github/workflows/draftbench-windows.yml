@@ -25,7 +25,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path pack | Out-Null
-          Copy-Item target/release/solidcraft.exe pack/Draftbench.exe
+          Copy-Item target/release/solidcraft.exe pack/DraftNew.exe
           Compress-Archive -Path pack/* -DestinationPath draftbench-windows.zip
       - uses: actions/upload-artifact@v4
         with:
@@ -37,4 +37,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="windows-${GITHUB_SHA::7}"
-          gh release create "$tag" draftbench-windows.zip --prerelease --title "Draftbench for Windows ($tag)" --notes "Desktop build of ${GITHUB_SHA::7}. Unzip and run Draftbench.exe." --target "$GITHUB_SHA"
+          gh release create "$tag" draftbench-windows.zip --prerelease --title "DraftNew for Windows ($tag)" --notes "Desktop build of ${GITHUB_SHA::7}. Unzip and run DraftNew.exe." --target "$GITHUB_SHA"
