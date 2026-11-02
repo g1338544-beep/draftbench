@@ -608,14 +608,33 @@ impl BodyDraw {
                 }
             }
         }
+        // Dashes for the edges behind the model, sized to the body.
+        let dash = if hidden_edges {
+            let b = m.bounds();
+            (((b.max - b.min).len() * 0.012) as f32).max(0.2)
+        } else {
+            1.0
+        };
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
             if !m.edge_pickable(ei) || (shaded && !m.shaded_edge_visible(ei)) {
                 continue;
             }
             for w in e.windows(2) {
-                out.line(w[0].to_f32(), w[1].to_f32(), edge_col, 1.3, false);
+                let (a, b) = (w[0].to_f32(), w[1].to_f32());
+                out.line(a, b, edge_col, 1.3, false);
                 if hidden_edges {
-                    out.hidden_line(w[0].to_f32(), w[1].to_f32(), hidden_col, 1.0);
+                    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                    let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                    // A dash, then a gap of the same length; long edges get at most 200 dashes.
+                    let step = dash.max(len / 400.0);
+                    let n = if len.is_finite() && step > 0.0 { (len / step).ceil() as usize } else { 0 };
+                    let mut k = 0;
+                    while k < n {
+                        let (t0, t1) = ((k as f32 * step) / len, (((k + 1) as f32) * step).min(len) / len);
+                        let p = |t: f32| [a[0] + d[0] * t, a[1] + d[1] * t, a[2] + d[2] * t];
+                        out.hidden_line(p(t0), p(t1), hidden_col, 1.2);
+                        k += 2;
+                    }
                 }
             }
         }
@@ -669,7 +688,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     let edge_col = if shaded { picked_line(&EDGE_COLOUR).unwrap_or_else(|| c4(tk.body_edge)) } else { c4(tk.text) };
     // Shaded with hidden edges: edges behind the model show faintly.
     let hidden_edges = app.ui.visual_style == 3;
-    let hidden_col = c4(tk.text.gamma_multiply(0.35));
+    let hidden_col = c4(tk.text.gamma_multiply(0.7));
     // The blocks the last scene built, reused when their bodies come back as they were.
     let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
     let mut made: std::collections::HashMap<u64, CachedBlock> = std::collections::HashMap::new();
