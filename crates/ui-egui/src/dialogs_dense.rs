@@ -714,6 +714,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
         Kind::Split => {
+            // Or cut across a WCS axis: the plane is square to XC, YC or ZC, Distance from the WCS origin.
+            form_row(ui, "WCS axis", |ui| {
+                extra_choice(ui, &mut d.extra, "split_wcs_axis", "wcs_axis", &[("Picked tool", "none"), ("XC", "x"), ("YC", "y"), ("ZC", "z")]);
+            });
             // A planar face as the tool can be moved along its normal before it cuts.
             form_row(ui, "Distance", |ui| {
                 enter |= extra_field(ui, &mut d.extra, "distance", "0 mm");

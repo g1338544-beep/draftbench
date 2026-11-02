@@ -3561,10 +3561,28 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Split => {
             need(0, "the body to split")?;
-            need(1, "the splitting plane")?;
+            // A WCS axis (XC, YC or ZC) cuts with the plane across that axis, Distance from the WCS origin.
+            let wcs_axis = d.extra.get("wcs_axis").and_then(Value::as_str).filter(|a| matches!(*a, "x" | "y" | "z"));
+            if wcs_axis.is_none() {
+                need(1, "the splitting plane")?;
+            }
             let body = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
             // A plane, a planar face's plane, or any other face (its surface extended).
-            let p = match sels(d, 1).first() {
+            let p = if let Some(axis) = wcs_axis {
+                let w = s.wcs.unwrap_or(solidcraft_engine::cmd::wcs::Wcs::WORLD);
+                let n = match axis {
+                    "x" => w.x,
+                    "y" => w.y,
+                    _ => w.z(),
+                };
+                let text = d.extra.get("distance").and_then(Value::as_str).unwrap_or("0");
+                let dist: f64 = text.trim().trim_end_matches("mm").trim().parse().map_err(|_| "Distance must be a number in mm".to_string())?;
+                if !dist.is_finite() || dist.abs() > 1.0e6 {
+                    return Err("Distance must be a finite number in mm".into());
+                }
+                json!({"body": body, "plane": {"origin": pt(w.origin + n * dist), "normal": pt(n)}})
+            } else {
+            match sels(d, 1).first() {
                 Some(Sel::Plane { name }) => json!({"body": body, "plane": name}),
                 Some(Sel::Face { body: b, index, point }) => match planar_face(s, b, *index) {
                     Some((_, n)) => {
@@ -3591,6 +3609,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     json!({"body": body, "sketch": sketch, "line": id})
                 }
                 _ => return Err("pick a plane, a face or a sketch line".into()),
+            }
             };
             if d.extra.get("trim").and_then(Value::as_bool).unwrap_or(false) {
                 let mut p = p;
