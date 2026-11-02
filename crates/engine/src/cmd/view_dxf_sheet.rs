@@ -122,7 +122,35 @@ fn manual(
             "omit" => false,
             _ => return Err(bad(CMD, "hidden must be omit or dashed")),
         };
-        let all = view_lines(scene, parts, view, key)?;
+        // A section view: the outline where a plane cuts the bodies, hatched, instead of the
+        // projected edges. `at` blank means the middle of the bodies along the axis.
+        let section = item.get("section").and_then(|sec| {
+            let axis = match sec.get("axis").and_then(Value::as_str)? {
+                "x" => 0,
+                "y" => 1,
+                "z" => 2,
+                _ => return None,
+            };
+            Some((axis, sec.get("at").and_then(Value::as_f64).filter(|v| v.is_finite())))
+        });
+        let mut section_at = 0.0;
+        let all = if let Some((axis, at)) = section {
+            section_at = at.unwrap_or_else(|| middle(scene, axis));
+            let cut = cut_outline(scene, view, axis, section_at);
+            if cut.is_empty() {
+                return Err(bad(CMD, "the section plane does not cut any visible body"));
+            }
+            let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+            for (a, b) in &cut {
+                for q in [a, b] {
+                    lo = Vec2::new(lo.x.min(q.x), lo.y.min(q.y));
+                    hi = Vec2::new(hi.x.max(q.x), hi.y.max(q.y));
+                }
+            }
+            std::rc::Rc::new(Projected { lines: cut.into_iter().map(|(a, b)| (a, b, false)).collect(), lo, hi })
+        } else {
+            view_lines(scene, parts, view, key)?
+        };
         if all.lo.x > all.hi.x {
             continue;
         }
@@ -150,7 +178,11 @@ fn manual(
             any_dashed |= *hidden;
             line(if *hidden { "HIDDEN" } else { "VISIBLE" }, to_sheet(*a), to_sheet(*b), &mut entities);
         }
-        if item.get("center").and_then(Value::as_bool).unwrap_or(true) {
+        if section.is_some() {
+            let segments: Vec<(Vec2, Vec2)> = all.lines.iter().map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
+            hatch(&segments, 3.0, &mut entities);
+        }
+        if section.is_none() && item.get("center").and_then(Value::as_bool).unwrap_or(true) {
             let mode = str_(p, "centre_mode").unwrap_or("lines");
             let found = circles(&all.lines, dashed);
             for (c, r) in &found {
@@ -189,7 +221,11 @@ fn manual(
                 shape: DxfShape::Text { at: Vec2::new(xx - 1.2, (lo.y + hi.y) / 2.0), height: th, angle_deg: 90.0, text: trim_mm(h) },
             });
         }
-        text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, format!("{}  {}", view_name(view), ratio_label(scale)), &mut entities);
+        let caption = match section {
+            Some((axis, _)) => format!("Section {}={}  {}", ["X", "Y", "Z"].get(axis).copied().unwrap_or("?"), trim_mm(section_at), ratio_label(scale)),
+            None => format!("{}  {}", view_name(view), ratio_label(scale)),
+        };
+        text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, caption, &mut entities);
         boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));
         names.push(view_name(view).to_string());
     }
@@ -200,6 +236,93 @@ fn manual(
     }
     let entities = projection::connect(entities);
     finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, any_centre, names, path, boxes)
+}
+
+/// The middle of the visible bodies along a world axis.
+fn middle(scene: &meshes::Scene, axis: usize) -> f64 {
+    let mut b = solidcraft_geom::Aabb3::EMPTY;
+    for placed in &scene.placements {
+        if let Some(mesh) = scene.meshes.get(placed.mesh) {
+            b = b.union(&meshes::transformed_bounds(mesh, &placed.transform));
+        }
+    }
+    if b.is_empty() {
+        return 0.0;
+    }
+    let (lo, hi) = ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]);
+    (lo.get(axis).copied().unwrap_or(0.0) + hi.get(axis).copied().unwrap_or(0.0)) / 2.0
+}
+
+/// Where the plane `axis = at` cuts the bodies, projected with `view`: loose segments.
+fn cut_outline(scene: &meshes::Scene, view: StandardView, axis: usize, at: f64) -> Vec<(Vec2, Vec2)> {
+    let (yaw, pitch) = view.angles();
+    let cam = Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+    let (right, up, _) = cam.basis();
+    let along = |v: Vec3| match axis {
+        0 => v.x,
+        1 => v.y,
+        _ => v.z,
+    };
+    let mut out = Vec::new();
+    for placed in &scene.placements {
+        let Some(mesh) = scene.meshes.get(placed.mesh) else { continue };
+        for t in &mesh.triangles {
+            if out.len() > 400_000 {
+                return out;
+            }
+            let Some(tri) = mesh.tri(t) else { continue };
+            let p = tri.map(|v| solidcraft_doc::apply_point(&placed.transform, v));
+            let d = p.map(|v| along(v) - at);
+            let mut hits: Vec<Vec3> = Vec::with_capacity(2);
+            for (i, j) in [(0, 1), (1, 2), (2, 0)] {
+                if (d[i] > 0.0) != (d[j] > 0.0) {
+                    let k = d[i] / (d[i] - d[j]);
+                    hits.push(p[i] + (p[j] - p[i]) * k);
+                }
+            }
+            if let [a, b] = hits[..]
+                && (a - b).len() > 1e-9
+            {
+                out.push((Vec2::new(a.dot(right), a.dot(up)), Vec2::new(b.dot(right), b.dot(up))));
+            }
+        }
+    }
+    out
+}
+
+/// 45° section lines inside the closed outline given as loose segments (even-odd rule).
+fn hatch(segments: &[(Vec2, Vec2)], spacing: f64, entities: &mut Vec<DxfEntity>) {
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    for (a, b) in segments {
+        for q in [a, b] {
+            lo = lo.min(q.x + q.y);
+            hi = hi.max(q.x + q.y);
+        }
+    }
+    if !(lo < hi) || spacing <= 0.0 {
+        return;
+    }
+    let mut made = 0usize;
+    let mut c = lo + spacing / 2.0;
+    while c < hi && made < 3000 {
+        let mut hits: Vec<(f64, Vec2)> = Vec::new();
+        for (a, b) in segments {
+            let (fa, fb) = (a.x + a.y - c, b.x + b.y - c);
+            if (fa < 0.0) != (fb < 0.0) {
+                let k = fa / (fa - fb);
+                let q = Vec2::new(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k);
+                hits.push((q.x - q.y, q));
+            }
+        }
+        hits.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+        for pair in hits.chunks_exact(2) {
+            if let [a, b] = pair {
+                line("DIM", a.1, b.1, entities);
+                made += 1;
+            }
+        }
+        c += spacing;
+    }
 }
 
 struct Built {

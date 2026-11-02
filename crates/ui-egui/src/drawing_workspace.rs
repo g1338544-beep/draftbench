@@ -52,6 +52,8 @@ struct PlacedView {
     scale: String,
     dashed: bool,
     dims: bool,
+    /// A section cut: the world axis (0 X, 1 Y, 2 Z) and the position (blank = the middle).
+    section: Option<(usize, String)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -176,7 +178,7 @@ impl State {
             designs.insert(
                 design.chars().take(120).collect(),
                 json!({
-                    "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims})).collect::<Vec<_>>(),
+                    "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t]))})).collect::<Vec<_>>(),
                     "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text})).collect::<Vec<_>>(),
                     "title": self.title, "number": self.number, "notes": self.notes,
                 }),
@@ -263,6 +265,10 @@ impl State {
                     scale: v.get("scale").and_then(serde_json::Value::as_str).unwrap_or("").chars().take(12).collect(),
                     dashed: v.get("dashed").and_then(serde_json::Value::as_bool).unwrap_or(false),
                     dims: v.get("dims").and_then(serde_json::Value::as_bool).unwrap_or(true),
+                    section: v.get("section").and_then(serde_json::Value::as_array).and_then(|a| {
+                        let axis = a.first()?.as_u64().filter(|n| *n <= 2)? as usize;
+                        Some((axis, a.get(1)?.as_str()?.chars().take(12).collect()))
+                    }),
                 });
             }
         }
@@ -307,6 +313,15 @@ fn params(st: &State) -> Value {
                 "dims": v.dims,
                 "center": st.centre,
             });
+            if let Some((axis, at)) = &v.section {
+                let mut sec = json!({"axis": ["x", "y", "z"][(*axis).min(2)]});
+                if let Ok(k) = at.trim().parse::<f64>()
+                    && k.is_finite()
+                {
+                    sec["at"] = json!(k);
+                }
+                o["section"] = sec;
+            }
             if let Ok(k) = v.scale.trim().parse::<f64>()
                 && k.is_finite()
                 && k > 0.0
@@ -456,6 +471,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         scale: String::new(),
         dashed: false,
         dims: true,
+        section: None,
     });
     app.drawing.selected = Some(n);
     begin(app);
@@ -668,6 +684,26 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_scale", i)), &mut v.scale, "auto", false, 12).changed();
                             dirty |= crate::ui_kit::checkbox(ui, "Hidden lines (dashed)", &mut v.dashed).changed();
                             dirty |= crate::ui_kit::checkbox(ui, "Overall dimensions", &mut v.dims).changed();
+                            let mut cut = v.section.is_some();
+                            if crate::ui_kit::checkbox(ui, "Section cut (hatched)", &mut cut).changed() {
+                                v.section = cut.then(|| (0, String::new()));
+                                // Look straight at the cut: right for X, front for Y, top for Z.
+                                v.view = 2;
+                                dirty = true;
+                            }
+                            if let Some((axis, at)) = &mut v.section {
+                                ui.horizontal(|ui| {
+                                    for (i, n) in ["X", "Y", "Z"].iter().enumerate() {
+                                        if ui.add(egui::Button::selectable(*axis == i, *n)).clicked() {
+                                            *axis = i;
+                                            v.view = [2, 0, 1][i];
+                                            dirty = true;
+                                        }
+                                    }
+                                });
+                                ui.label("Cut position (mm, blank = middle)");
+                                dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_section_at", i)), at, "middle", false, 12).changed();
+                            }
                             if crate::ui_kit::button(ui, "Remove view", crate::ui_kit::Button::Small).clicked() {
                                 remove = Some(i);
                             }
