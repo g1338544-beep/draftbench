@@ -156,7 +156,9 @@ pub struct State {
     /// Centre lines placed between two picked lines (ends on the sheet), and the tool: the lines picked so far.
     clines: Vec<[f32; 4]>,
     /// Rectangles (x0, y0, x1, y1 on the sheet) where centre lines were erased.
-    centre_cut: Vec<[f32; 4]>,
+    centre_cut: Vec<[f32; 5]>,
+    /// A centre line being stretched: its original ends, its ends now, and whether the second end moves.
+    cl_drag: Option<(Pos2, Pos2, Pos2, Pos2, bool)>,
     /// An erase drag in progress: where it started and where the pointer is.
     erase: Option<(Pos2, Pos2)>,
     cline_tool: Option<Vec<(Pos2, Pos2)>>,
@@ -242,6 +244,7 @@ impl Default for State {
             mark_tool: false,
             clines: Vec::new(),
             centre_cut: Vec::new(),
+            cl_drag: None,
             erase: None,
             cline_tool: None,
             dirty_marks: false,
@@ -487,10 +490,9 @@ impl State {
         if let Some(list) = d.get("centre_cut").and_then(serde_json::Value::as_array) {
             for m in list.iter().take(400) {
                 let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
-                if let [a, b, c, e] = n[..]
-                    && [a, b, c, e].iter().all(|t| t.is_finite() && t.abs() < 1e5)
-                {
-                    self.centre_cut.push([a as f32, b as f32, c as f32, e as f32]);
+                if n.len() >= 4 && n.iter().all(|t| t.is_finite() && t.abs() < 1e5) {
+                    let flag = n.get(4).copied().unwrap_or(0.0);
+                    self.centre_cut.push([n[0] as f32, n[1] as f32, n[2] as f32, n[3] as f32, flag as f32]);
                 }
             }
         }
@@ -859,7 +861,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         y: f64::from(h * (0.68 - 0.3 * row.min(1.0))),
         scale: String::new(),
         dashed: true,
-        dims: true,
+        dims: false,
         section: None,
         align: None,
         custom: None,
@@ -1024,7 +1026,21 @@ fn erase_centre(app: &mut SolveApp, mut r: [f32; 4]) {
     app.drawing.marks.retain(|m| !(m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]));
     app.drawing.clines.retain(|c| !segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r));
     if app.drawing.centre_cut.len() < 400 {
-        app.drawing.centre_cut.push(r);
+        app.drawing.centre_cut.push([r[0], r[1], r[2], r[3], 0.0]);
+    }
+    app.drawing.sel_centre = None;
+    app.drawing.dirty_marks = true;
+}
+
+/// Erase exactly one centre line (its ends), leaving any line that crosses it.
+fn erase_line(app: &mut SolveApp, a: Pos2, b: Pos2) {
+    let same = |c: &[f32; 4]| {
+        let near = |p: Pos2, x: f32, y: f32| (p.x - x).abs() < 0.05 && (p.y - y).abs() < 0.05;
+        (near(a, c[0], c[1]) && near(b, c[2], c[3])) || (near(a, c[2], c[3]) && near(b, c[0], c[1]))
+    };
+    app.drawing.clines.retain(|c| !same(c));
+    if app.drawing.centre_cut.len() < 400 {
+        app.drawing.centre_cut.push([a.x, a.y, b.x, b.y, 1.0]);
     }
     app.drawing.sel_centre = None;
     app.drawing.dirty_marks = true;
@@ -1950,6 +1966,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if response.double_clicked() {
                 app.drawing.text_edit = Some(i);
             }
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none())
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = pointer
+            && let Some((a, b)) = app.drawing.sel_centre
+            && ((s - a).length() <= tol * 1.5 || (s - b).length() <= tol * 1.5)
+        {
+            // An end of the selected centre line: drag it to make the line longer or shorter.
+            let second = (s - b).length() < (s - a).length();
+            app.drawing.cl_drag = Some((a, b, a, b, second));
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
@@ -1974,6 +1999,29 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.sel_centre = centre_hit(s);
             app.drawing.selected = if app.drawing.sel_centre.is_some() { None } else { hit(s).map(|b| b.0) };
             app.drawing.sel_dim = None;
+        }
+    }
+    // Stretching a centre line: the end follows the pointer along the line; letting go keeps it.
+    if let (Some((oa, ob, _, _, second)), Some(m)) = (app.drawing.cl_drag, &map) {
+        let (fixed, moving) = if second { (oa, ob) } else { (ob, oa) };
+        let along = moving - fixed;
+        if along.length() > 1e-4 {
+            let d = along / along.length();
+            if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)) {
+                let t = (s - fixed).dot(d).clamp(1.0, 3000.0);
+                let end = fixed + d * t;
+                let (la, lb) = if second { (oa, end) } else { (end, ob) };
+                app.drawing.cl_drag = Some((oa, ob, la, lb, second));
+            }
+        }
+        if response.drag_stopped() || !response.dragged() {
+            if let Some((oa, ob, la, lb, _)) = app.drawing.cl_drag.take() {
+                erase_line(app, oa, ob);
+                if app.drawing.clines.len() < 400 {
+                    app.drawing.clines.push([la.x, la.y, lb.x, lb.y]);
+                }
+                app.drawing.sel_centre = Some((la, lb));
+            }
         }
     }
     // Erasing centre lines: the frame follows the pointer; letting go removes what it touches.
@@ -2043,7 +2091,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
     {
         app.drawing.sel_centre = None;
-        erase_centre(app, [a.x.min(b.x) - 0.05, a.y.min(b.y) - 0.05, a.x.max(b.x) + 0.05, a.y.max(b.y) + 0.05]);
+        erase_line(app, a, b);
     }
     if let Some(i) = app.drawing.sel_dim
         && !ui.ctx().egui_wants_keyboard_input()
@@ -2222,7 +2270,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -2343,7 +2391,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     y: f64::from(at.y),
                     scale: String::new(),
                     dashed,
-                    dims: true,
+                    dims: false,
                     section: None,
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
@@ -2524,7 +2572,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(220, 60, 60, 40));
         painter.rect_stroke(r, 0.0, Stroke::new(1.5, Color32::from_rgb(220, 60, 60)), egui::StrokeKind::Inside);
     }
-    if let Some((a, b)) = app.drawing.sel_centre {
+    if let Some((a, b)) = app.drawing.sel_centre.map(|(a, b)| app.drawing.cl_drag.map_or((a, b), |d| (d.2, d.3))) {
         let accent = Tokens::get().accent;
         painter.line_segment([map(a), map(b)], Stroke::new(3.0, accent));
         for q in [a, b] {

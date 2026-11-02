@@ -794,21 +794,30 @@ fn finish(
         cell(6, format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" })),
         &mut entities,
     );
-    // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go.
+    // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go; a fifth
+    // number of 1 means one exact line (its two ends) and nothing else.
     if let Some(cuts) = p.get("centre_cut").and_then(Value::as_array) {
-        let frames: Vec<[f64; 4]> = cuts
+        let frames: Vec<([f64; 4], bool)> = cuts
             .iter()
             .take(400)
             .filter_map(|c| {
                 let n: Vec<f64> = c.as_array()?.iter().filter_map(Value::as_f64).collect();
-                match n[..] {
-                    [a, b, c, d] if [a, b, c, d].iter().all(|v| v.is_finite() && v.abs() < 1e5) => Some([a, b, c, d]),
-                    _ => None,
+                if n.len() >= 4 && n.iter().all(|v| v.is_finite() && v.abs() < 1e5) {
+                    Some(([n[0], n[1], n[2], n[3]], n.get(4).is_some_and(|f| *f > 0.5)))
+                } else {
+                    None
                 }
             })
             .collect();
         entities.retain(|e| match (&e.shape, e.layer.as_str()) {
-            (DxfShape::Line(a, b), "CENTER") => !frames.iter().any(|r| touches(*a, *b, *r)),
+            (DxfShape::Line(a, b), "CENTER") => !frames.iter().any(|(r, exact)| {
+                if *exact {
+                    let near = |p: Vec2, x: f64, y: f64| (p.x - x).abs() < 0.05 && (p.y - y).abs() < 0.05;
+                    (near(*a, r[0], r[1]) && near(*b, r[2], r[3])) || (near(*a, r[2], r[3]) && near(*b, r[0], r[1]))
+                } else {
+                    touches(*a, *b, *r)
+                }
+            }),
             _ => true,
         });
     }
