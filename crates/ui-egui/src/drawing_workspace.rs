@@ -1042,7 +1042,7 @@ fn normal_angles(n: [f64; 3]) -> Option<(f64, f64)> {
 /// The model views as icon buttons: a small cube with the face being looked at filled in
 /// (hidden faces, seen from behind, are outlined with a dotted face). The last one is "as the 3D window".
 fn view_buttons(ui: &mut egui::Ui, view: &mut usize) {
-    use egui::{Shape, vec2};
+    use egui::Shape;
     let t = Tokens::get();
     let labels: Vec<&str> = VIEWS.iter().map(|v| v.1).chain(["Model (as the 3D window)"]).collect();
     ui.horizontal_wrapped(|ui| {
