@@ -2502,8 +2502,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.drawing.caption_sel = hit_view;
                 if let Some(v) = hit_view {
                     app.drawing.selected = Some(v);
-                    app.drawing.sel_dim = None;
-                    app.drawing.sel_centre = None;
                     if response.double_clicked() {
                         // The caption as drawn now: the automatic one or the user's own.
                         let b = sheet.boxes.iter().find(|b| b.0 == v).copied();
@@ -2588,6 +2586,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if let Some(r) = erase_click {
         erase_centre(app, r);
+    }
+    if app.drawing.caption_sel.is_some() && response.clicked() {
+        app.drawing.sel_dim = None;
+        app.drawing.sel_centre = None;
     }
     if app.drawing.erase_tool && (ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary)) {
         app.drawing.erase_tool = false;
