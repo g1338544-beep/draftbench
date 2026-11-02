@@ -688,6 +688,21 @@ fn finish(
         cell(6, format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" })),
         &mut entities,
     );
+    // Centre marks the user placed by hand: x, y and how far each arm reaches (mm on the sheet).
+    let mut centre = centre;
+    if let Some(marks) = p.get("marks").and_then(Value::as_array) {
+        for m in marks.iter().take(400) {
+            let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+            if let [x, y, r] = n[..]
+                && [x, y, r].iter().all(|v| v.is_finite() && v.abs() < 1e5)
+                && r > 0.1
+            {
+                line("CENTER", Vec2::new(x - r, y), Vec2::new(x + r, y), &mut entities);
+                line("CENTER", Vec2::new(x, y - r), Vec2::new(x, y + r), &mut entities);
+                centre = true;
+            }
+        }
+    }
     // The parts list (BOM) over the title block: header at the bottom, items counted upward.
     if let Some(rows) = p.get("bom").and_then(Value::as_array).filter(|r| !r.is_empty()) {
         let edges = [0.0, 0.10, 0.56, 0.68, 1.0];

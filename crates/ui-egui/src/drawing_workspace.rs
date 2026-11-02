@@ -146,6 +146,10 @@ pub struct State {
     dims: Vec<DimItem>,
     /// The parts list drawn over the title block: item, description, quantity, material.
     bom: Vec<[String; 4]>,
+    /// Centre marks placed by hand (x, y, arm length in mm on the sheet), and the tool that places them.
+    marks: Vec<[f32; 3]>,
+    mark_tool: bool,
+    dirty_marks: bool,
     /// Colour pictures of the model on the sheet, and the pictures drawn so far (key, RGB, texture).
     shaded: Vec<ShadedView>,
     shaded_cache: Vec<(String, Picture, Option<egui::TextureHandle>)>,
@@ -217,6 +221,9 @@ impl Default for State {
             placed: Vec::new(),
             dims: Vec::new(),
             bom: Vec::new(),
+            marks: Vec::new(),
+            mark_tool: false,
+            dirty_marks: false,
             shaded: Vec::new(),
             shaded_cache: Vec::new(),
             dim_tool: None,
@@ -257,6 +264,7 @@ impl State {
             "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p]))})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
+            "marks": self.marks,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch])).collect::<Vec<_>>(),
             "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
             "paper": self.paper, "landscape": self.landscape,
@@ -384,6 +392,7 @@ impl State {
         self.placed.clear();
         self.dims.clear();
         self.bom.clear();
+        self.marks.clear();
         self.shaded.clear();
         self.selected = None;
         self.sel_dim = None;
@@ -441,6 +450,16 @@ impl State {
                     && [x, y, w, yaw, pitch].iter().all(|t| t.is_finite())
                 {
                     self.shaded.push(ShadedView { x: x as f32, y: y as f32, w: (w as f32).clamp(20.0, 800.0), yaw, pitch });
+                }
+            }
+        }
+        if let Some(list) = d.get("marks").and_then(serde_json::Value::as_array) {
+            for m in list.iter().take(400) {
+                let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
+                if let [x, y, r] = n[..]
+                    && [x, y, r].iter().all(|t| t.is_finite() && t.abs() < 1e5)
+                {
+                    self.marks.push([x as f32, y as f32, (r as f32).clamp(0.5, 500.0)]);
                 }
             }
         }
@@ -649,6 +668,7 @@ fn params(st: &State) -> Value {
         "centre_extra": st.centre_extra.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..=50.0).contains(h)).unwrap_or(3.0),
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
         "block_cells": st.cells,
+        "marks": st.marks,
         "bom": st.bom.iter().filter(|r| r.iter().any(|c| !c.trim().is_empty())).collect::<Vec<_>>(),
         "bolt_circle": st.bolt,
         "hole_table": st.hole_table,
@@ -967,6 +987,10 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                 }
             });
         }
+        "drawing.ribbon.centremark" => {
+            app.drawing.mark_tool = !app.drawing.mark_tool;
+            app.drawing.dim_tool = None;
+        }
         "drawing.ribbon.orient" => app.drawing.orient = Some(["1".into(), "-1".into(), "1".into()]),
         "drawing.ribbon.shaded" => add_shaded_view(app),
         "drawing.ribbon.print" => print_sheet(app),
@@ -1282,6 +1306,19 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         app.drawing.dims.remove(i);
                         dirty = true;
                     }
+                    ui.separator();
+                    ui.label(format!("Centre marks: {}", app.drawing.marks.len()));
+                    ui.small("Centre Mark in the ribbon: click circles (or points) to mark them; Esc ends.");
+                    ui.horizontal(|ui| {
+                        if !app.drawing.marks.is_empty() && crate::ui_kit::button(ui, "Remove last", crate::ui_kit::Button::Small).clicked() {
+                            app.drawing.marks.pop();
+                            dirty = true;
+                        }
+                        if !app.drawing.marks.is_empty() && crate::ui_kit::button(ui, "Clear all", crate::ui_kit::Button::Small).clicked() {
+                            app.drawing.marks.clear();
+                            dirty = true;
+                        }
+                    });
                     ui.separator();
                     ui.label("Colour pictures (shaded 3D)");
                     ui.small("Add Shaded View in the ribbon places a colour picture of the model from the 3D camera. Drag it on the sheet; it is not in DXF.");
@@ -1888,6 +1925,31 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Centre Mark: click a circle for a cross sized to it, or any point for a small one; stays on until Esc.
+    if app.drawing.mark_tool {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
+            app.drawing.mark_tool = false;
+        } else {
+            let tol = 14.0 / px_per_mm;
+            let hover = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
+            let target = |c: Pos2| -> Option<[f32; 3]> {
+                if let Some((centre, r)) = snap_circle(sheet, c, tol * 1.5) {
+                    return Some([centre.x, centre.y, r + 3.0]);
+                }
+                snap_point(sheet, c, tol).map(|q| [q.x, q.y, 4.0])
+            };
+            if let Some(t) = hover.and_then(target) {
+                painter.circle_stroke(map(pos2(t[0], t[1])), 7.0, Stroke::new(2.0, Tokens::get().accent));
+            }
+            if response.clicked_by(egui::PointerButton::Primary)
+                && let Some(t) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)).and_then(target)
+                && app.drawing.marks.len() < 400
+            {
+                app.drawing.marks.push(t);
+                app.drawing.dirty_marks = true;
+            }
+        }
+    }
     // Placing a dimension: snap to the drawn geometry, three clicks.
     let mut new_dim: Option<DimItem> = None;
     if let Some((kind, picks)) = app.drawing.dim_tool.clone() {
@@ -2008,6 +2070,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         Color32::from_gray(220),
     );
     let (sw, sh) = (sheet.width, sheet.height);
+    if std::mem::take(&mut app.drawing.dirty_marks) {
+        refresh(app);
+    }
     if let Some(d) = new_dim {
         app.drawing.dims.push(d);
         refresh(app);

@@ -17,6 +17,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.ribbon.projected", "Projected View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("lookat").params("No parameters. UI only: places a view projected from the selected view."),
     CommandSpec::new("drawing.ribbon.dimension", "Dimension", ui_only).noundo().doc_only().at("DRAWING", "ANNOTATE").icon("dimension").params("No parameters. UI only: starts the dimension tool on the sheet."),
     CommandSpec::new("drawing.ribbon.centre", "Centre Lines", ui_only).noundo().doc_only().at("DRAWING", "ANNOTATE").icon("centerline").params("No parameters. UI only: switches centre lines on circles on or off."),
+    CommandSpec::new("drawing.ribbon.centremark", "Centre Mark", ui_only).noundo().doc_only().at("DRAWING", "ANNOTATE").icon("centerline").params("No parameters. UI only: click circles or points on the sheet to place centre marks, one after another; Esc or right-click ends."),
     CommandSpec::new("drawing.ribbon.hidden", "Hidden Lines", ui_only).noundo().doc_only().at("DRAWING", "EDIT").icon("eye").params("No parameters. UI only: switches dashed hidden lines on or off for all views."),
     CommandSpec::new("drawing.ribbon.scale", "View Scale", ui_only).noundo().doc_only().at("DRAWING", "EDIT").icon("scale").params("No parameters. UI only: edits the scale of the selected view."),
     CommandSpec::new("drawing.ribbon.delete", "Delete View", ui_only).noundo().doc_only().at("DRAWING", "EDIT").icon("delete").params("No parameters. UI only: removes the selected view."),
