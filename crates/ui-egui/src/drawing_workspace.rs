@@ -3344,9 +3344,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             x = parent.x as f32;
                         }
                     }
+                    // A standard view placed on its own (Top, Right…) slides along the line it is projected
+                    // along from the Front view; Alt frees it.
+                    if !ui.input(|i| i.modifiers.alt)
+                        && let Some((p, horizontal)) = natural_parent(&app.drawing.placed, b.0)
+                        && let Some(parent) = app.drawing.placed.get(p)
+                    {
+                        if horizontal {
+                            y = parent.y as f32;
+                        } else {
+                            x = parent.x as f32;
+                        }
+                    }
                     if app.drawing.placed.get(b.0).is_some_and(|v| v.align.is_none()) {
                         // Lines up with another view's centre: snaps there and shows the guide line.
-                        let (sx, sy, gx, gy) = snap_axes(sheet, b.0, x, y, 5.0);
+                        let (sx, sy, gx, gy) = snap_axes(sheet, b.0, x, y, 14.0);
                         (x, y) = (sx, sy);
                         let guide = Stroke::new(1.0, Color32::from_rgb(235, 120, 40));
                         for line in gx.map(|gx| (pos2(gx, -1000.0), pos2(gx, 2000.0))).into_iter().chain(gy.map(|gy| (pos2(-1000.0, gy), pos2(2000.0, gy)))) {
@@ -3408,9 +3420,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             if old.2.is_none()
+                && !ui.input(|i| i.modifiers.alt)
+                && let Some((p, horizontal)) = natural_parent(&app.drawing.placed, index)
+                && let Some(parent) = app.drawing.placed.get(p)
+            {
+                if horizontal {
+                    ny = parent.y;
+                } else {
+                    nx = parent.x;
+                }
+            }
+            if old.2.is_none()
                 && let Some(sh) = app.drawing.sheet.as_ref()
             {
-                let (sx, sy, _, _) = snap_axes(sh, index, nx as f32, ny as f32, 5.0);
+                let (sx, sy, _, _) = snap_axes(sh, index, nx as f32, ny as f32, 14.0);
                 (nx, ny) = (f64::from(sx), f64::from(sy));
             }
             let (ddx, ddy) = (nx - old.0, ny - old.1);
@@ -3542,6 +3565,22 @@ fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
 
 /// A view being placed at (x, y) lines up with the centre of another view when it is within `tol` mm:
 /// the snapped position and the guide lines (a vertical x, a horizontal y) to draw.
+/// The Front view a standard view placed on its own is projected from, and whether it sits beside
+/// it (Right, Left, Back share its height) rather than above or below it (Top, Bottom share its x).
+fn natural_parent(placed: &[PlacedView], i: usize) -> Option<(usize, bool)> {
+    let v = placed.get(i)?;
+    if v.align.is_some() || v.rot != 0 || v.section.is_some() || v.custom.is_some() {
+        return None;
+    }
+    let horizontal = match v.view {
+        1 | 5 => false,
+        2..=4 => true,
+        _ => return None,
+    };
+    let p = placed.iter().position(|q| q.view == 0 && q.rot == 0 && q.section.is_none() && q.custom.is_none())?;
+    (p != i).then_some((p, horizontal))
+}
+
 fn snap_axes(sheet: &Sheet, index: usize, x: f32, y: f32, tol: f32) -> (f32, f32, Option<f32>, Option<f32>) {
     let (mut sx, mut sy) = (None::<(f32, f32)>, None::<(f32, f32)>);
     for b in sheet.boxes.iter().filter(|b| b.0 != index) {
