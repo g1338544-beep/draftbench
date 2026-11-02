@@ -80,18 +80,35 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
     }
     if !down {
         LAST.with(|l| l.set(None));
+        LASTPOS.with(|l| l.set(None));
         GRAB.with(|g| g.set(None));
         SNAP.with(|s| s.set(None));
         return;
     }
     let (Some(pos), Some(grab)) = (pos, GRAB.with(Cell::get)) else { return };
+    // Nothing to redo while the pointer rests: the snap search is the costly part.
+    if LASTPOS.with(|l| l.replace(Some(pos))).is_some_and(|old| (old - pos).length() < 0.5) {
+        return;
+    }
     let target = match grab {
         Grab::Origin => {
             let hits = crate::viewport::pick(app, &proj, pos);
             let vertex = hits.iter().find_map(|h| if let Hit::Vertex { point, .. } = h { Some(*point) } else { None });
             let edge = hits.iter().find_map(|h| if let Hit::Edge { mid, .. } = h { Some(*mid) } else { None });
+            // Looking into a hole: the wall under the pointer gives the centre of its nearest end.
+            let wall = if vertex.is_none() && edge.is_none() {
+                hits.iter().find_map(|h| match h {
+                    Hit::Face { body, point, .. } => solidcraft_engine::cmd::wcs::round_centre(&app.session, *point, Some(body.as_str())),
+                    _ => None,
+                })
+            } else {
+                None
+            };
             if let Some(p) = vertex {
                 SNAP.with(|s| s.set(Some((p, "corner"))));
+                Some(json!({"point": [p.x, p.y, p.z]}))
+            } else if let Some(p) = wall.filter(|_| edge.is_none()) {
+                SNAP.with(|s| s.set(Some((p, "centre"))));
                 Some(json!({"point": [p.x, p.y, p.z]}))
             } else if let Some(p) = edge {
                 // A round edge gives its centre, any other the middle of the edge.
@@ -133,6 +150,7 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
 }
 
 thread_local! {
+    static LASTPOS: Cell<Option<Pos2>> = const { Cell::new(None) };
     static LAST: Cell<Option<String>> = const { Cell::new(None) };
 }
 

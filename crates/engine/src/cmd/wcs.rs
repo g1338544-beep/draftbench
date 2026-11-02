@@ -88,14 +88,23 @@ fn origin(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(store(s, w))
 }
 
-/// The centre of the round end of a cylindrical face (a hole or a boss) that the point `pick` lies on.
-fn circle_centre(s: &Session, pick: Vec3) -> Option<Vec3> {
+/// The centre of the round end of a cylindrical face (a hole or a boss) that the point `pick`
+/// lies on, in the body `body` (any body when `None`).
+pub fn round_centre(s: &Session, pick: Vec3, body: Option<&str>) -> Option<Vec3> {
     let st = s.model.state();
-    let c = st.bodies.iter().find_map(|b| solidcraft_doc::kernel::cylinder_face_at(&b.body, pick))
+    let c = st
+        .bodies
+        .iter()
+        .filter(|b| body.is_none_or(|n| b.name == n))
+        .find_map(|b| solidcraft_doc::kernel::cylinder_face_at(&b.body, pick))
         .filter(|c| c.off(pick) <= 0.05 + c.radius * 0.01)?;
     let along = (pick - c.axis_point).dot(c.axis);
     let at = if (along - c.start).abs() <= (c.end - along).abs() { c.start } else { c.end };
     Some(c.axis_point + c.axis * at)
+}
+
+fn circle_centre(s: &Session, pick: Vec3) -> Option<Vec3> {
+    round_centre(s, pick, None)
 }
 
 /// `v` turned by `deg` about the unit axis `k`.
