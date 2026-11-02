@@ -1293,12 +1293,16 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
         line("DIM", b, a, entities);
         let side = Vec2::new(-dir.y, dir.x);
         for k in [-1.0, 1.0] {
-            let back = Vec2::new(a.x - dir.x * 3.0 + side.x * 0.9 * k, a.y - dir.y * 3.0 + side.y * 0.9 * k);
+            let back = Vec2::new(a.x - dir.x * arrow + side.x * arrow * 0.3 * k, a.y - dir.y * arrow + side.y * arrow * 0.3 * k);
             line("DIM", a, back, entities);
         }
         let label: String = d.get("text").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map_or("NOTE".into(), |t| t.chars().take(40).collect());
-        let reach = 1.0 + th * 0.3 * label.chars().count() as f64;
-        text("DIM", Vec2::new(b.x + reach, b.y + th * 0.3), th, label, entities);
+        // A level shoulder under the text, on the side away from the spot, so the leader ends where the note is read.
+        let half = th * 0.3 * label.chars().count() as f64;
+        let side_x = if b.x >= a.x { 1.0 } else { -1.0 };
+        let end = Vec2::new(b.x + side_x * (2.0 * half + 2.0), b.y);
+        line("DIM", b, end, entities);
+        text("DIM", Vec2::new(b.x + side_x * (half + 1.0), b.y + th * 0.25 + 0.8), th, label, entities);
         return;
     }
     if kind == "diameter" || kind == "radius" {
@@ -1386,7 +1390,7 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
     let side = Vec2::new(-dir.y, dir.x);
     for (tip, sign) in [(p1, 1.0), (p2, -1.0)] {
         for k in [-1.0, 1.0] {
-            let back = Vec2::new(tip.x + dir.x * 3.0 * sign + side.x * 0.9 * k, tip.y + dir.y * 3.0 * sign + side.y * 0.9 * k);
+            let back = Vec2::new(tip.x + dir.x * arrow * sign + side.x * arrow * 0.3 * k, tip.y + dir.y * arrow * sign + side.y * arrow * 0.3 * k);
             line("DIM", tip, back, entities);
         }
     }

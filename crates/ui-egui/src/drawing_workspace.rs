@@ -3391,7 +3391,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if let Some(target) = picks.first().copied() {
                         let number = app.drawing.dims.iter().filter(|d| d.kind == 5).count() + 1;
                         let text = if kind == 5 { number.to_string() } else if app.drawing.note_text.trim().is_empty() { "NOTE".to_string() } else { app.drawing.note_text.trim().to_string() };
-                        new_dim = Some(DimItem { kind, a: target, b: c, at: 0.0, text, slide: 0.0 });
+                        new_dim = Some(DimItem { kind, a: target, b: snap_leader(target, c), at: 0.0, text, slide: 0.0 });
                         app.drawing.dim_tool = Some((again, Vec::new()));
                     } else {
                         app.drawing.dim_tool = Some((if kind == 0 || kind == 1 || kind == 2 { again } else { kind }, vec![hit_pt.unwrap_or(c)]));
@@ -3715,6 +3715,24 @@ fn natural_parent(placed: &[PlacedView], i: usize) -> Option<(usize, bool)> {
     };
     let p = placed.iter().position(|q| q.view == 0 && q.rot == 0 && q.section.is_none() && q.custom.is_none())?;
     (p != i).then_some((p, horizontal))
+}
+
+/// A leader's far end, turned onto the nearest multiple of 15 degrees from the spot it points at
+/// when it is within 4 degrees of it, so leaders line up neatly.
+fn snap_leader(from: Pos2, to: Pos2) -> Pos2 {
+    let v = to - from;
+    let len = v.length();
+    if len < 1e-3 {
+        return to;
+    }
+    let step = 15f32.to_radians();
+    let ang = v.y.atan2(v.x);
+    let snapped = (ang / step).round() * step;
+    if (snapped - ang).abs() <= 4f32.to_radians() {
+        from + vec2(snapped.cos(), snapped.sin()) * len
+    } else {
+        to
+    }
 }
 
 fn snap_axes(sheet: &Sheet, index: usize, x: f32, y: f32, tol: f32) -> (f32, f32, Option<f32>, Option<f32>) {
