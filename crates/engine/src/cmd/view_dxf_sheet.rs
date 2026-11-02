@@ -94,6 +94,8 @@ fn manual(
     path: Option<String>,
 ) -> Result<Built> {
     let (sheet_w, sheet_h) = sheet;
+    let th = text_height(p);
+    let mut any_centre = false;
     let default_dims = p.get("dimensions").and_then(Value::as_bool).unwrap_or(false);
     let mut entities: Vec<DxfEntity> = Vec::new();
     let mut boxes = Vec::new();
@@ -132,6 +134,18 @@ fn manual(
             any_dashed |= *hidden;
             line(if *hidden { "HIDDEN" } else { "VISIBLE" }, to_sheet(*a), to_sheet(*b), &mut entities);
         }
+        if item.get("center").and_then(Value::as_bool).unwrap_or(true) {
+            for (c, r) in circles(&all.lines, dashed) {
+                let (cs, rs) = (to_sheet(c), r * scale);
+                if rs < 0.4 {
+                    continue;
+                }
+                let reach = rs + 3.0;
+                line("CENTER", Vec2::new(cs.x - reach, cs.y), Vec2::new(cs.x + reach, cs.y), &mut entities);
+                line("CENTER", Vec2::new(cs.x, cs.y - reach), Vec2::new(cs.x, cs.y + reach), &mut entities);
+                any_centre = true;
+            }
+        }
         let dims = item.get("dims").and_then(Value::as_bool).unwrap_or(default_dims) && view != StandardView::Iso;
         let (lo, hi) = (to_sheet(all.lo), to_sheet(all.hi));
         if dims {
@@ -140,22 +154,22 @@ fn manual(
             line("DIM", Vec2::new(lo.x, lo.y - 2.0), Vec2::new(lo.x, yy - 2.0), &mut entities);
             line("DIM", Vec2::new(hi.x, lo.y - 2.0), Vec2::new(hi.x, yy - 2.0), &mut entities);
             line("DIM", Vec2::new(lo.x, yy), Vec2::new(hi.x, yy), &mut entities);
-            text("DIM", Vec2::new((lo.x + hi.x) / 2.0, yy + 1.2), TEXT_H, trim_mm(w), &mut entities);
+            text("DIM", Vec2::new((lo.x + hi.x) / 2.0, yy + 1.2), th, trim_mm(w), &mut entities);
             let xx = lo.x - off;
             line("DIM", Vec2::new(lo.x - 2.0, lo.y), Vec2::new(xx - 2.0, lo.y), &mut entities);
             line("DIM", Vec2::new(lo.x - 2.0, hi.y), Vec2::new(xx - 2.0, hi.y), &mut entities);
             line("DIM", Vec2::new(xx, lo.y), Vec2::new(xx, hi.y), &mut entities);
             entities.push(DxfEntity {
                 layer: "DIM".into(),
-                shape: DxfShape::Text { at: Vec2::new(xx - 1.2, (lo.y + hi.y) / 2.0), height: TEXT_H, angle_deg: 90.0, text: trim_mm(h) },
+                shape: DxfShape::Text { at: Vec2::new(xx - 1.2, (lo.y + hi.y) / 2.0), height: th, angle_deg: 90.0, text: trim_mm(h) },
             });
         }
-        text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), TEXT_H, format!("{}  {}", view_name(view), ratio_label(scale)), &mut entities);
+        text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, format!("{}  {}", view_name(view), ratio_label(scale)), &mut entities);
         boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));
         names.push(view_name(view).to_string());
     }
     let entities = projection::connect(entities);
-    finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, names, path, boxes)
+    finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, any_centre, names, path, boxes)
 }
 
 struct Built {
@@ -335,6 +349,7 @@ fn build(s: &mut Session, p: &Value) -> Result<Built> {
         ratio_label(scale),
         first_angle,
         dashed,
+        false,
         placed.iter().map(|v| view_name(v.view).to_string()).collect(),
         path.map(str::to_string),
         Vec::new(),
@@ -350,11 +365,13 @@ fn finish(
     scale_text: String,
     first_angle: bool,
     dashed: bool,
+    centre: bool,
     names: Vec<String>,
     path: Option<String>,
     boxes: Vec<Value>,
 ) -> Result<Built> {
     let (sheet_w, sheet_h) = sheet;
+    let th = text_height(p);
     // Border and title block.
     rect("SHEET", Vec2::new(MARGIN, MARGIN), Vec2::new(sheet_w - MARGIN, sheet_h - MARGIN), &mut entities);
     let block_w = 190.0_f64.min(sheet_w - 2.0 * MARGIN);
@@ -370,23 +387,23 @@ fn finish(
     let field = |key: &str| -> String { p.get("block").and_then(|b| b.get(key)).and_then(Value::as_str).unwrap_or("").chars().take(60).collect() };
     let cap = |label: &str, value: String| if value.is_empty() { String::new() } else { format!("{label} {value}") };
     let company = field("company");
-    text("TEXT", Vec2::new(bx0 + block_w / 2.0, by0 + 2.0 * row + row * 0.3), 5.0, if title.is_empty() { "Untitled".into() } else { title }, &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w / 2.0, by0 + 2.0 * row + row * 0.3), th * 1.4, if title.is_empty() { "Untitled".into() } else { title }, &mut entities);
     if !company.is_empty() {
-        text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row + row * 0.3), TEXT_H, company, &mut entities);
+        text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row + row * 0.3), th, company, &mut entities);
     }
-    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row + row * 0.3), TEXT_H, cap("No.", field("number")), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.85, by0 + row + row * 0.3), TEXT_H, cap("Date", field("date")), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row * 0.3), TEXT_H, cap("Scale", scale_text.clone()), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row * 0.3), TEXT_H, cap("By", field("author")), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row + row * 0.3), th, cap("No.", field("number")), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.85, by0 + row + row * 0.3), th, cap("Date", field("date")), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row * 0.3), th, cap("Scale", scale_text.clone()), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row * 0.3), th, cap("By", field("author")), &mut entities);
     text(
         "TEXT",
         Vec2::new(bx0 + block_w * 0.85, by0 + row * 0.3),
-        TEXT_H,
+        th,
         format!("{} {} - mm", str_(p, "paper").unwrap_or("A3").to_ascii_uppercase(), if first_angle { "1st angle" } else { "3rd angle" }),
         &mut entities,
     );
     for n in field("note").split('|').filter(|n| !n.trim().is_empty()).take(3).enumerate() {
-        text("TEXT", Vec2::new(bx0 - 2.0 - 40.0, by0 + 4.0 + 5.0 * n.0 as f64), TEXT_H, n.1.trim().to_string(), &mut entities);
+        text("TEXT", Vec2::new(bx0 - 2.0 - 40.0, by0 + 4.0 + 5.0 * n.0 as f64), th, n.1.trim().to_string(), &mut entities);
     }
 
     // Layer colours: AutoCAD colour numbers 1…255 (1 red, 2 yellow, 3 green, 4 cyan, 5 blue,
@@ -405,6 +422,9 @@ fn finish(
     ];
     if dashed {
         layers.push(DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", colour("hidden", 8)?) });
+    }
+    if centre {
+        layers.push(DxfLayer { linetype: DxfLinetype::Center, ..DxfLayer::new("CENTER", colour("center", 1)?) });
     }
     let summary = json!({"paper": str_(p, "paper").unwrap_or("A3"), "scale": scale_text, "views": names, "units": "mm", "boxes": boxes});
     Ok(Built { sheet: (sheet_w, sheet_h), layers, entities, summary, path })
@@ -547,6 +567,100 @@ fn warm(s: &mut Session, p: &Value) -> Result<Value> {
         view_lines(&scene, &parts, view, key)?;
     }
     Ok(json!({"warmed": stage}))
+}
+
+/// Text height on the sheet in mm (the template's text size): 2…10, default 3.5.
+fn text_height(p: &Value) -> f64 {
+    p.get("text_height").and_then(Value::as_f64).filter(|h| (2.0..=10.0).contains(h)).unwrap_or(TEXT_H)
+}
+
+/// The circles a view's edges draw: closed loops of equal chords whose corners lie on one circle,
+/// as (centre, radius) in model units. Hidden loops count only when `hidden` is drawn, and not
+/// where a visible circle already sits on them.
+fn circles(lines: &[(Vec2, Vec2, bool)], hidden: bool) -> Vec<(Vec2, f64)> {
+    let mut found = loops(lines.iter().filter(|l| !l.2).map(|l| (l.0, l.1)).collect());
+    if hidden {
+        for (c, r) in loops(lines.iter().filter(|l| l.2).map(|l| (l.0, l.1)).collect()) {
+            if !found.iter().any(|(fc, fr)| fc.dist(c) <= 0.02 * fr.max(r) && (fr - r).abs() <= 0.02 * fr.max(r)) {
+                found.push((c, r));
+            }
+        }
+    }
+    found
+}
+
+fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let extent = edges.iter().flat_map(|(a, b)| [a, b]).fold(1.0_f64, |s, p| s.max(p.x.abs()).max(p.y.abs()));
+    let eps = extent * 1e-7;
+    let key = |p: Vec2| [(p.x / eps).round() as i64, (p.y / eps).round() as i64];
+    let mut ids: BTreeMap<[i64; 2], usize> = BTreeMap::new();
+    let mut pts: Vec<Vec2> = Vec::new();
+    let mut parent: Vec<usize> = Vec::new();
+    let mut unique: BTreeSet<(usize, usize)> = BTreeSet::new();
+    let mut id = |p: Vec2, pts: &mut Vec<Vec2>, parent: &mut Vec<usize>| -> usize {
+        *ids.entry(key(p)).or_insert_with(|| {
+            pts.push(p);
+            parent.push(pts.len() - 1);
+            pts.len() - 1
+        })
+    };
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent.get(i).copied().unwrap_or(i) != i {
+            let up = parent.get(i).copied().unwrap_or(i);
+            let grand = parent.get(up).copied().unwrap_or(up);
+            if let Some(slot) = parent.get_mut(i) {
+                *slot = grand;
+            }
+            i = grand;
+        }
+        i
+    }
+    for (a, b) in &edges {
+        let (ia, ib) = (id(*a, &mut pts, &mut parent), id(*b, &mut pts, &mut parent));
+        if ia == ib {
+            continue;
+        }
+        unique.insert((ia.min(ib), ia.max(ib)));
+        let (ra, rb) = (root(&mut parent, ia), root(&mut parent, ib));
+        if let Some(slot) = parent.get_mut(ra) {
+            *slot = rb;
+        }
+    }
+    let mut degree = vec![0usize; pts.len()];
+    for (a, b) in &unique {
+        for v in [a, b] {
+            if let Some(d) = degree.get_mut(*v) {
+                *d += 1;
+            }
+        }
+    }
+    let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for i in 0..pts.len() {
+        let r = root(&mut parent, i);
+        groups.entry(r).or_default().push(i);
+    }
+    let mut out = Vec::new();
+    for members in groups.values() {
+        let n = members.len();
+        if n < 6 || members.iter().any(|v| degree.get(*v) != Some(&2)) {
+            continue;
+        }
+        let points: Vec<Vec2> = members.iter().filter_map(|v| pts.get(*v).copied()).collect();
+        let nf = points.len() as f64;
+        let c = Vec2::new(points.iter().map(|p| p.x).sum::<f64>() / nf, points.iter().map(|p| p.y).sum::<f64>() / nf);
+        let r = points.iter().map(|p| p.dist(c)).sum::<f64>() / nf;
+        if !(r > 1e-6) || points.iter().any(|p| (p.dist(c) - r).abs() > 0.01 * r) {
+            continue;
+        }
+        let lens: Vec<f64> = unique.iter().filter(|(a, _)| members.contains(a)).filter_map(|(a, b)| Some(pts.get(*a)?.dist(*pts.get(*b)?))).collect();
+        let mean = lens.iter().sum::<f64>() / lens.len().max(1) as f64;
+        if lens.iter().any(|l| (l - mean).abs() > 0.05 * mean) {
+            continue;
+        }
+        out.push((c, r));
+    }
+    out
 }
 
 fn view_name(v: StandardView) -> &'static str {

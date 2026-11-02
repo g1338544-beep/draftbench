@@ -33,6 +33,7 @@ enum Layer {
     Dim,
     Sheet,
     Text,
+    Center,
 }
 
 enum Shape {
@@ -56,6 +57,8 @@ pub struct State {
     paper: usize,
     landscape: bool,
     first_angle: bool,
+    centre: bool,
+    text_height: String,
     placed: Vec<PlacedView>,
     selected: Option<usize>,
     title: String,
@@ -82,6 +85,8 @@ impl Default for State {
             paper: 3,
             landscape: true,
             first_angle: true,
+            centre: true,
+            text_height: "3.5".into(),
             placed: Vec::new(),
             selected: None,
             title: String::new(),
@@ -116,6 +121,7 @@ fn params(st: &State) -> Value {
                 "y": v.y,
                 "hidden": if v.dashed { "dashed" } else { "omit" },
                 "dims": v.dims,
+                "center": st.centre,
             });
             if let Ok(k) = v.scale.trim().parse::<f64>()
                 && k.is_finite()
@@ -126,14 +132,16 @@ fn params(st: &State) -> Value {
             o
         })
         .collect();
+    let text_height = st.text_height.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (2.0..=10.0).contains(h)).unwrap_or(3.5);
     json!({
+        "text_height": text_height,
         "paper": PAPERS[st.paper.min(4)],
         "orientation": if st.landscape { "landscape" } else { "portrait" },
         "projection": if st.first_angle { "first" } else { "third" },
         "placements": placements,
         "title": st.title,
         "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "note": st.notes},
-        "tolerance": 0.5,
+        "tolerance": 0.15,
     })
 }
 
@@ -150,6 +158,7 @@ fn parse(v: &Value) -> Option<Sheet> {
             "dim" => Layer::Dim,
             "sheet" => Layer::Sheet,
             "text" => Layer::Text,
+            "center" => Layer::Center,
             _ => Layer::Visible,
         };
         let shape = if let Some(l) = it.get("line").and_then(Value::as_array) {
@@ -324,6 +333,16 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dirty |= crate::ui_kit::checkbox(ui, "Landscape", &mut app.drawing.landscape).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "First-angle projection (ISO)", &mut app.drawing.first_angle).changed();
                     ui.separator();
+                    ui.label("Lines");
+                    dirty |= crate::ui_kit::checkbox(ui, "Centre lines on circles", &mut app.drawing.centre).changed();
+                    let mut all_dashed = !app.drawing.placed.is_empty() && app.drawing.placed.iter().all(|v| v.dashed);
+                    if crate::ui_kit::checkbox(ui, "Hidden lines dashed (all views)", &mut all_dashed).changed() {
+                        for v in &mut app.drawing.placed {
+                            v.dashed = all_dashed;
+                        }
+                        dirty = true;
+                    }
+                    ui.separator();
                     ui.label("Views on the sheet");
                     crate::ui_kit::dropdown_menu(ui, "drawing_add_view", "Add view…", |ui| {
                         for (i, (_, label)) in VIEWS.iter().enumerate() {
@@ -352,6 +371,8 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     ui.separator();
                     ui.label("Title block");
+                    ui.label("Text size (mm, 2–10)");
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_text_height"), &mut app.drawing.text_height, "3.5", false, 6).changed();
                     for (label, key) in [
                         ("Title", 0),
                         ("Drawing number", 1),
@@ -527,6 +548,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         Layer::Dim => Stroke::new(1.0, Color32::from_rgb(0, 120, 70)),
         Layer::Sheet => Stroke::new(1.4, Color32::BLACK),
         Layer::Text => Stroke::new(1.0, Color32::BLACK),
+        Layer::Center => Stroke::new(1.0, Color32::from_rgb(200, 40, 40)),
     };
     for (layer, shape) in &sheet.items {
         let s = stroke(*layer);
@@ -534,6 +556,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             Shape::Line(a, b) => {
                 if *layer == Layer::Hidden {
                     painter.extend(egui::Shape::dashed_line(&[map(*a), map(*b)], s, 6.0, 4.0));
+                } else if *layer == Layer::Center {
+                    painter.extend(egui::Shape::dashed_line(&[map(*a), map(*b)], s, 14.0, 4.0));
                 } else {
                     painter.line_segment([map(*a), map(*b)], s);
                 }
