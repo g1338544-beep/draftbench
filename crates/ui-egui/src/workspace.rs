@@ -263,7 +263,7 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "DRAWING", panel: "VIEWS", promoted: 6, ids: &["drawing.ribbon.front", "drawing.ribbon.top", "drawing.ribbon.right", "drawing.ribbon.iso", "drawing.ribbon.model", "drawing.ribbon.projected"] },
     Section { tab: "DRAWING", panel: "ANNOTATE", promoted: 2, ids: &["drawing.ribbon.dimension", "drawing.ribbon.centre"] },
     Section { tab: "DRAWING", panel: "EDIT", promoted: 3, ids: &["drawing.ribbon.hidden", "drawing.ribbon.scale", "drawing.ribbon.delete"] },
-    Section { tab: "DRAWING", panel: "SHEET", promoted: 5, ids: &["drawing.ribbon.addsheet", "drawing.ribbon.delsheet", "drawing.ribbon.fit", "drawing.ribbon.export", "drawing.ribbon.close"] },
+    Section { tab: "DRAWING", panel: "SHEET", promoted: 6, ids: &["drawing.ribbon.addsheet", "drawing.ribbon.delsheet", "drawing.ribbon.print", "drawing.ribbon.fit", "drawing.ribbon.export", "drawing.ribbon.close"] },
 ];
 
 /// Compact source labels for painted big buttons only. Menus, search and tooltips

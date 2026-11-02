@@ -777,6 +777,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                 }
             });
         }
+        "drawing.ribbon.print" => print_sheet(app),
         "drawing.ribbon.close" => leave(app),
         _ => {}
     }
@@ -1689,4 +1690,115 @@ fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
             pos2(c.x + r * t.cos(), c.y + r * t.sin())
         })
         .collect()
+}
+
+/// The sheet as a one-page vector PDF at paper size (mm → points), ready to print.
+fn sheet_pdf(sheet: &Sheet, cols: [u8; 4]) -> Vec<u8> {
+    use std::fmt::Write as _;
+    let k = 72.0 / 25.4;
+    let rgb = |l: Layer| -> (f32, f32, f32) {
+        let c = match l {
+            Layer::Visible => colour_of(cols[0]),
+            Layer::Hidden => colour_of(cols[1]),
+            Layer::Dim => colour_of(cols[3]),
+            Layer::Center => colour_of(cols[2]),
+            Layer::Sheet | Layer::Text => Color32::BLACK,
+        };
+        // White-on-white would vanish on paper: AutoCAD "white" prints black.
+        let c = if c == Color32::WHITE { Color32::BLACK } else { c };
+        (f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0)
+    };
+    let mut c = String::new();
+    let _ = writeln!(c, "{k:.5} 0 0 {k:.5} 0 0 cm 1 J 1 j");
+    for (layer, shape) in sheet.items.iter().take(400_000) {
+        let (r, g, b) = rgb(*layer);
+        let (width, dash) = match layer {
+            Layer::Visible => (0.5, ""),
+            Layer::Hidden => (0.25, "[1.5 1] 0 d"),
+            Layer::Dim | Layer::Text => (0.25, ""),
+            Layer::Sheet => (0.5, ""),
+            Layer::Center => (0.25, "[6 1.2 1 1.2] 0 d"),
+        };
+        let path = |c: &mut String, pts: &[Pos2]| {
+            for (i, p) in pts.iter().enumerate() {
+                let _ = writeln!(c, "{:.3} {:.3} {}", p.x, p.y, if i == 0 { "m" } else { "l" });
+            }
+        };
+        match shape {
+            Shape::Text(p, h, t) => {
+                let bytes: Vec<u8> = t.chars().map(|ch| if (ch as u32) < 256 { ch as u32 as u8 } else { b'?' }).collect();
+                let mut esc = String::new();
+                for b in bytes {
+                    match b {
+                        b'(' | b')' | b'\\' => {
+                            esc.push('\\');
+                            esc.push(b as char);
+                        }
+                        32..=126 => esc.push(b as char),
+                        _ => {
+                            let _ = write!(esc, "\\{b:03o}");
+                        }
+                    }
+                }
+                let w = h * 0.5 * t.chars().count() as f32;
+                let _ = writeln!(c, "BT {r:.3} {g:.3} {b:.3} rg /F1 {h:.3} Tf {:.3} {:.3} Td ({esc}) Tj ET", p.x - w / 2.0, p.y);
+            }
+            other => {
+                let pts: Vec<Pos2> = match other {
+                    Shape::Line(a, b) => vec![*a, *b],
+                    Shape::Poly(p) => p.clone(),
+                    Shape::Circle(ce, rad) => arc_points(*ce, *rad, 0.0, 360.0),
+                    Shape::Arc(ce, rad, a0, a1) => arc_points(*ce, *rad, *a0, *a1),
+                    Shape::Text(..) => Vec::new(),
+                };
+                if pts.len() < 2 {
+                    continue;
+                }
+                let _ = writeln!(c, "q {r:.3} {g:.3} {b:.3} RG {width} w {}", if dash.is_empty() { "[] 0 d" } else { dash });
+                path(&mut c, &pts);
+                let _ = writeln!(c, "S Q");
+            }
+        }
+    }
+    let (w, h) = (sheet.width * k, sheet.height * k);
+    let mut out: Vec<u8> = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.2} {h:.2}] /Contents 5 0 R /Resources << /Font << /F1 4 0 R >> >> >>"),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
+    ];
+    for (i, o) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    offsets.push(out.len());
+    out.extend(format!("5 0 obj\n<< /Length {} >>\nstream\n", c.len()).as_bytes());
+    out.extend(c.as_bytes());
+    out.extend(b"endstream\nendobj\n");
+    let xref = out.len();
+    out.extend(b"xref\n0 6\n0000000000 65535 f \n");
+    for o in &offsets {
+        out.extend(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+    out
+}
+
+/// Save the sheet on screen as a PDF to print.
+fn print_sheet(app: &mut SolveApp) {
+    let Some(sheet) = app.drawing.sheet.as_ref() else {
+        app.set_status("Add a view first, then print", true);
+        return;
+    };
+    let bytes = sheet_pdf(sheet, app.drawing.colours);
+    let name = format!("{}-sheet{}.pdf", app.session.doc.name, app.drawing.page + 1);
+    app.pick_save(&name, &["pdf"], move |app, path| {
+        let Some(path) = path else { return };
+        match solidcraft_engine::io::vfs::write(&path, &bytes) {
+            Ok(()) => app.set_status(format!("Saved {path} — open it and print"), false),
+            Err(e) => app.set_status(format!("Could not save the PDF: {e}"), true),
+        }
+    });
 }

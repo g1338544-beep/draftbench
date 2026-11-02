@@ -20,6 +20,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.ribbon.delete", "Delete View", ui_only).noundo().doc_only().at("DRAWING", "EDIT").icon("delete").params("No parameters. UI only: removes the selected view."),
     CommandSpec::new("drawing.ribbon.addsheet", "Add Sheet", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("box").params("No parameters. UI only: adds a blank sheet to the drawing."),
     CommandSpec::new("drawing.ribbon.delsheet", "Delete Sheet", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("delete").params("No parameters. UI only: removes the sheet on screen."),
+    CommandSpec::new("drawing.ribbon.print", "Print / PDF", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("export").params("No parameters. UI only: saves the sheet on screen as a PDF at paper size, to print."),
     CommandSpec::new("drawing.ribbon.fit", "Fit Sheet", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("fit").params("No parameters. UI only: frames the whole sheet."),
     CommandSpec::new("drawing.ribbon.export", "Export DXF", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("export").params("No parameters. UI only: exports the sheet as DXF."),
     CommandSpec::new("drawing.ribbon.close", "Back to Design", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("home").params("No parameters. UI only: leaves the Drawing workspace."),
