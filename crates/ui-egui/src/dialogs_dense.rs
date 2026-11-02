@@ -565,7 +565,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 });
                 if d.extra.contains_key("hole_size") {
                     form_row(ui, "Fit", |ui| {
-                        extra_choice(ui, &mut d.extra, "fit", "hole_fit", &[("Normal", "normal"), ("Close", "close"), ("Loose", "loose")]);
+                        extra_choice(ui, &mut d.extra, "fit", "hole_fit", &[("Normal", "normal"), ("Close", "close"), ("Loose", "loose"), ("Tap drill", "tap")]);
                     });
                     // Choosing a size or fit fills the diameter with the ISO 273 clearance hole; the
                     // field stays editable afterwards.
@@ -573,7 +573,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     let fit = d.extra.get("hole_fit").and_then(Value::as_str).unwrap_or("normal").to_string();
                     let key = format!("{size}/{fit}");
                     if d.extra.get("bolt_sync").and_then(Value::as_str) != Some(key.as_str()) {
-                        if let Some(v) = iso_clearance(&size, &fit) {
+                        // "Tap drill" is the hole a thread of that size is cut in (M5 → 4.2).
+                        let tap = (fit == "tap").then(|| solidcraft_engine::doc::parse_metric_thread(&size).map(|(d, p)| ((d - p) * 100.0).round() / 100.0)).flatten();
+                        if let Some(v) = tap.or_else(|| iso_clearance(&size, &fit)) {
                             *diameter = format!("{v} mm");
                         }
                         d.extra.insert("bolt_sync".into(), json!(key));
