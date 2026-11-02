@@ -357,6 +357,27 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
 
     o.code(0, "SECTION");
     o.code(2, "TABLES");
+    // The active viewport, framed on the drawing: without it AutoCAD opens on a tiny default view
+    // and a drawing in sheet coordinates seems empty until Zoom Extents.
+    let t = o.table("VPORT", 1);
+    o.record("VPORT", "AcDbViewportTableRecord", &t);
+    o.code(2, "*Active");
+    o.code(70, 0);
+    o.point(10, Vec2::new(0.0, 0.0));
+    o.point(11, Vec2::new(1.0, 1.0));
+    let (w, h) = ((hi.x - lo.x).max(1.0), (hi.y - lo.y).max(1.0));
+    let centre = Vec2::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0);
+    o.point(12, centre);
+    o.point(13, Vec2::new(0.0, 0.0));
+    o.point(14, Vec2::new(10.0, 10.0));
+    o.point(15, Vec2::new(10.0, 10.0));
+    o.num(16, 0.0);
+    o.num(26, 0.0);
+    o.num(36, 1.0);
+    o.point(17, centre);
+    o.num(40, h * 1.1);
+    o.num(41, w / h);
+    o.code(0, "ENDTAB");
     // The three every drawing has, and DASHED, which the dashed layers name: dash and gap lengths
     // (a gap is negative) after the pattern's total.
     let mut linetypes: Vec<(&str, &str, &[f64])> = vec![
@@ -573,6 +594,17 @@ mod tests {
     fn ellipse_point(e: &DxfShape, t: f64) -> Vec2 {
         let DxfShape::Ellipse { c, major, ratio, .. } = e else { panic!("{e:?}") };
         *c + *major * t.cos() + major.perp() * (*ratio * t.sin())
+    }
+
+    #[test]
+    fn active_viewport_frames_the_drawing() {
+        let e = DxfEntity { layer: "0".into(), shape: DxfShape::Line(Vec2::new(0.0, 0.0), Vec2::new(841.0, 594.0)) };
+        let text = write_dxf_drawing(&[], &[e]);
+        let p = pairs(&text);
+        let at = p.iter().position(|x| x == &(2, "*Active".to_string()));
+        assert!(at.is_some());
+        let tail = &p[at.unwrap_or(0)..];
+        assert!(tail.contains(&(12, "420.5".to_string())) && tail.contains(&(22, "297.0".to_string())));
     }
 
     /// A DXF text as (group code, value) pairs.
