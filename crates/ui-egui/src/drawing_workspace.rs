@@ -930,14 +930,38 @@ fn snap_circle(sheet: &Sheet, p: Pos2, tol: f32) -> Option<(Pos2, f32)> {
         if !matches!(layer, Layer::Visible | Layer::Hidden) {
             continue;
         }
-        if let Shape::Circle(c, r) | Shape::Arc(c, r, _, _) = shape {
-            let d = ((p - *c).length() - *r).abs();
+        let round = match shape {
+            Shape::Circle(c, r) | Shape::Arc(c, r, _, _) => Some((*c, *r)),
+            Shape::Poly(points) => poly_circle(points),
+            _ => None,
+        };
+        if let Some((c, r)) = round {
+            let d = ((p - c).length() - r).abs().min((p - c).length());
             if d <= tol && best.is_none_or(|(b, _, _)| d < b) {
-                best = Some((d, *c, *r));
+                best = Some((d, c, r));
             }
         }
     }
     best.map(|(_, c, r)| (c, r))
+}
+
+/// The circle a closed polyline traces (a hole drawn as many short segments), if it is round.
+fn poly_circle(points: &[Pos2]) -> Option<(Pos2, f32)> {
+    let n = points.len();
+    if !(12..=2000).contains(&n) {
+        return None;
+    }
+    let first = *points.first()?;
+    let last = *points.last()?;
+    let sum = points.iter().fold(vec2(0.0, 0.0), |a, q| a + q.to_vec2());
+    let c = (sum / n as f32).to_pos2();
+    let r = points.iter().map(|q| (*q - c).length()).sum::<f32>() / n as f32;
+    if !(r.is_finite() && r > 1e-3) {
+        return None;
+    }
+    let round = points.iter().all(|q| ((*q - c).length() - r).abs() <= r * 0.03);
+    let closed = (first - last).length() <= r * 0.3;
+    (round && closed).then_some((c, r))
 }
 
 fn dist_to_segment(p: Pos2, (a, b): (Pos2, Pos2)) -> f32 {
