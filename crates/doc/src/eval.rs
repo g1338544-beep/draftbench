@@ -4279,7 +4279,7 @@ fn feature_tools_with_constructor(
             // Its sides are named by the profile's curves, its base `start`.
             Ok(vec![crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None)])
         }
-        FeatureKind::Coil { base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, .. } => {
+        FeatureKind::Coil { base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, end_turns, .. } => {
             let base = &point(vals, base)?;
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let (d, p, n, s) = (
@@ -4316,7 +4316,30 @@ fn feature_tools_with_constructor(
             let axis = if *clockwise { k * -1.0 } else { k };
             // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
             let pitch = if *clockwise { -p } else { p };
-            Ok(unnamed(vec![kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?]))
+            let ends = match end_turns {
+                Some(e) => val(vals, e, Kind::Unitless)?,
+                None => 0.0,
+            };
+            if ends <= 0.0 {
+                return Ok(unnamed(vec![kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?]));
+            }
+            if !(ends <= 5.0 && n + 2.0 * ends <= 200.0) {
+                return Err(DocError::Invalid("the closed end turns must be 0…5".into()));
+            }
+            // Wire against wire at the ends (a hair apart so the turns never touch), the working
+            // pitch between: one continuous sweep, so there is no join to fail.
+            let tight = s * 1.001 * pitch.signum();
+            let lift = move |a: f64| {
+                let t = a / std::f64::consts::TAU;
+                if t <= ends {
+                    tight * t
+                } else if t <= ends + n {
+                    tight * ends + pitch * (t - ends)
+                } else {
+                    tight * ends + pitch * n + tight * (t - ends - n)
+                }
+            };
+            Ok(unnamed(vec![kernel::sweep_helix_with(&plane, &region, *base, axis, tight.abs().min(pitch.abs()), &lift, n + 2.0 * ends)?]))
         }
         FeatureKind::Loft { sections, rails, rail_fit, .. } => {
             let mut secs = Vec::new();

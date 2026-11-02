@@ -21,6 +21,13 @@ fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
 /// (one per profile segment); if those cannot be built, ruled walls between stations 3° apart
 /// stand in.
 pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64) -> Result<Body> {
+    sweep_helix_with(plane, region, axis_origin, axis, pitch, &|a| pitch * a / std::f64::consts::TAU, turns)
+}
+
+/// A screw sweep whose advance along the axis is any smooth `lift(angle)` (millimetres for the
+/// angle turned, in radians): a coil with closed ends is a small pitch, the working pitch, then
+/// the small pitch again. `pitch` is the smallest pitch it ever has (the section must clear it).
+pub fn sweep_helix_with(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, lift: &dyn Fn(f64) -> f64, turns: f64) -> Result<Body> {
     let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
     if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && pitch.abs() < 1e7 && axis_origin.is_finite()) {
         return Err(KernelError::Invalid("helix: turns must be in (0, 200] and the pitch finite".into()));
@@ -39,7 +46,7 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
         return Err(KernelError::Invalid(format!("the coil runs into itself: the pitch must exceed the section ({extent:.3} mm)")));
     }
     // One smooth B-spline wall per profile segment; the ruled walls below are the fallback.
-    if let Ok(b) = smooth_helix(plane, &profile, axis_origin, k, pitch, turns) {
+    if let Ok(b) = smooth_helix(plane, &profile, axis_origin, k, lift, turns) {
         return Ok(b);
     }
     let n = ((turns * 120.0).ceil() as usize).clamp(4, 24_000);
@@ -47,8 +54,7 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
     let mut wires = Vec::with_capacity(n + 1);
     for i in 0..=n {
         let a = total * i as f64 / n as f64;
-        let lift = k * (pitch * a / std::f64::consts::TAU);
-        let o = axis_origin + rot(plane.origin - axis_origin, k, a) + lift;
+        let o = axis_origin + rot(plane.origin - axis_origin, k, a) + k * lift(a);
         let pl = Plane { origin: o, x: rot(plane.x, k, a), y: rot(plane.y, k, a) };
         wires.push(uniform_wire(&pl, lp)?);
     }
@@ -110,7 +116,7 @@ const STATIONS_PER_TURN: f64 = 12.0;
 
 /// Helical walls as B-spline surfaces: each profile segment, sampled at every station of the
 /// screw motion, interpolated by cubics across the profile and then along the helix.
-fn smooth_helix(plane: &Plane, profile: &NumberedLoop, o: Vec3, k: Vec3, pitch: f64, turns: f64) -> Result<Body> {
+fn smooth_helix(plane: &Plane, profile: &NumberedLoop, o: Vec3, k: Vec3, lift: &dyn Fn(f64) -> f64, turns: f64) -> Result<Body> {
     let lp = &profile.lp;
     let nseg = lp.segs.len();
     if nseg == 0 || nseg > 64 {
@@ -121,7 +127,7 @@ fn smooth_helix(plane: &Plane, profile: &NumberedLoop, o: Vec3, k: Vec3, pitch: 
     let at = |i: usize, q: solidcraft_geom::Vec2| {
         let a = total * i as f64 / n as f64;
         let w = plane.to_world(q);
-        o + rot(w - o, k, a) + k * (pitch * a / std::f64::consts::TAU)
+        o + rot(w - o, k, a) + k * lift(a)
     };
     let fail = |w: &str| KernelError::Failed(format!("smooth helix: {w}"));
     // Per segment: the wall surface through its samples at every station.

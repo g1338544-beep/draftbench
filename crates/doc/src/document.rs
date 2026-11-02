@@ -994,6 +994,11 @@ pub enum FeatureKind {
         /// Turn the other way (left-handed).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clockwise: bool,
+        /// Closed ends: this many turns at each end wound tight, wire against wire (a
+        /// compression spring's ground ends). None or 0: the pitch all the way.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "End turns")]
+        end_turns: Option<Expr>,
         #[serde(default)]
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

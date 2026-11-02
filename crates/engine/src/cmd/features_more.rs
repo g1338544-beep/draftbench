@@ -20,7 +20,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("solid.coil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; operation?, targets?, name?, body_name?",
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; end_turns?: turns wound tight at each end (closed ends, default 0); operation?, targets?, name?, body_name?",
     ),
     CommandSpec::new("solid.rib", "Rib", rib)
         .at("SOLID", "CREATE")
@@ -102,6 +102,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             position,
             start_angle,
             clockwise,
+            end_turns: expr(p, "end_turns"),
             operation,
             targets: string_list(p, "targets").into_iter().map(BodyName).collect(),
         },
