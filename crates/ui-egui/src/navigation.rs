@@ -472,7 +472,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let mode = motion
         .map(|(m, _)| m)
         .or_else(|| {
-            if dragging && app.viewport.axis_drag.is_none() {
+            if dragging && app.viewport.axis_drag.is_none() && !crate::wcs_triad::dragging() {
                 match button {
                     Some(b) => crate::prefs::nav_mode(app, b, mods),
                     None if primary_down => primary_nav,

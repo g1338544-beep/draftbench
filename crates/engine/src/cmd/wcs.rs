@@ -29,7 +29,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSPECT")
         .icon("origin")
         .noundo()
-        .params("point?: [x,y,z] (default: the picked vertex, edge or face point). Moves the WCS origin there, keeping its orientation"),
+        .params("point?: [x,y,z]; rim?: [x,y,z] (a point on an edge: a round edge gives its centre). Default: the picked vertex, edge or face point; with nothing picked it shows the WCS on screen to drag. Moves the WCS origin there, keeping its orientation"),
     CommandSpec::new("wcs.rotate_x", "Rotate WCS about XC", rotate_x).at("SOLID", "INSPECT").icon("axis").noundo().params("angle?: degrees (default 90)"),
     CommandSpec::new("wcs.rotate_y", "Rotate WCS about YC", rotate_y).at("SOLID", "INSPECT").icon("joint_origin").noundo().params("angle?: degrees (default 90)"),
     CommandSpec::new("wcs.rotate_z", "Rotate WCS about ZC", rotate_z).at("SOLID", "INSPECT").icon("pattern_circ").noundo().params("angle?: degrees (default 90)"),
@@ -51,7 +51,8 @@ fn report(w: &Wcs) -> Value {
 }
 
 fn store(s: &mut Session, w: Wcs) -> Value {
-    s.wcs = (w != Wcs::WORLD).then_some(w);
+    // Kept even on the world axes: once started, the triad stays on screen to be dragged.
+    s.wcs = Some(w);
     s.revision += 1;
     report(&w)
 }
@@ -65,14 +66,20 @@ fn point_of(sel: &Sel) -> Option<Vec3> {
 
 fn origin(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "wcs.origin";
-    let at = match p.get("point") {
-        Some(v) => vec3(v).ok_or_else(|| bad(cmd, "point must be [x, y, z]"))?,
-        None => {
-            let picked = s.selection.iter().find_map(point_of).ok_or_else(|| bad(cmd, "pick a vertex, edge or face first, or give a point"))?;
-            // A pick on a round edge (a hole's rim) means the middle of that circle.
-            let edge = s.selection.iter().any(|x| matches!(x, Sel::Edge { .. }));
-            if edge { circle_centre(s, picked).unwrap_or(picked) } else { picked }
-        }
+    let at = if let Some(v) = p.get("point") {
+        vec3(v).ok_or_else(|| bad(cmd, "point must be [x, y, z]"))?
+    } else if let Some(v) = p.get("rim") {
+        // A point picked on an edge: the middle of the circle when the edge is round.
+        let rim = vec3(v).ok_or_else(|| bad(cmd, "rim must be [x, y, z]"))?;
+        circle_centre(s, rim).unwrap_or(rim)
+    } else if let Some(picked) = s.selection.iter().find_map(point_of) {
+        // A pick on a round edge (a hole's rim) means the middle of that circle.
+        let edge = s.selection.iter().any(|x| matches!(x, Sel::Edge { .. }));
+        if edge { circle_centre(s, picked).unwrap_or(picked) } else { picked }
+    } else {
+        // Nothing picked: show the triad where it is, to be dragged to a centre, corner or middle.
+        let w = current(s);
+        return Ok(store(s, w));
     };
     if !(at.x.is_finite() && at.y.is_finite() && at.z.is_finite()) {
         return Err(bad(cmd, "point must be finite"));
@@ -116,7 +123,9 @@ fn rotate_z(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn reset(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(store(s, Wcs::WORLD))
+    s.wcs = None;
+    s.revision += 1;
+    Ok(report(&Wcs::WORLD))
 }
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
