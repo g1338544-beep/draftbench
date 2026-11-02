@@ -2868,17 +2868,22 @@ fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
                 }
             }
             Shape::Poly(points) => {
-                points.iter().for_each(|q| offer(*q));
+                // A hole drawn as many short segments offers its centre, not its vertices.
                 if let Some((c, r)) = poly_circle(points) {
                     offer(c);
                     centres.push((c, r));
+                } else {
+                    points.iter().for_each(|q| offer(*q));
                 }
             }
             Shape::Circle(c, r) => {
                 offer(*c);
                 centres.push((*c, *r));
                 for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
-                    offer(pos2(c.x + dx * r, c.y + dy * r));
+                    let q = pos2(c.x + dx * r, c.y + dy * r);
+                    if (q - p).length() <= tol * 0.4 {
+                        offer(q);
+                    }
                 }
             }
             Shape::Arc(c, _, _, _) => offer(*c),
