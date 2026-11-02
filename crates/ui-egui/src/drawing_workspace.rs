@@ -161,6 +161,11 @@ pub struct State {
     cl_drag: Option<(Pos2, Pos2, Pos2, Pos2, bool)>,
     /// An erase drag in progress: where it started and where the pointer is.
     erase: Option<(Pos2, Pos2)>,
+    /// Earlier states of the sheet (as saved text), for Undo and Redo in the Drawing workspace.
+    undo: Vec<String>,
+    redo: Vec<String>,
+    /// The state at the last look: what a change is compared with.
+    last_state: String,
     cline_tool: Option<Vec<(Pos2, Pos2)>>,
     dirty_marks: bool,
     /// Colour pictures of the model on the sheet, and the pictures drawn so far (key, RGB, texture).
@@ -246,6 +251,9 @@ impl Default for State {
             centre_cut: Vec::new(),
             cl_drag: None,
             erase: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            last_state: String::new(),
             cline_tool: None,
             dirty_marks: false,
             shaded: Vec::new(),
@@ -991,6 +999,50 @@ fn poly_circle(points: &[Pos2]) -> Option<(Pos2, f32)> {
     let round = points.iter().all(|q| ((*q - c).length() - r).abs() <= r * 0.03);
     let closed = (first - last).length() <= r * 0.3;
     (round && closed).then_some((c, r))
+}
+
+/// Remember the sheet's state each time it settles after a change, so Undo can step back.
+fn track_history(app: &mut SolveApp, ui: &egui::Ui) {
+    let d = &app.drawing;
+    let busy = d.drag.is_some() || d.drag_dim.is_some() || d.drag_end.is_some() || d.erase.is_some() || d.cl_drag.is_some() || ui.input(|i| i.pointer.any_down());
+    if busy || d.sheet.is_none() {
+        return;
+    }
+    let now = d.page_json().to_string();
+    if app.drawing.last_state.is_empty() {
+        app.drawing.last_state = now;
+    } else if app.drawing.last_state != now {
+        let before = std::mem::replace(&mut app.drawing.last_state, now);
+        app.drawing.undo.push(before);
+        if app.drawing.undo.len() > 100 {
+            app.drawing.undo.remove(0);
+        }
+        app.drawing.redo.clear();
+    }
+}
+
+/// Undo (or redo) the last change to the sheet; false when the Drawing workspace is not showing.
+pub fn step_history(app: &mut SolveApp, undo: bool) -> bool {
+    if !active(app) {
+        return false;
+    }
+    let from = if undo { &mut app.drawing.undo } else { &mut app.drawing.redo };
+    let Some(target) = from.pop() else {
+        app.set_status(if undo { "Nothing to undo on this sheet" } else { "Nothing to redo on this sheet" }.to_string(), false);
+        return true;
+    };
+    let current = std::mem::replace(&mut app.drawing.last_state, target.clone());
+    if undo {
+        app.drawing.redo.push(current);
+    } else {
+        app.drawing.undo.push(current);
+    }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&target) {
+        app.drawing.load_page(&v);
+    }
+    app.drawing.sel_centre = None;
+    refresh(app);
+    true
 }
 
 /// Does the segment `a`–`b` touch the rectangle `r` (x0, y0, x1, y1)?
@@ -2619,6 +2671,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         Color32::from_gray(220),
     );
     let (sw, sh) = (sheet.width, sheet.height);
+    track_history(app, ui);
     if std::mem::take(&mut app.drawing.dirty_marks) {
         refresh(app);
     }

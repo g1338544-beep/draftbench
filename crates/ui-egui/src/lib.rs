@@ -770,6 +770,10 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
+        // On the drawing sheet, undo and redo step through the sheet's own changes.
+        if matches!(id, "edit.undo" | "edit.redo") && drawing_workspace::step_history(self, id == "edit.undo") {
+            return Ok(json!({}));
+        }
         let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
