@@ -7,6 +7,7 @@ use super::CommandSpec;
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("drawing.ribbon.base", "Base View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: opens a window to choose the model view and scale, then click the sheet to place it."),
     CommandSpec::new("drawing.ribbon.front", "Front View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds a front view to the sheet."),
     CommandSpec::new("drawing.ribbon.top", "Top View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds a top view to the sheet."),
     CommandSpec::new("drawing.ribbon.right", "Right View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds a right view to the sheet."),

@@ -192,6 +192,8 @@ pub struct State {
     orient: Option<[String; 3]>,
     /// The Sheet window shown when Drawing opens on a design with no views yet.
     setup: bool,
+    /// The Base View window: the view to use (7 = as the 3D window shows it) and its scale; the next click on the sheet places it.
+    base: Option<(usize, String)>,
     /// Per-design views and dimensions kept between runs, by design name.
     saved_designs: serde_json::Map<String, serde_json::Value>,
     /// Every sheet of the drawing as saved JSON (the current one is refreshed when switching).
@@ -255,6 +257,7 @@ impl Default for State {
             scale_edit: None,
             orient: None,
             setup: false,
+            base: None,
             saved_designs: serde_json::Map::new(),
             pages: Vec::new(),
             page: 0,
@@ -1005,6 +1008,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             app.drawing.mark_tool = !app.drawing.mark_tool;
             app.drawing.dim_tool = None;
         }
+        "drawing.ribbon.base" => app.drawing.base = Some((1, app.drawing.sheet_scale.clone())),
         "drawing.ribbon.orient" => app.drawing.orient = Some(["1".into(), "-1".into(), "1".into()]),
         "drawing.ribbon.shaded" => add_shaded_view(app),
         "drawing.ribbon.print" => print_sheet(app),
@@ -1033,6 +1037,71 @@ fn normal_angles(n: [f64; 3]) -> Option<(f64, f64)> {
     let (x, y, z) = (n[0] / len, n[1] / len, n[2] / len);
     let yaw = if x.abs() < 1e-9 && y.abs() < 1e-9 { 0.0 } else { (-x).atan2(-y) };
     Some((yaw, z.clamp(-1.0, 1.0).asin()))
+}
+
+/// The model views as icon buttons: a small cube with the face being looked at filled in
+/// (hidden faces, seen from behind, are outlined with a dotted face). The last one is "as the 3D window".
+fn view_buttons(ui: &mut egui::Ui, view: &mut usize) {
+    use egui::{Shape, vec2};
+    let t = Tokens::get();
+    let labels: Vec<&str> = VIEWS.iter().map(|v| v.1).chain(["Model (as the 3D window)"]).collect();
+    ui.horizontal_wrapped(|ui| {
+        for (i, label) in labels.iter().enumerate() {
+            let (rect, response) = ui.allocate_exact_size(vec2(t.control_height * 1.3, t.control_height * 1.3), Sense::click());
+            let on = *view == i;
+            let bg = if on { t.accent_soft } else if response.hovered() { t.hover } else { Color32::TRANSPARENT };
+            ui.painter().rect(rect, t.control_radius, bg, Stroke::new(if on { 1.5 } else { 1.0 }, if on { t.accent } else { t.control_border }), egui::StrokeKind::Inside);
+            let ink = if on { t.form_ink } else { t.form_dim };
+            let b = rect.shrink(rect.width() * 0.2);
+            let k = b.width() * 0.62;
+            let d = b.width() - k;
+            // Front face lower left, top face above it, right face beside it.
+            let f0 = pos2(b.left(), b.bottom());
+            let front = [pos2(f0.x, f0.y - k), pos2(f0.x + k, f0.y - k), pos2(f0.x + k, f0.y), f0];
+            let top = [front[0], front[1], pos2(front[1].x + d, front[1].y - d), pos2(front[0].x + d, front[0].y - d)];
+            let right = [front[1], pos2(front[1].x + d, front[1].y - d), pos2(front[2].x + d, front[2].y - d), front[2]];
+            // Which faces are filled: front 0 (and back 4, same silhouette), top 1/5, right 2/3, iso 6, model 7 all.
+            let (f, tp, r) = match i {
+                0 | 4 => (true, false, false),
+                1 | 5 => (false, true, false),
+                2 | 3 => (false, false, true),
+                _ => (true, true, true),
+            };
+            let hidden = matches!(i, 3..=5);
+            for (face, filled) in [(front, f), (top, tp), (right, r)] {
+                let fill = if filled { ink.gamma_multiply(if hidden { 0.18 } else { 0.55 }) } else { Color32::TRANSPARENT };
+                ui.painter().add(Shape::convex_polygon(face.to_vec(), fill, Stroke::new(1.0, ink)));
+            }
+            if i == 7 {
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "3D", egui::FontId::proportional(t.font_body * 0.8), t.panel);
+            }
+            if response.on_hover_text(*label).clicked() {
+                *view = i;
+            }
+        }
+    });
+}
+
+/// The Base View window: choose the model view and scale, then click the sheet to place it.
+fn base_window(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some((mut view, mut scale)) = app.drawing.base.clone() else { return };
+    let mut orient = false;
+    let mut close = false;
+    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_base"), "base", "Base View").show_body(ctx, |ui| {
+        ui.label("Model view to use");
+        view_buttons(ui, &mut view);
+        if crate::ui_kit::button(ui, "Orient View…", crate::ui_kit::Button::Small).clicked() {
+            orient = true;
+        }
+        ui.label("Scale");
+        scale_picker(ui, "base_scale", &mut scale);
+        ui.small("Click the sheet to place the view. Click again for another; Close ends.");
+        close = crate::ui_kit::button(ui, "Close", crate::ui_kit::Button::Small).clicked();
+    });
+    if orient {
+        app.drawing.orient = Some(["1".into(), "-1".into(), "1".into()]);
+    }
+    app.drawing.base = if closed || close { None } else { Some((view, scale)) };
 }
 
 /// The Sheet window: size, scale, name and projection, shown when Drawing opens on a new design.
@@ -1974,6 +2043,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     ensure_shaded(app, ui.ctx());
     orient_window(app, ui.ctx());
     setup_window(app, ui.ctx());
+    base_window(app, ui.ctx());
     dimension_window(app, ui.ctx());
     let Some(sheet) = app.drawing.sheet.as_ref() else {
         let msg = match (&app.drawing.error, app.drawing.placed.is_empty()) {
@@ -2081,6 +2151,24 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 proj_placed = true;
             }
         }
+    }
+    // Base View: a click on the sheet places the chosen view there.
+    if let Some((view, scale)) = app.drawing.base.clone()
+        && response.clicked_by(egui::PointerButton::Primary)
+        && let Some(at) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+    {
+        if view == 7 {
+            add_model_view(app);
+        } else {
+            add_view(app, view);
+        }
+        if let Some(v) = app.drawing.placed.last_mut() {
+            v.x = f64::from(at.x);
+            v.y = f64::from(at.y);
+            v.scale = scale;
+        }
+        refresh(app);
+        return;
     }
     // Centre Mark: click a circle for a cross sized to it, or any point for a small one; stays on until Esc.
     if app.drawing.mark_tool {
