@@ -255,6 +255,12 @@ pub struct State {
     /// Frame margin and title block width in mm, and the title block cells typed over.
     margin: String,
     block_w: String,
+    /// The border and title block: shown or not, the block's height (mm) and where its two column dividers sit (% of its width).
+    frame_on: bool,
+    block_on: bool,
+    block_h: String,
+    col1: String,
+    col2: String,
     cells: [String; 7],
     cell_edit: Option<usize>,
     placed: Vec<PlacedView>,
@@ -366,6 +372,11 @@ impl Default for State {
             centre_extra: "3".into(),
             margin: "10".into(),
             block_w: "190".into(),
+            frame_on: true,
+            block_on: true,
+            block_h: "36".into(),
+            col1: "40".into(),
+            col2: "70".into(),
             cells: Default::default(),
             cell_edit: None,
             placed: Vec::new(),
@@ -472,12 +483,18 @@ impl State {
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
             "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
-            "company": self.company, "margin": self.margin, "block_w": self.block_w, "cells": self.cells, "designs": designs,
+            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_h": self.block_h, "col1": self.col1, "col2": self.col2, "cells": self.cells, "designs": designs,
         })
     }
 
     pub fn load_prefs(&mut self, v: &serde_json::Value) {
         let flag = |k: &str| v.get(k).and_then(serde_json::Value::as_bool);
+        if let Some(b) = flag("frame_on") {
+            self.frame_on = b;
+        }
+        if let Some(b) = flag("block_on") {
+            self.block_on = b;
+        }
         let index = |k: &str, max: u64| v.get(k).and_then(serde_json::Value::as_u64).filter(|n| *n <= max).map(|n| n as usize);
         if let Some(n) = index("paper", 5) {
             self.paper = n;
@@ -513,6 +530,9 @@ impl State {
             ("centre_extra", &mut self.centre_extra, 6),
             ("margin", &mut self.margin, 6),
             ("block_w", &mut self.block_w, 6),
+            ("block_h", &mut self.block_h, 6),
+            ("col1", &mut self.col1, 6),
+            ("col2", &mut self.col2, 6),
             ("author", &mut self.author, 80),
             ("company", &mut self.company, 80),
         ] {
@@ -907,6 +927,15 @@ fn params(st: &State) -> Value {
     if st.paper >= 5 {
         let num = |t: &str, d: f64| t.trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(d);
         p["size"] = json!([num(&st.custom_w, 420.0), num(&st.custom_h, 297.0)]);
+    }
+    p["frame_on"] = json!(st.frame_on);
+    p["block_on"] = json!(st.block_on);
+    for (key, text, scale) in [("block_h", &st.block_h, 1.0), ("col1", &st.col1, 0.01), ("col2", &st.col2, 0.01)] {
+        if let Ok(k) = text.trim().parse::<f64>()
+            && k.is_finite()
+        {
+            p[key] = json!(k * scale);
+        }
     }
     for (key, text) in [("margin", &st.margin), ("block_w", &st.block_w)] {
         if let Ok(k) = text.trim().parse::<f64>()
@@ -2267,6 +2296,13 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.label("Frame margin · Title block width (mm)");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_margin"), &mut app.drawing.margin, "10", false, 6).changed();
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_block_w"), &mut app.drawing.block_w, "190", false, 6).changed();
+                    ui.label("Border and title block");
+                    dirty |= crate::ui_kit::checkbox(ui, "Show the border", &mut app.drawing.frame_on).changed();
+                    dirty |= crate::ui_kit::checkbox(ui, "Show the title block", &mut app.drawing.block_on).changed();
+                    ui.label("Title block height (mm) · column dividers (% of width)");
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_block_h"), &mut app.drawing.block_h, "36", false, 6).changed();
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_col1"), &mut app.drawing.col1, "40", false, 6).changed();
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_col2"), &mut app.drawing.col2, "70", false, 6).changed();
                     ui.label("Text size (mm, 2–10)");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_text_height"), &mut app.drawing.text_height, "3.5", false, 6).changed();
                     for (label, key) in [
@@ -2695,9 +2731,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let margin = num(&app.drawing.margin, 10.0).clamp(2.0, 40.0);
         let block_w = num(&app.drawing.block_w, 190.0).max(60.0).min(sheet.width - 2.0 * margin).max(10.0);
         let x0 = sheet.width - margin - block_w;
-        if s.x >= x0 && s.x <= sheet.width - margin && s.y >= margin && s.y <= margin + 36.0 {
-            let row = (((s.y - margin) / 12.0) as usize).min(2);
-            let col = if (s.x - x0) / block_w < 0.4 { 0 } else if (s.x - x0) / block_w < 0.7 { 1 } else { 2 };
+        let bh = num(&app.drawing.block_h, 36.0).clamp(18.0, 90.0);
+        let c1 = (num(&app.drawing.col1, 40.0) / 100.0).clamp(0.15, 0.6);
+        let c2 = (num(&app.drawing.col2, 70.0) / 100.0).clamp(c1 + 0.1, 0.9);
+        let rowh = bh / 3.0;
+        if app.drawing.block_on && s.x >= x0 && s.x <= sheet.width - margin && s.y >= margin && s.y <= margin + bh {
+            let row = (((s.y - margin) / rowh) as usize).min(2);
+            let col = if (s.x - x0) / block_w < c1 { 0 } else if (s.x - x0) / block_w < c2 { 1 } else { 2 };
             let index = match (row, col) {
                 (2, _) => 0,
                 (1, c) => 1 + c,
@@ -2705,7 +2745,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             };
             if app.drawing.cells[index].trim().is_empty() {
                 // Start from the text shown there.
-                let centre = pos2(x0 + block_w * [0.2, 0.55, 0.85][col], margin + 12.0 * row as f32 + 4.0);
+                let centre = pos2(x0 + block_w * [c1 / 2.0, (c1 + c2) / 2.0, (c2 + 1.0) / 2.0][col], margin + rowh * row as f32 + rowh * 0.3);
                 let shown = sheet
                     .items
                     .iter()

@@ -766,18 +766,34 @@ fn finish(
     let th = text_height(p);
     // Border and title block.
     let margin = p.get("margin").and_then(Value::as_f64).filter(|v| v.is_finite() && (2.0..=40.0).contains(v)).unwrap_or(MARGIN);
-    rect("SHEET", Vec2::new(margin, margin), Vec2::new(sheet_w - margin, sheet_h - margin), &mut entities);
+    let on = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(true);
+    if on("frame_on") {
+        rect("SHEET", Vec2::new(margin, margin), Vec2::new(sheet_w - margin, sheet_h - margin), &mut entities);
+    }
+    // The title block: its height and the two column dividers can be changed; it can be left out.
+    let bh = p.get("block_h").and_then(Value::as_f64).filter(|v| v.is_finite() && (18.0..=90.0).contains(v)).unwrap_or(TITLE_H);
+    let c1 = p.get("col1").and_then(Value::as_f64).filter(|v| v.is_finite() && (0.15..=0.6).contains(v)).unwrap_or(0.4);
+    let c2 = p.get("col2").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > c1 + 0.1 && *v <= 0.9).unwrap_or(0.7);
     let wanted = p.get("block_w").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 60.0).unwrap_or(190.0);
     let block_w = wanted.min(sheet_w - 2.0 * margin).max(10.0);
     let (bx0, by0) = (sheet_w - margin - block_w, margin);
-    let row = TITLE_H / 3.0;
+    let row = bh / 3.0;
     let right = sheet_w - margin;
-    rect("SHEET", Vec2::new(bx0, by0), Vec2::new(right, by0 + TITLE_H), &mut entities);
-    line("SHEET", Vec2::new(bx0, by0 + row), Vec2::new(right, by0 + row), &mut entities);
-    line("SHEET", Vec2::new(bx0, by0 + 2.0 * row), Vec2::new(right, by0 + 2.0 * row), &mut entities);
-    for f in [0.4, 0.7] {
-        line("SHEET", Vec2::new(bx0 + block_w * f, by0), Vec2::new(bx0 + block_w * f, by0 + 2.0 * row), &mut entities);
+    let block_on = on("block_on");
+    let mut block_entities: Vec<DxfEntity> = Vec::new();
+    {
+        let entities = &mut block_entities;
+        rect("SHEET", Vec2::new(bx0, by0), Vec2::new(right, by0 + bh), entities);
+        line("SHEET", Vec2::new(bx0, by0 + row), Vec2::new(right, by0 + row), entities);
+        line("SHEET", Vec2::new(bx0, by0 + 2.0 * row), Vec2::new(right, by0 + 2.0 * row), entities);
+        for f in [c1, c2] {
+            line("SHEET", Vec2::new(bx0 + block_w * f, by0), Vec2::new(bx0 + block_w * f, by0 + 2.0 * row), entities);
+        }
     }
+    if block_on {
+        entities.append(&mut block_entities);
+    }
+    let (m0, m1, m2) = (c1 / 2.0, (c1 + c2) / 2.0, (c2 + 1.0) / 2.0);
     let field = |key: &str| -> String { p.get("block").and_then(|b| b.get(key)).and_then(Value::as_str).unwrap_or("").chars().take(60).collect() };
     let cap = |label: &str, value: String| if value.is_empty() { String::new() } else { format!("{label} {value}") };
     // Cells the user typed over: title, company, number, date, scale, drawn by, paper.
@@ -785,22 +801,26 @@ fn finish(
     let cell = |i: usize, default: String| -> String {
         cells.and_then(|c| c.get(i)).and_then(Value::as_str).filter(|t| !t.trim().is_empty()).map_or(default, |t| t.chars().take(80).collect())
     };
+    let text_from = entities.len();
     let company = cell(1, field("company"));
     text("TEXT", Vec2::new(bx0 + block_w / 2.0, by0 + 2.0 * row + row * 0.3), th * 1.4, cell(0, if title.is_empty() { "Untitled".into() } else { title }), &mut entities);
     if !company.is_empty() {
-        text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row + row * 0.3), th, company, &mut entities);
+        text("TEXT", Vec2::new(bx0 + block_w * m0, by0 + row + row * 0.3), th, company, &mut entities);
     }
-    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row + row * 0.3), th, cell(2, cap("No.", [field("number"), cap("Sh", field("sheet")), cap("Rev", field("revision"))].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("  "))), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.85, by0 + row + row * 0.3), th, cell(3, cap("Date", field("date"))), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row * 0.3), th, cell(4, cap("Scale", scale_text.clone())), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row * 0.3), th, cell(5, cap("By", field("author"))), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * m1, by0 + row + row * 0.3), th, cell(2, cap("No.", [field("number"), cap("Sh", field("sheet")), cap("Rev", field("revision"))].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("  "))), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * m2, by0 + row + row * 0.3), th, cell(3, cap("Date", field("date"))), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * m0, by0 + row * 0.3), th, cell(4, cap("Scale", scale_text.clone())), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * m1, by0 + row * 0.3), th, cell(5, cap("By", field("author"))), &mut entities);
     text(
         "TEXT",
-        Vec2::new(bx0 + block_w * 0.85, by0 + row * 0.3),
+        Vec2::new(bx0 + block_w * m2, by0 + row * 0.3),
         th,
         cell(6, format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" })),
         &mut entities,
     );
+    if !block_on {
+        entities.truncate(text_from);
+    }
     // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go; a fifth
     // number of 1 means one exact line (its two ends) and nothing else.
     if let Some(cuts) = p.get("centre_cut").and_then(Value::as_array) {
@@ -859,7 +879,7 @@ fn finish(
         let edges = [0.0, 0.10, 0.56, 0.68, 1.0];
         let rh = 7.0;
         let n = rows.len().min(40);
-        let y0 = by0 + TITLE_H;
+        let y0 = by0 + if block_on { bh } else { 0.0 };
         let top = y0 + rh * (n as f64 + 1.0);
         rect("SHEET", Vec2::new(bx0, y0), Vec2::new(right, top), &mut entities);
         for r in 1..=n {
