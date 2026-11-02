@@ -366,6 +366,15 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     let mut pan = if trackpad_pan { raw.pan } else { egui::Vec2::ZERO } + raw.mouse_pan;
     pan.x *= crate::prefs::pan_sign_x(app);
+    // Touch screen: two fingers pan along with the pinch zoom; one finger on empty space orbits.
+    let fingers = ui.input(|i| i.multi_touch());
+    if let Some(t) = fingers
+        && t.translation_delta.x.is_finite()
+        && t.translation_delta.y.is_finite()
+    {
+        pan += t.translation_delta;
+    }
+    let touch_start = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Touch { phase: egui::TouchPhase::Start, .. })));
     let scroll = if app.viewport.wheel_zoom_raw_until_idle || (trackpad_pan && app.viewport.trackpad_until_idle) {
         raw.zoom + if trackpad_pan { 0.0 } else { raw.point_zoom }
     } else {
@@ -438,7 +447,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         // Ctrl+left drag from empty space orbits in every preset (Cmd on macOS). A Ctrl+click
         // still selects, and Ctrl on geometry still drags it without snapping.
         let ctrl_orbit = (mods.ctrl || mods.command) && !mods.shift && !mods.alt && empty_space(app);
-        app.viewport.primary_nav = preset.or(ctrl_orbit.then_some(NavMode::Orbit));
+        let touch_orbit = touch_start && app.tool.is_none() && app.dialog.is_none() && !mods.shift && empty_space(app);
+        app.viewport.primary_nav = preset.or(ctrl_orbit.then_some(NavMode::Orbit)).or(touch_orbit.then_some(NavMode::Orbit));
     } else if !primary_down && !primary_released {
         app.viewport.primary_nav = None;
     }
@@ -482,7 +492,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                 None
             }
         })
-        .filter(|m| allowed(*m));
+        .filter(|m| allowed(*m) && fingers.is_none());
     if let Some((mode, delta)) = motion {
         if delta != egui::Vec2::ZERO {
             let mut params = json!({"motion":if mode == NavMode::Pan {"pan"} else {"orbit"},"delta":[delta.x,delta.y]});
