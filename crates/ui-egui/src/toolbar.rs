@@ -1890,6 +1890,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Copy, Cut and Paste (`edit_clipboard::handle`).
                 Key::C | Key::X | Key::V if !mods.shift && !mods.alt => {}
                 Key::S => save(app),
+                // NX-style: Ctrl+B hides what is selected, Ctrl+Shift+B swaps shown and hidden,
+                // Ctrl+Shift+U shows everything.
+                Key::B if !mods.shift && !mods.alt => crate::context_menu::toggle_visibility(app),
+                Key::B if mods.shift && !mods.alt => drop(app.run("view.invert_visibility", json!({}))),
+                Key::U if mods.shift && !mods.alt => drop(app.run("view.show_all", json!({}))),
                 _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods)),
             }
             continue;

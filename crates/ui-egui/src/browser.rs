@@ -1048,6 +1048,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         origin_rows(app, ui, d, acts);
         canvas_rows(app, ui, d, acts);
         analysis_rows(app, ui, d, acts);
+        layer_rows(app, ui, d);
     }
     let _ = t;
     for folder in ["bodies", "sketches", "construction"] {
@@ -1358,6 +1359,49 @@ pub fn view_items(app: &SolveApp, name: &str) -> Vec<Item> {
         Item::action("ui.rename", "Rename", "rename").with(json!({ "view": name })).on_if(saved),
         Item::action("view.delete", "Delete", "delete").with(json!({ "view": name })).on_if(saved),
     ]
+}
+
+/// The Layers folder: one row per layer with an eye that shows or hides everything on it. A
+/// click on a layer moves the selected bodies and sketches onto it; a right click deletes the
+/// layer (its items stay, shown). "New Layer" makes one from the selection.
+fn layer_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
+    let key = "layers";
+    let open = is_open(app, key, true);
+    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: "Layers", ..Default::default() });
+    if r.fold || r.clicked {
+        toggle(app, key, true);
+    }
+    if !open {
+        return;
+    }
+    let layers = app.session.visibility.layers.clone();
+    for (n, layer) in layers.iter().enumerate() {
+        let label = format!("{} ({})", layer.name, layer.items.len());
+        let r = draw_row(
+            ui,
+            ui.id().with(("layer", n)),
+            &Row { depth: depth + 1, eye: Some(layer.visible), icon: "folder", label: &label, name: true, dim: !layer.visible, ..Default::default() },
+        );
+        if r.eye {
+            let _ = app.run("layer.visibility", json!({"name": layer.name, "visible": !layer.visible}));
+        } else if r.secondary.is_some() {
+            let _ = app.run("layer.delete", json!({"name": layer.name}));
+        } else if r.clicked {
+            let items = crate::context_menu::selected_names(app);
+            if !items.is_empty() {
+                let _ = app.run("layer.assign", json!({"name": layer.name, "items": items}));
+            }
+        }
+    }
+    let r = draw_row(ui, ui.id().with("layer_new"), &Row { depth: depth + 1, icon: "folder", label: "New Layer (from selection)", name: true, ..Default::default() });
+    if r.clicked {
+        let items = crate::context_menu::selected_names(app);
+        let mut k = layers.len() + 1;
+        while layers.iter().any(|l| l.name == format!("Layer {k}")) {
+            k += 1;
+        }
+        let _ = app.run("layer.create", json!({"name": format!("Layer {k}"), "items": items}));
+    }
 }
 
 /// The Analysis folder: the Section Analysis, while there is one (shown or hidden), with an eye

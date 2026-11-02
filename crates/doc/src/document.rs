@@ -2516,6 +2516,18 @@ pub struct Visibility {
     /// once the folder is shown.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_folders: Vec<String>,
+    /// Layers: named sets of bodies, sketches and construction items shown or hidden together.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<Layer>,
+}
+
+/// A layer: a name, the items on it (as `browser.visibility` names them) and whether it is shown.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Layer {
+    pub name: String,
+    pub items: Vec<String>,
+    pub visible: bool,
 }
 
 impl Visibility {
@@ -2528,6 +2540,7 @@ impl Visibility {
             && self.shown_sketches.is_empty()
             && self.hidden_joints.is_empty()
             && self.hidden_folders.is_empty()
+            && self.layers.is_empty()
     }
 }
 

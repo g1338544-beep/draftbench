@@ -181,7 +181,7 @@ fn is_construction(k: &FeatureKind) -> bool {
     matches!(k, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
 }
 
-fn shown_item(s: &Session, key: &str) -> Option<Shown> {
+pub(super) fn shown_item(s: &Session, key: &str) -> Option<Shown> {
     if let Some(f) = s.doc.find_feature(key) {
         if matches!(f.kind, FeatureKind::Sketch { .. }) {
             return Some(Shown::Sketch(f.id));
@@ -210,7 +210,7 @@ fn tree_folder_key(k: &str) -> bool {
     k.len() <= 2048 && scope_ok && last_ok
 }
 
-fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "browser.visibility";
     let visible = bool_(p, "visible").ok_or_else(|| bad(cmd, "`visible` must be true or false"))?;
     if let Some(value) = p.get("tree_folders") {

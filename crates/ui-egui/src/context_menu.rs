@@ -282,6 +282,22 @@ fn sel_sketch(app: &SolveApp) -> Option<u64> {
 }
 
 /// Bodies the selection touches (bodies, and the bodies of selected faces and edges).
+/// The bodies and sketches that are selected, by name (for a layer).
+pub(crate) fn selected_names(app: &SolveApp) -> Vec<String> {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut v = touched_bodies(app);
+    for s in &app.session.selection {
+        if let Sel::Feature { id } = s
+            && let Some(f) = app.session.doc.feature(*id)
+            && matches!(f.kind, FeatureKind::Sketch { .. })
+            && !v.contains(&f.name)
+        {
+            v.push(f.name.clone());
+        }
+    }
+    v
+}
+
 fn touched_bodies(app: &SolveApp) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     for s in &app.session.selection {
