@@ -151,6 +151,9 @@ pub struct State {
     /// Centre marks placed by hand (x, y, arm length in mm on the sheet), and the tool that places them.
     marks: Vec<[f32; 3]>,
     mark_tool: bool,
+    /// Centre lines placed between two picked lines (ends on the sheet), and the tool: the lines picked so far.
+    clines: Vec<[f32; 4]>,
+    cline_tool: Option<Vec<(Pos2, Pos2)>>,
     dirty_marks: bool,
     /// Colour pictures of the model on the sheet, and the pictures drawn so far (key, RGB, texture).
     shaded: Vec<ShadedView>,
@@ -231,6 +234,8 @@ impl Default for State {
             bom: Vec::new(),
             marks: Vec::new(),
             mark_tool: false,
+            clines: Vec::new(),
+            cline_tool: None,
             dirty_marks: false,
             shaded: Vec::new(),
             shaded_cache: Vec::new(),
@@ -276,6 +281,7 @@ impl State {
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
+            "clines": self.clines,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch])).collect::<Vec<_>>(),
             "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
             "paper": self.paper, "landscape": self.landscape,
@@ -404,6 +410,7 @@ impl State {
         self.dims.clear();
         self.bom.clear();
         self.marks.clear();
+        self.clines.clear();
         self.shaded.clear();
         self.selected = None;
         self.sel_dim = None;
@@ -462,6 +469,16 @@ impl State {
                     && [x, y, w, yaw, pitch].iter().all(|t| t.is_finite())
                 {
                     self.shaded.push(ShadedView { x: x as f32, y: y as f32, w: (w as f32).clamp(20.0, 800.0), yaw, pitch });
+                }
+            }
+        }
+        if let Some(list) = d.get("clines").and_then(serde_json::Value::as_array) {
+            for m in list.iter().take(400) {
+                let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
+                if let [a, b, c, e] = n[..]
+                    && [a, b, c, e].iter().all(|t| t.is_finite() && t.abs() < 1e5)
+                {
+                    self.clines.push([a as f32, b as f32, c as f32, e as f32]);
                 }
             }
         }
@@ -682,6 +699,7 @@ fn params(st: &State) -> Value {
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
         "block_cells": st.cells,
         "marks": st.marks,
+        "clines": st.clines,
         "bom": st.bom.iter().filter(|r| r.iter().any(|c| !c.trim().is_empty())).collect::<Vec<_>>(),
         "bolt_circle": st.bolt,
         "hole_table": st.hole_table,
@@ -1007,6 +1025,11 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                 }
             });
         }
+        "drawing.ribbon.centreline" => {
+            app.drawing.cline_tool = if app.drawing.cline_tool.is_some() { None } else { Some(Vec::new()) };
+            app.drawing.mark_tool = false;
+            app.drawing.dim_tool = None;
+        }
         "drawing.ribbon.centremark" => {
             app.drawing.mark_tool = !app.drawing.mark_tool;
             app.drawing.dim_tool = None;
@@ -1087,6 +1110,39 @@ fn view_buttons(ui: &mut egui::Ui, view: &mut usize) {
             }
         }
     });
+}
+
+/// The centre line between two roughly parallel lines: along the first one's direction, over
+/// the stretch both cover (all of both when they do not overlap), a little longer at each end.
+fn centre_between((a1, b1): (Pos2, Pos2), (a2, b2): (Pos2, Pos2)) -> Option<[f32; 4]> {
+    let d = b1 - a1;
+    let len = d.length();
+    if len < 1e-4 {
+        return None;
+    }
+    let u = d / len;
+    let n = vec2(-u.y, u.x);
+    // The lines must be nearly parallel.
+    let d2 = b2 - a2;
+    if d2.length() < 1e-4 || (u.x * d2.y - u.y * d2.x).abs() > 0.1 * d2.length() {
+        return None;
+    }
+    let off = (a2 - a1).dot(n);
+    if off.abs() < 1e-3 {
+        return None;
+    }
+    let along = |p: Pos2| (p - a1).dot(u);
+    let (lo1, hi1) = (along(a1).min(along(b1)), along(a1).max(along(b1)));
+    let (lo2, hi2) = (along(a2).min(along(b2)), along(a2).max(along(b2)));
+    let (mut lo, mut hi) = (lo1.max(lo2), hi1.min(hi2));
+    if hi <= lo {
+        lo = lo1.min(lo2);
+        hi = hi1.max(hi2);
+    }
+    let (lo, hi) = (lo - 3.0, hi + 3.0);
+    let base = a1 + n * (off / 2.0);
+    let (p, q) = (base + u * lo, base + u * hi);
+    Some([p.x, p.y, q.x, q.y])
 }
 
 /// The Base View window: choose the model view and scale, then click the sheet to place it.
@@ -2138,7 +2194,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (dx, dy) = (h.x - b.1, h.y - b.2);
             let horizontal = dx.abs() >= dy.abs();
             let target = if horizontal { (from.0 + if dx >= 0.0 { 1 } else { -1 }, from.1) } else { (from.0, from.1 + if dy >= 0.0 { 1 } else { -1 }) };
-            let found = (0..6).find(|v| grid_cell(*v, first) == Some(target));
+            let mut found = (0..6).find(|v| grid_cell(*v, first) == Some(target));
+            // The standard layout has no neighbour there: a side view beside the top or bottom view
+            // (and the top or bottom one above or below a side view) is placed free, unaligned.
+            let mut free = false;
+            if found.is_none() {
+                let parent_view = app.drawing.placed.get(parent).map_or(0, |v| v.view);
+                found = match (parent_view, horizontal) {
+                    (1 | 5, true) => Some(if dx >= 0.0 { 2 } else { 3 }),
+                    (2 | 3 | 4, false) => Some(if dy >= 0.0 { 1 } else { 5 }),
+                    _ => None,
+                };
+                free = found.is_some();
+            }
             let at = if horizontal { pos2(h.x, b.2) } else { pos2(b.1, h.y) };
             let label = found.map_or("No view on this side", |v| VIEWS[v].1);
             painter.line_segment([map(pos2(b.1, b.2)), map(at)], Stroke::new(1.0, Tokens::get().accent));
@@ -2156,7 +2224,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dashed,
                     dims: true,
                     section: None,
-                    align: Some((parent, horizontal)),
+                    align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
                 });
                 app.drawing.selected = Some(n);
@@ -2166,7 +2234,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Base View: a click on the sheet places the chosen view there.
-    if let Some((view, scale)) = app.drawing.base.clone()
+    if app.drawing.cline_tool.is_none()
+        && let Some((view, scale)) = app.drawing.base.clone()
         && response.clicked_by(egui::PointerButton::Primary)
         && let Some(at) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
     {
@@ -2182,6 +2251,45 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         refresh(app);
         return;
+    }
+    // Centre Line: click two lines; the centre line runs midway between them.
+    if let Some(mut picked) = app.drawing.cline_tool.clone() {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
+            app.drawing.cline_tool = None;
+        } else {
+            let tol = 10.0 / px_per_mm;
+            let near = |c: Pos2| {
+                sheet
+                    .items
+                    .iter()
+                    .filter_map(|(l, sh)| match (l, sh) {
+                        (Layer::Visible | Layer::Hidden, Shape::Line(a, b)) => Some((dist_to_segment(c, (*a, *b)), (*a, *b))),
+                        _ => None,
+                    })
+                    .filter(|(d, _)| *d <= tol)
+                    .min_by(|x, y| x.0.total_cmp(&y.0))
+                    .map(|(_, seg)| seg)
+            };
+            if let Some((a, b)) = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q)).and_then(near) {
+                painter.line_segment([map(a), map(b)], Stroke::new(3.0, Tokens::get().accent));
+            }
+            for (a, b) in &picked {
+                painter.line_segment([map(*a), map(*b)], Stroke::new(3.0, Tokens::get().accent));
+            }
+            if response.clicked_by(egui::PointerButton::Primary)
+                && let Some(seg) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)).and_then(near)
+            {
+                picked.push(seg);
+                if let [(a1, b1), (a2, b2)] = picked[..] {
+                    if let Some(line) = centre_between((a1, b1), (a2, b2)) {
+                        app.drawing.clines.push(line);
+                        app.drawing.dirty_marks = true;
+                    }
+                    picked.clear();
+                }
+                app.drawing.cline_tool = Some(picked);
+            }
+        }
     }
     // Centre Mark: click a circle for a cross sized to it, or any point for a small one; stays on until Esc.
     if app.drawing.mark_tool {

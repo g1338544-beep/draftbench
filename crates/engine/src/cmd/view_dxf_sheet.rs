@@ -213,7 +213,12 @@ fn manual(
             let here = circles(&all.lines, true);
             // Hole axes carry over to the view projected from this one (and back): a circle in one
             // view is a pair of parallel lines in the aligned view, with the centre line between.
-            let link = item.get("align").and_then(Value::as_array).and_then(|a| Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?)));
+            let link = item
+                .get("align")
+                .and_then(Value::as_array)
+                .and_then(|a| Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?)))
+                // Views placed one by one still share their hole axes when their projections share an axis.
+                .or_else(|| if custom.is_some() { None } else { infos.iter().find_map(|(i, info)| shared_axis(view, info.view).map(|h| (*i, h))) });
             if let Some((pi, horizontal)) = link
                 && let Some(par) = infos.get(&pi)
             {
@@ -231,7 +236,7 @@ fn manual(
                     }
                 }
             }
-            infos.insert(index, ViewInfo { lines: all.clone(), circles: here, x, y, c, scale });
+            infos.insert(index, ViewInfo { lines: all.clone(), circles: here, x, y, c, scale, view });
         }
         if section.is_none() && item.get("center").and_then(Value::as_bool).unwrap_or(true) {
             let mode = str_(p, "centre_mode").unwrap_or("lines");
@@ -376,8 +381,22 @@ fn manual(
     finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, any_centre || centre_used, names, path, boxes)
 }
 
+/// Whether two standard views show one world axis the same way, and how: `Some(false)` when
+/// they share the horizontal coordinate (front with top or bottom), `Some(true)` when they share
+/// the vertical one (front with right). A hole's axis then lines up between them whatever their
+/// place on the sheet.
+fn shared_axis(a: StandardView, b: StandardView) -> Option<bool> {
+    use StandardView::{Bottom, Front, Right, Top};
+    match (a, b) {
+        (Front, Top) | (Top, Front) | (Front, Bottom) | (Bottom, Front) => Some(false),
+        (Front, Right) | (Right, Front) => Some(true),
+        _ => None,
+    }
+}
+
 /// What a placed view offers the views aligned with it.
 struct ViewInfo {
+    view: StandardView,
     lines: std::rc::Rc<Projected>,
     circles: Vec<(Vec2, f64)>,
     x: f64,
@@ -749,6 +768,17 @@ fn finish(
     );
     // Centre marks the user placed by hand: x, y and how far each arm reaches (mm on the sheet).
     let mut centre = centre;
+    if let Some(list) = p.get("clines").and_then(Value::as_array) {
+        for m in list.iter().take(400) {
+            let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+            if let [x1, y1, x2, y2] = n[..]
+                && [x1, y1, x2, y2].iter().all(|v| v.is_finite() && v.abs() < 1e5)
+            {
+                line("CENTER", Vec2::new(x1, y1), Vec2::new(x2, y2), &mut entities);
+                centre = true;
+            }
+        }
+    }
     if let Some(marks) = p.get("marks").and_then(Value::as_array) {
         for m in marks.iter().take(400) {
             let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
