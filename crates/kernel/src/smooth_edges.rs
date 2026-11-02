@@ -121,6 +121,43 @@ fn on_boundary(boundaries: &[Boundary; 2], a: Vec3, b: Vec3) -> Option<Boundary>
     })
 }
 
+/// A body made of many small flat facets (a modelled thread's result) draws every facet seam as
+/// a line, which hides the shape under black hatching. Edges between facets that turn by less
+/// than 15° are display-smooth there; real corners and every sharp edge keep their line.
+pub(crate) fn hide_facet_edges(mesh: &mut Mesh) {
+    const MIN_FACES: usize = 400;
+    let faces = mesh.tri_face.iter().copied().max().map_or(0, |m| m as usize + 1);
+    if faces < MIN_FACES || mesh.edge_faces.len() != mesh.edges.len() || mesh.edge_faces.len() > MAX_EDGES {
+        return;
+    }
+    // One normal per face, from its first triangle.
+    let mut normals: Vec<Option<Vec3>> = vec![None; faces];
+    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        let Some(slot) = normals.get_mut(*f as usize) else { continue };
+        if slot.is_none()
+            && let Some([a, b, c]) = mesh.tri(t)
+        {
+            *slot = (b - a).cross(c - a).normalized();
+        }
+    }
+    let cos = 15f64.to_radians().cos();
+    let mut smooth = std::mem::take(&mut mesh.smooth_edges);
+    smooth.resize(mesh.edges.len(), false);
+    for (i, fs) in mesh.edge_faces.iter().enumerate() {
+        let [a, b] = fs.as_slice() else { continue };
+        if mesh.sharp_edges.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        let (Some(Some(na)), Some(Some(nb))) = (normals.get(*a as usize), normals.get(*b as usize)) else { continue };
+        if na.dot(*nb) >= cos
+            && let Some(slot) = smooth.get_mut(i)
+        {
+            *slot = true;
+        }
+    }
+    mesh.smooth_edges = smooth;
+}
+
 pub(crate) fn flags(body: &Body, mesh: &Mesh) -> (Vec<bool>, Vec<bool>) {
     crate::guard("smooth display edges", || Ok(classify(body, mesh, WORK))).unwrap_or_default()
 }

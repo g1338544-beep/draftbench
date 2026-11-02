@@ -1596,6 +1596,7 @@ impl Body {
         }
         m.seams = crate::topo::seam_flags(self, &m);
         (m.smooth_edges, m.sharp_edges) = crate::smooth_edges::flags(self, &m);
+        crate::smooth_edges::hide_facet_edges(&mut m);
         Ok(m)
     }
 
