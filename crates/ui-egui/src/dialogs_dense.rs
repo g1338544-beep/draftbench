@@ -485,25 +485,6 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
         }
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
-            form_row(ui, "Extents", |ui| {
-                let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(opts.all) * 2 };
-                let mut ext = cur;
-                combo(ui, "hole_ext", &["Distance", "To Object", "All"], &mut ext);
-                opts.all = ext == 2;
-                set_to_object(&mut d.inputs, &mut d.active, ext == 1);
-            });
-            if opts.multiple {
-                // Every point of the picked points' sketches (standalone points and
-                // circle centres), not just the picked ones.
-                form_row(ui, "All Sketch Points", |ui| {
-                    extra_check(ui, &mut d.extra, "all_points");
-                });
-                // The holes go into the part the sketch touches; Flip drills the
-                // other way.
-                form_row(ui, "Flip", |ui| {
-                    extra_check(ui, &mut d.extra, "flip");
-                });
-            }
             choice_row(ui, "Hole Type", "hole_kind", kind, &HOLE_LABELS);
             form_row(ui, "Hole Tap Type", |ui| {
                 let mut tap = usize::from(opts.tapped);
@@ -513,44 +494,18 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if opts.tapped {
                 enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread);
             }
-            // Where the hole goes: pick edges of the part and give the distance from each; the
-            // dimensions show on the model.
-            if !opts.multiple {
-                for label in crate::hole_position::LABELS {
-                    if !d.inputs.iter().any(|i| i.label == label) {
-                        d.inputs.push(SelInput::new(label, selection::EDGES, false));
-                    }
-                }
-                match crate::hole_position::setup(app, &d.inputs) {
-                    Some(st) if !st.references.is_empty() => {
-                        let before = crate::hole_position::texts(&mut d.extra, &d.inputs, &st);
-                        let mut text = before.clone();
-                        for r in &st.references {
-                            if let Some(t) = text.get_mut(r.slot) {
-                                enter |= expr_row(ui, &format!("Distance from Edge {}", r.slot + 1), t);
-                            }
-                        }
-                        if text != before {
-                            crate::hole_position::store(&mut d.extra, &d.inputs, &st, &text);
-                        }
-                    }
-                    _ => {
-                        ui.small("Pick edges (Edge 1, Edge 2) of the part to set the hole's distance from them");
-                    }
-                }
+            if *kind == 1 {
+                enter |= expr_row(ui, "Counterbore Ø", cb_diameter);
+                enter |= expr_row(ui, "Counterbore depth", cb_depth);
             }
-            if *kind == 0 {
-                form_row(ui, "Drill Point", |ui| {
-                    let mut tip = usize::from(opts.angled);
-                    combo(ui, "hole_tip", &["Flat", "Angle"], &mut tip);
-                    opts.angled = tip == 1;
+            if *kind == 3 {
+                form_row(ui, "Taper angle (per side)", |ui| {
+                    enter |= extra_field(ui, &mut d.extra, "taper_angle", "1 deg");
                 });
             }
-            if !opts.all {
-                enter |= expr_row(ui, "Depth", depth);
-            }
-            if *kind == 0 && opts.angled {
-                enter |= expr_row(ui, "Tip Angle", &mut opts.tip_angle);
+            if *kind == 2 {
+                enter |= expr_row(ui, "Countersink Ø", cs_diameter);
+                enter |= expr_row(ui, "Countersink angle", cs_angle);
             }
             if !opts.tapped {
                 // A standard bolt size gives the ISO 273 clearance hole; Custom types the diameter.
@@ -585,18 +540,63 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
                 enter |= expr_row(ui, "Diameter", diameter);
             }
-            if *kind == 1 {
-                enter |= expr_row(ui, "Counterbore Ø", cb_diameter);
-                enter |= expr_row(ui, "Counterbore depth", cb_depth);
+            if !opts.all {
+                enter |= expr_row(ui, "Depth", depth);
             }
-            if *kind == 3 {
-                form_row(ui, "Taper angle (per side)", |ui| {
-                    enter |= extra_field(ui, &mut d.extra, "taper_angle", "1 deg");
+            if *kind == 0 {
+                form_row(ui, "Drill Point", |ui| {
+                    let mut tip = usize::from(opts.angled);
+                    combo(ui, "hole_tip", &["Flat", "Angle"], &mut tip);
+                    opts.angled = tip == 1;
                 });
             }
-            if *kind == 2 {
-                enter |= expr_row(ui, "Countersink Ø", cs_diameter);
-                enter |= expr_row(ui, "Countersink angle", cs_angle);
+            if *kind == 0 && opts.angled {
+                enter |= expr_row(ui, "Tip Angle", &mut opts.tip_angle);
+            }
+            // Where the hole goes: pick edges of the part and give the distance from each; the
+            // dimensions show on the model.
+            if !opts.multiple {
+                for label in crate::hole_position::LABELS {
+                    if !d.inputs.iter().any(|i| i.label == label) {
+                        d.inputs.push(SelInput::new(label, selection::EDGES, false));
+                    }
+                }
+                match crate::hole_position::setup(app, &d.inputs) {
+                    Some(st) if !st.references.is_empty() => {
+                        let before = crate::hole_position::texts(&mut d.extra, &d.inputs, &st);
+                        let mut text = before.clone();
+                        for r in &st.references {
+                            if let Some(t) = text.get_mut(r.slot) {
+                                enter |= expr_row(ui, &format!("Distance from Edge {}", r.slot + 1), t);
+                            }
+                        }
+                        if text != before {
+                            crate::hole_position::store(&mut d.extra, &d.inputs, &st, &text);
+                        }
+                    }
+                    _ => {
+                        ui.small("Pick edges (Edge 1, Edge 2) of the part to set the hole's distance from them");
+                    }
+                }
+            }
+            form_row(ui, "Extents", |ui| {
+                let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(opts.all) * 2 };
+                let mut ext = cur;
+                combo(ui, "hole_ext", &["Distance", "To Object", "All"], &mut ext);
+                opts.all = ext == 2;
+                set_to_object(&mut d.inputs, &mut d.active, ext == 1);
+            });
+            if opts.multiple {
+                // Every point of the picked points' sketches (standalone points and
+                // circle centres), not just the picked ones.
+                form_row(ui, "All Sketch Points", |ui| {
+                    extra_check(ui, &mut d.extra, "all_points");
+                });
+                // The holes go into the part the sketch touches; Flip drills the
+                // other way.
+                form_row(ui, "Flip", |ui| {
+                    extra_check(ui, &mut d.extra, "flip");
+                });
             }
         }
         _ => enter |= additional_rows(app, d, ui),
