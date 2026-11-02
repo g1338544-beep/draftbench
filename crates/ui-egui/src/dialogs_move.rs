@@ -229,6 +229,19 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     Ok(p)
 }
 
+/// The points picked for From, To (or Pivot, Point) as the move reads them: the centre of a
+/// circle edge, the middle of a face, a vertex. Drawn as dots so the pick can be checked.
+pub fn point_markers(app: &SolveApp, d: &Dialog) -> Vec<(Vec3, &'static str)> {
+    let Kind::Move { mode, .. } = &d.kind else { return Vec::new() };
+    let names: &[&'static str] = match *mode {
+        POINT_TO_POINT => &["From", "To"],
+        POINT_TO_POSITION => &["Point"],
+        FREE => &["Pivot"],
+        _ => &[],
+    };
+    names.iter().enumerate().filter_map(|(k, n)| sel_point(app, items(d, k + 1).first()).map(|p| (p, *n))).collect()
+}
+
 /// An axis line: origin axes and sketch lines, or a straight body edge.
 fn axis_line(app: &SolveApp, s: &Sel) -> Option<(Vec3, Vec3)> {
     if let Some(a) = crate::dialogs::axis_of(app, s) {

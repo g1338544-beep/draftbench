@@ -315,6 +315,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             crate::dialogs_move::drag(app, &mut d, g);
             dragging = true;
         }
+        // The picked From / To points, where the move reads them (a circle's centre, a face's middle).
+        let markers = crate::dialogs_move::point_markers(app, &d);
+        let accent = Tokens::get().accent;
+        for (p, name) in &markers {
+            if let Some(s) = proj.to_screen(*p) {
+                painter.circle_filled(s, 5.0, accent);
+                painter.circle_stroke(s, 7.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
+                painter.text(s + vec2(9.0, -9.0), egui::Align2::LEFT_BOTTOM, *name, egui::FontId::proportional(Tokens::get().font_body), accent);
+            }
+        }
+        if let [(a, _), (b, _)] = markers.as_slice()
+            && let (Some(sa), Some(sb)) = (proj.to_screen(*a), proj.to_screen(*b))
+        {
+            painter.line_segment([sa, sb], egui::Stroke::new(1.5, accent));
+        }
         // Read the triad again after the drag, so the box follows it in the same frame. Move
         // types with no triad (Rotate, Point to Point, Point to Position) put the box on the
         // picked bodies instead.
