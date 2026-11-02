@@ -2880,6 +2880,51 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             }
+            // Centre lines, centre marks, erased spots and dimensions that sit on a moved view travel with it.
+            let areas: Vec<[f32; 4]> = app
+                .drawing
+                .sheet
+                .as_ref()
+                .map(|sh| {
+                    sh.boxes
+                        .iter()
+                        .filter(|b| moved.contains(&b.0))
+                        .map(|b| [b.1 - b.3 / 2.0 - 8.0, b.2 - b.4 / 2.0 - 8.0, b.1 + b.3 / 2.0 + 8.0, b.2 + b.4 / 2.0 + 8.0])
+                        .collect()
+                })
+                .unwrap_or_default();
+            let (fx, fy) = (ddx as f32, ddy as f32);
+            if (fx != 0.0 || fy != 0.0) && fx.is_finite() && fy.is_finite() {
+                let inside = |x: f32, y: f32| areas.iter().any(|r| x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]);
+                for mk in app.drawing.marks.iter_mut() {
+                    if inside(mk[0], mk[1]) {
+                        mk[0] += fx;
+                        mk[1] += fy;
+                    }
+                }
+                for c in app.drawing.clines.iter_mut() {
+                    if inside((c[0] + c[2]) / 2.0, (c[1] + c[3]) / 2.0) {
+                        c[0] += fx;
+                        c[2] += fx;
+                        c[1] += fy;
+                        c[3] += fy;
+                    }
+                }
+                for c in app.drawing.centre_cut.iter_mut() {
+                    if inside((c[0] + c[2]) / 2.0, (c[1] + c[3]) / 2.0) {
+                        c[0] += fx;
+                        c[2] += fx;
+                        c[1] += fy;
+                        c[3] += fy;
+                    }
+                }
+                for d in app.drawing.dims.iter_mut() {
+                    if inside(d.a.x, d.a.y) && inside(d.b.x, d.b.y) {
+                        d.a += vec2(fx, fy);
+                        d.b += vec2(fx, fy);
+                    }
+                }
+            }
             refresh(app);
         }
     } else if app.drawing.drag.is_some() && !response.dragged() {
