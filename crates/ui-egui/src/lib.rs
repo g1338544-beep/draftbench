@@ -676,6 +676,7 @@ impl SolveApp {
             "shortcut_box": self.sbox.prefs(),
             "shortcuts": self.keymap.prefs(),
             "toolbar": self.toolbar_custom.prefs(),
+            "drawing": self.drawing.prefs(&self.session.doc.name),
             "autosave_minutes": self.autosave_minutes,
             "ground_shadow": self.ui.ground_shadow,
             "agent_cursor": self.ui.agent_cursor,
@@ -732,6 +733,9 @@ impl SolveApp {
         }
         if let Some(t) = v.get("toolbar") {
             self.toolbar_custom.load(t);
+        }
+        if let Some(d) = v.get("drawing") {
+            self.drawing.load_prefs(d);
         }
         if let Some(mut p) = v.get("preferences").filter(|p| p.is_object()).map(prefs::lenient) {
             if !prefs::MSAA.contains(&p.msaa) {

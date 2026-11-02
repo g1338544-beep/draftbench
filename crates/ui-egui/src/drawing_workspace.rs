@@ -122,6 +122,8 @@ pub struct State {
     menu_at: Option<(Option<usize>, Pos2)>,
     /// The view whose scale is being edited after a double-click.
     scale_edit: Option<usize>,
+    /// Per-design views and dimensions kept between runs, by design name.
+    saved_designs: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for State {
@@ -160,6 +162,130 @@ impl Default for State {
             drag: None,
             menu_at: None,
             scale_edit: None,
+            saved_designs: serde_json::Map::new(),
+        }
+    }
+}
+
+impl State {
+    /// Everything worth keeping between runs: the sheet settings for all designs, and this
+    /// design's views, dimensions and title block.
+    pub fn prefs(&self, design: &str) -> serde_json::Value {
+        let mut designs = self.saved_designs.clone();
+        if !design.is_empty() && (!self.placed.is_empty() || !self.dims.is_empty()) {
+            designs.insert(
+                design.chars().take(120).collect(),
+                json!({
+                    "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims})).collect::<Vec<_>>(),
+                    "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text})).collect::<Vec<_>>(),
+                    "title": self.title, "number": self.number, "notes": self.notes,
+                }),
+            );
+        }
+        while designs.len() > 40 {
+            let Some(k) = designs.keys().next().cloned() else { break };
+            designs.remove(&k);
+        }
+        json!({
+            "paper": self.paper, "landscape": self.landscape, "first_angle": self.first_angle,
+            "custom_w": self.custom_w, "custom_h": self.custom_h, "sheet_scale": self.sheet_scale,
+            "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
+            "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
+            "centre": self.centre, "text_height": self.text_height, "author": self.author,
+            "company": self.company, "designs": designs,
+        })
+    }
+
+    pub fn load_prefs(&mut self, v: &serde_json::Value) {
+        let flag = |k: &str| v.get(k).and_then(serde_json::Value::as_bool);
+        let index = |k: &str, max: u64| v.get(k).and_then(serde_json::Value::as_u64).filter(|n| *n <= max).map(|n| n as usize);
+        if let Some(n) = index("paper", 5) {
+            self.paper = n;
+        }
+        if let Some(b) = flag("landscape") {
+            self.landscape = b;
+        }
+        if let Some(b) = flag("first_angle") {
+            self.first_angle = b;
+        }
+        if let Some(b) = flag("bolt") {
+            self.bolt = b;
+        }
+        if let Some(b) = flag("centre") {
+            self.centre = b;
+        }
+        if let Some(n) = index("centre_mode", 8) {
+            self.centre_mode = n;
+        }
+        if let Some(n) = index("hidden_style", 8) {
+            self.hidden_style = n;
+        }
+        for (k, field, max) in [
+            ("custom_w", &mut self.custom_w, 12),
+            ("custom_h", &mut self.custom_h, 12),
+            ("sheet_scale", &mut self.sheet_scale, 12),
+            ("sheet_no", &mut self.sheet_no, 40),
+            ("revision", &mut self.revision, 40),
+            ("text_height", &mut self.text_height, 6),
+            ("author", &mut self.author, 80),
+            ("company", &mut self.company, 80),
+        ] {
+            if let Some(t) = v.get(k).and_then(serde_json::Value::as_str) {
+                *field = t.chars().take(max).collect();
+            }
+        }
+        if let Some(c) = v.get("colours").and_then(serde_json::Value::as_array) {
+            for (slot, n) in self.colours.iter_mut().zip(c) {
+                if let Some(n) = n.as_u64().filter(|n| *n <= 255) {
+                    *slot = n as u8;
+                }
+            }
+        }
+        if let Some(d) = v.get("designs").and_then(serde_json::Value::as_object) {
+            self.saved_designs = d.iter().take(40).map(|(k, v)| (k.clone(), v.clone())).collect();
+        }
+    }
+
+    /// Bring back the views saved for this design (only into an empty sheet).
+    fn restore_design(&mut self, design: &str) {
+        if !self.placed.is_empty() || !self.dims.is_empty() {
+            return;
+        }
+        let Some(d) = self.saved_designs.get(design) else { return };
+        let f = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_f64).filter(|x| x.is_finite());
+        if let Some(list) = d.get("views").and_then(serde_json::Value::as_array) {
+            for v in list.iter().take(24) {
+                let (Some(x), Some(y)) = (f(v, "x"), f(v, "y")) else { continue };
+                self.placed.push(PlacedView {
+                    view: v.get("view").and_then(serde_json::Value::as_u64).map_or(0, |n| (n as usize).min(6)),
+                    x,
+                    y,
+                    scale: v.get("scale").and_then(serde_json::Value::as_str).unwrap_or("").chars().take(12).collect(),
+                    dashed: v.get("dashed").and_then(serde_json::Value::as_bool).unwrap_or(false),
+                    dims: v.get("dims").and_then(serde_json::Value::as_bool).unwrap_or(true),
+                });
+            }
+        }
+        if let Some(list) = d.get("dims").and_then(serde_json::Value::as_array) {
+            for v in list.iter().take(200) {
+                let pt = |k: &str| {
+                    let a = v.get(k)?.as_array()?;
+                    Some(pos2(a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32))
+                };
+                let (Some(a), Some(b)) = (pt("a"), pt("b")) else { continue };
+                self.dims.push(DimItem {
+                    kind: v.get("kind").and_then(serde_json::Value::as_u64).map_or(0, |n| (n as usize).min(2)),
+                    a,
+                    b,
+                    at: f(v, "at").unwrap_or(0.0) as f32,
+                    text: v.get("text").and_then(serde_json::Value::as_str).unwrap_or("").chars().take(40).collect(),
+                });
+            }
+        }
+        for (k, field) in [("title", &mut self.title), ("number", &mut self.number), ("notes", &mut self.notes)] {
+            if let Some(t) = d.get(k).and_then(serde_json::Value::as_str) {
+                *field = t.chars().take(400).collect();
+            }
         }
     }
 }
@@ -411,6 +537,8 @@ pub fn enter(app: &mut SolveApp) -> Result<(), String> {
     }
     app.drawing.design_camera = Some((app.cam, app.ui.perspective));
     app.ui.tab = "DRAWING".into();
+    let design = app.session.doc.name.clone();
+    app.drawing.restore_design(&design);
     if app.drawing.title.is_empty() {
         app.drawing.title = app.session.doc.name.clone();
     }
