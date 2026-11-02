@@ -102,7 +102,8 @@ enum Shape {
     Poly(Vec<Pos2>),
     Circle(Pos2, f32),
     Arc(Pos2, f32, f32, f32),
-    Text(Pos2, f32, String),
+    /// Text: where (bottom centre), height, the words, and the turn in degrees (counter-clockwise).
+    Text(Pos2, f32, String, f32),
 }
 
 /// A colour picture of the model, from a camera, placed on the sheet (centre and width in mm).
@@ -304,6 +305,8 @@ pub struct State {
     shaded_cache: Vec<(String, Picture, Option<egui::TextureHandle>)>,
     /// The dimension being placed: its kind and the points picked so far.
     dim_tool: Option<(usize, Vec<Pos2>)>,
+    /// The Smart dimension tool (tool kind 7) is on: it goes back to it after each dimension.
+    dim_back: bool,
     /// The selected dimension, the one being dragged, and the one whose text is being edited.
     sel_dim: Option<usize>,
     /// The view a projected view is being placed from.
@@ -406,6 +409,7 @@ impl Default for State {
             shaded: Vec::new(),
             shaded_cache: Vec::new(),
             dim_tool: None,
+            dim_back: false,
             sel_dim: None,
             proj_tool: None,
             drag_dim: None,
@@ -1031,7 +1035,7 @@ fn parse(v: &Value) -> Option<Sheet> {
         } else if let Some(a) = it.get("arc").and_then(Value::as_array) {
             Shape::Arc(pt(a.first()?)?, a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32, a.get(3)?.as_f64()? as f32)
         } else if let Some(t) = it.get("text").and_then(Value::as_str) {
-            Shape::Text(pt(it.get("at")?)?, it.get("h")?.as_f64()? as f32, t.to_string())
+            Shape::Text(pt(it.get("at")?)?, it.get("h")?.as_f64()? as f32, t.to_string(), it.get("angle").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0) as f32)
         } else {
             continue;
         };
@@ -1546,7 +1550,10 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
         "drawing.ribbon.model" => add_model_view(app),
         "drawing.ribbon.addsheet" => add_page(app),
         "drawing.ribbon.delsheet" => delete_page(app),
-        "drawing.ribbon.dimension" => app.drawing.dim_tool = Some((0, Vec::new())),
+        "drawing.ribbon.dimension" => {
+            app.drawing.dim_tool = Some((7, Vec::new()));
+            app.drawing.dim_back = true;
+        }
         "drawing.ribbon.centre" => {
             app.drawing.centre = !app.drawing.centre;
             refresh(app);
@@ -1853,12 +1860,18 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_dimwin"), "dimension", "Dimension").show_body(ctx, |ui| {
         ui.label("Type");
         ui.horizontal_wrapped(|ui| {
+            if crate::ui_kit::list_picker(ui, "Smart (measures anything)", "Smart (measures anything)", tool == Some(7)).clicked() {
+                pick = Some(7);
+            }
             for (i, (_, label)) in DIM_KINDS.iter().enumerate() {
                 if crate::ui_kit::list_picker(ui, label, label, tool == Some(i)).clicked() {
                     pick = Some(i);
                 }
             }
         });
+        if tool == Some(7) {
+            ui.small("Click a circle for its diameter, or two points: horizontal, vertical or aligned follows the points. Then click where it goes.");
+        }
         if tool == Some(6) {
             ui.label("Note text");
             crate::ui_kit::bounded_cell_editor(ui, ui.id().with("dimwin_note"), &mut note, "NOTE", false, 40);
@@ -1881,6 +1894,7 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     });
     app.drawing.note_text = note;
     if let Some(i) = pick {
+        app.drawing.dim_back = i == 7;
         app.drawing.dim_tool = Some((i, Vec::new()));
         app.drawing.mark_tool = false;
     }
@@ -2185,6 +2199,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     crate::ui_kit::dropdown_menu(ui, "drawing_add_dim", "Add dimension…", |ui| {
                         for (i, (_, label)) in DIM_KINDS.iter().enumerate() {
                             if crate::ui_kit::list_picker(ui, label, label, false).clicked() {
+                                app.drawing.dim_back = false;
                                 app.drawing.dim_tool = Some((i, Vec::new()));
                                 ui.close();
                             }
@@ -2557,7 +2572,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let text = b
                             .and_then(|b| {
                                 sheet.items.iter().find_map(|(l, sh)| match (l, sh) {
-                                    (Layer::Text, Shape::Text(p, _, t)) if (p.x - b.1).abs() < 2.0 && p.y <= b.2 - b.4 / 2.0 - 1.0 && p.y >= b.2 - b.4 / 2.0 - 24.0 => Some(t.clone()),
+                                    (Layer::Text, Shape::Text(p, _, t, _)) if (p.x - b.1).abs() < 2.0 && p.y <= b.2 - b.4 / 2.0 - 1.0 && p.y >= b.2 - b.4 / 2.0 - 24.0 => Some(t.clone()),
                                     _ => None,
                                 })
                             })
@@ -2800,7 +2815,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let shown = sheet
                     .items
                     .iter()
-                    .filter_map(|(_, sh)| if let Shape::Text(p, _, t) = sh { Some((p, t)) } else { None })
+                    .filter_map(|(_, sh)| if let Shape::Text(p, _, t, _) = sh { Some((p, t)) } else { None })
                     .filter(|(p, _)| (p.x - centre.x).abs() < block_w * 0.3 && (p.y - centre.y).abs() < 6.0)
                     .min_by(|a, b| (*a.0 - centre).length().total_cmp(&(*b.0 - centre).length()))
                     .map(|(_, t)| t.clone());
@@ -3041,10 +3056,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.add(egui::Shape::line(pts, s));
                 }
             }
-            Shape::Text(p, height, text) => {
+            Shape::Text(p, height, text, angle) => {
                 let size = (height * px_per_mm).clamp(0.0, 300.0);
                 if size >= 3.0 {
-                    painter.text(map(*p), egui::Align2::CENTER_BOTTOM, text, egui::FontId::proportional(size), Color32::BLACK);
+                    if angle.rem_euclid(360.0).abs() < 0.01 {
+                        painter.text(map(*p), egui::Align2::CENTER_BOTTOM, text, egui::FontId::proportional(size), Color32::BLACK);
+                    } else {
+                        // A dimension's value turned along its line: the sheet turns counter-clockwise, the screen clockwise.
+                        let galley = painter.layout_no_wrap(text.clone(), egui::FontId::proportional(size), Color32::BLACK);
+                        let theta = -angle.to_radians();
+                        let (sin, cos) = theta.sin_cos();
+                        let q = galley.size();
+                        let (qx, qy) = (q.x / 2.0, q.y);
+                        let turned = vec2(qx * cos - qy * sin, qx * sin + qy * cos);
+                        painter.add(egui::epaint::TextShape::new(map(*p) - turned, galley, Color32::BLACK).with_angle(theta));
+                    }
                 }
             }
         }
@@ -3258,15 +3284,34 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             {
                 let hit_pt = snap_point(sheet, c, tol);
+                // Smart: a circle is a diameter; two points pick horizontal, vertical or aligned by their direction.
+                let mut kind = kind;
+                if kind == 7 {
+                    kind = if picks.is_empty() && snap_circle(sheet, c, tol * 1.5).is_some() {
+                        3
+                    } else if let [a, b] = picks[..] {
+                        let (dx, dy) = ((b.x - a.x).abs(), (b.y - a.y).abs());
+                        if dx >= 2.0 * dy {
+                            0
+                        } else if dy >= 2.0 * dx {
+                            1
+                        } else {
+                            2
+                        }
+                    } else {
+                        0
+                    };
+                }
+                let again = if app.drawing.dim_back { 7 } else { kind };
                 if kind == 5 || kind == 6 {
                     // Balloon or note: the point on the part, then where it goes; balloons are numbered in turn.
                     if let Some(target) = picks.first().copied() {
                         let number = app.drawing.dims.iter().filter(|d| d.kind == 5).count() + 1;
                         let text = if kind == 5 { number.to_string() } else if app.drawing.note_text.trim().is_empty() { "NOTE".to_string() } else { app.drawing.note_text.trim().to_string() };
                         new_dim = Some(DimItem { kind, a: target, b: c, at: 0.0, text, slide: 0.0 });
-                        app.drawing.dim_tool = Some((kind, Vec::new()));
+                        app.drawing.dim_tool = Some((again, Vec::new()));
                     } else {
-                        app.drawing.dim_tool = Some((kind, vec![hit_pt.unwrap_or(c)]));
+                        app.drawing.dim_tool = Some((if kind == 0 || kind == 1 || kind == 2 { again } else { kind }, vec![hit_pt.unwrap_or(c)]));
                     }
                 } else if kind >= 3 {
                     // Diameter or radius: click the circle, then where the leader and value go.
@@ -3274,14 +3319,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let v = c - centre;
                         let len = v.length().max(1e-6);
                         new_dim = Some(DimItem { kind, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0 });
-                        app.drawing.dim_tool = Some((kind, Vec::new()));
+                        app.drawing.dim_tool = Some((again, Vec::new()));
                     } else if let Some((centre, r)) = snap_circle(sheet, c, tol * 1.5) {
                         app.drawing.dim_tool = Some((kind, vec![centre, pos2(r, 0.0)]));
                     }
                 } else if picks.len() < 2 {
                     let mut next = picks.clone();
                     next.push(hit_pt.unwrap_or(c));
-                    app.drawing.dim_tool = Some((kind, next));
+                    app.drawing.dim_tool = Some((again, next));
                 } else {
                     let (a, b) = (picks[0], picks[1]);
                     let at = match DIM_KINDS[kind.min(6)].0 {
@@ -3294,7 +3339,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     };
                     new_dim = Some(DimItem { kind, a, b, at, text: String::new(), slide: 0.0 });
-                    app.drawing.dim_tool = Some((kind, Vec::new()));
+                    app.drawing.dim_tool = Some((again, Vec::new()));
                 }
             }
         }
@@ -3650,7 +3695,7 @@ fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4]) -> (String, f32, f32) {
             }
         };
         match shape {
-            Shape::Text(p, h, t) => {
+            Shape::Text(p, h, t, _) => {
                 let bytes: Vec<u8> = t.chars().map(|ch| if (ch as u32) < 256 { ch as u32 as u8 } else { b'?' }).collect();
                 let mut esc = String::new();
                 for b in bytes {

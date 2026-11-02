@@ -969,7 +969,7 @@ fn preview(s: &mut Session, p: &Value) -> Result<Value> {
             DxfShape::Polyline { points } => json!({"layer": l, "poly": points.iter().map(|q| pt(*q)).collect::<Vec<_>>()}),
             DxfShape::Circle { c, r } => json!({"layer": l, "circle": [pt(*c), r]}),
             DxfShape::Arc { c, r, a0, a1 } => json!({"layer": l, "arc": [pt(*c), r, a0, a1]}),
-            DxfShape::Text { at, height, text, .. } => json!({"layer": l, "text": text, "at": pt(*at), "h": height}),
+            DxfShape::Text { at, height, text, angle_deg } => json!({"layer": l, "text": text, "at": pt(*at), "h": height, "angle": angle_deg}),
             _ => continue, // ellipses and splines are written to the DXF; the preview skips them
         });
     }
