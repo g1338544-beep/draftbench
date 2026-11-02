@@ -807,7 +807,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             let picked = d.inputs.first().map_or(0, |i| i.items.len());
             ui.horizontal(|ui| {
                 if picked > 0 && ui_kit::button(ui, "Add New Set", ui_kit::Button::Small).clicked() {
-                    let faces: Vec<Value> = sels(d, 0).face_points().into_iter().map(pt).collect();
+                    let faces: Vec<Value> = sels(d, 0).face_points().into_iter().map(pt3).collect();
                     let reverse = d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false);
                     let dist = if reverse { format!("-({distance})") } else { distance.clone() };
                     let sets = d.extra.entry("sets").or_insert_with(|| json!([]));
