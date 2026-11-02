@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("component.break_link", "Break Link", break_link)
         .icon("break")
-        .params("component: id or name of a linked component — keeps its bodies as they are and forgets the design file"),
+        .params("component?: id or name of a linked component (default: the only linked one) — keeps its bodies as they are and forgets the design file"),
     CommandSpec::new("component.links", "List Links", list_links)
         .icon("chain")
         .noundo()
@@ -297,7 +297,17 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.break_link";
-    let comp = component_key(s, p, "component", cmd)?;
+    // Without a component: the one linked component, when there is only one.
+    let comp = if p.get("component").is_some() {
+        component_key(s, p, "component", cmd)?
+    } else {
+        let mut linked = s.doc.links.keys();
+        match (linked.next(), linked.next()) {
+            (Some(only), None) => *only,
+            (None, _) => return Err(bad(cmd, "this design has no linked components")),
+            _ => return Err(bad(cmd, "select the linked component to break, or give `component`")),
+        }
+    };
     let link = s.doc_mut().links.remove(&comp).ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
     Ok(json!({"component": comp, "path": link.path}))
 }

@@ -996,6 +996,15 @@ impl SolveApp {
             });
             return;
         }
+        if id == "component.break_link" {
+            // The component picked in the browser, else the only linked one.
+            let params = match self.tree.picked_components.first() {
+                Some(c) => json!({"component": c}),
+                None => json!({}),
+            };
+            let _ = self.run(id, params);
+            return;
+        }
         if id == "component.relink" {
             linked_source::start_selected(self);
             return;
