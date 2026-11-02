@@ -1327,6 +1327,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    let mut proj_placed = false;
     // Placing a projected view: the pointer's side of the parent view picks which view it is.
     if let Some(parent) = app.drawing.proj_tool {
         let first = app.drawing.first_angle;
@@ -1360,7 +1361,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 app.drawing.selected = Some(n);
                 app.drawing.proj_tool = None;
-                begin(app);
+                proj_placed = true;
             }
         }
     }
@@ -1450,6 +1451,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(d) = new_dim {
         app.drawing.dims.push(d);
         refresh(app);
+    }
+    if proj_placed {
+        begin(app);
     }
     if let Some((index, ox, oy)) = app.drawing.drag
         && response.drag_stopped()
