@@ -2546,7 +2546,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let cols = app.drawing.colours;
     let stroke = |l: Layer| match l {
         Layer::Visible => Stroke::new(1.6, colour_of(cols[0])),
-        Layer::Hidden => Stroke::new(1.0, colour_of(cols[1])),
+        Layer::Hidden => Stroke::new(1.4, if cols[1] == 8 { Color32::from_gray(80) } else { colour_of(cols[1]) }),
         Layer::Dim => Stroke::new(1.0, colour_of(cols[3])),
         Layer::Sheet => Stroke::new(1.4, Color32::BLACK),
         Layer::Text => Stroke::new(1.0, Color32::BLACK),
@@ -2557,7 +2557,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         match shape {
             Shape::Line(a, b) => {
                 if *layer == Layer::Hidden {
-                    painter.extend(egui::Shape::dashed_line(&[map(*a), map(*b)], s, 6.0, 4.0));
+                    painter.extend(egui::Shape::dashed_line(&[map(*a), map(*b)], s, 8.0, 5.0));
                 } else if *layer == Layer::Center {
                     painter.extend(egui::Shape::dashed_line(&[map(*a), map(*b)], s, 14.0, 4.0));
                 } else {
@@ -2566,21 +2566,29 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             Shape::Poly(points) => {
                 let pts: Vec<Pos2> = points.iter().map(|p| map(*p)).collect();
-                painter.add(egui::Shape::line(pts, s));
+                if *layer == Layer::Hidden {
+                    painter.extend(egui::Shape::dashed_line(&pts, s, 8.0, 5.0));
+                } else {
+                    painter.add(egui::Shape::line(pts, s));
+                }
             }
             Shape::Circle(c, r) => {
                 let pts: Vec<Pos2> = arc_points(*c, *r, 0.0, 360.0).into_iter().map(map).collect();
                 if *layer == Layer::Center {
                     painter.extend(egui::Shape::dashed_line(&pts, s, 14.0, 4.0));
                 } else if *layer == Layer::Hidden {
-                    painter.extend(egui::Shape::dashed_line(&pts, s, 6.0, 4.0));
+                    painter.extend(egui::Shape::dashed_line(&pts, s, 8.0, 5.0));
                 } else {
                     painter.add(egui::Shape::line(pts, s));
                 }
             }
             Shape::Arc(c, r, a0, a1) => {
-                let pts = arc_points(*c, *r, *a0, *a1).into_iter().map(map).collect();
-                painter.add(egui::Shape::line(pts, s));
+                let pts: Vec<Pos2> = arc_points(*c, *r, *a0, *a1).into_iter().map(map).collect();
+                if *layer == Layer::Hidden {
+                    painter.extend(egui::Shape::dashed_line(&pts, s, 8.0, 5.0));
+                } else {
+                    painter.add(egui::Shape::line(pts, s));
+                }
             }
             Shape::Text(p, height, text) => {
                 let size = (height * px_per_mm).clamp(0.0, 300.0);
