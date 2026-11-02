@@ -118,6 +118,10 @@ pub struct State {
     painted: bool,
     /// A view being dragged: its placement index and the grab offset from its centre, in mm.
     drag: Option<(usize, f32, f32)>,
+    /// Where the last right-click landed: the view under it and the sheet point.
+    menu_at: Option<(Option<usize>, Pos2)>,
+    /// The view whose scale is being edited after a double-click.
+    scale_edit: Option<usize>,
 }
 
 impl Default for State {
@@ -154,6 +158,8 @@ impl Default for State {
             total: 0,
             painted: false,
             drag: None,
+            menu_at: None,
+            scale_edit: None,
         }
     }
 }
@@ -675,6 +681,87 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
         {
             app.drawing.selected = hit(s).map(|b| b.0);
+        }
+    }
+    // Double-click a view to edit its scale; right-click for the add / remove menu.
+    if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
+        let under = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).map(|b| b.0);
+        if app.drawing.dim_tool.is_none()
+            && response.double_clicked()
+            && let Some(v) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)).and_then(under)
+        {
+            app.drawing.selected = Some(v);
+            app.drawing.scale_edit = Some(v);
+        }
+        if response.secondary_clicked()
+            && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+        {
+            let v = under(s);
+            if v.is_some() {
+                app.drawing.selected = v;
+            }
+            app.drawing.menu_at = Some((v, s));
+        }
+    }
+    let mut menu_add: Option<(usize, Pos2)> = None;
+    let mut menu_remove: Option<usize> = None;
+    let mut menu_scale: Option<usize> = None;
+    if let Some((target, at)) = app.drawing.menu_at {
+        crate::ui_kit::Menu::context(&response, |ui| {
+            for (i, (_, label)) in VIEWS.iter().enumerate() {
+                if crate::ui_kit::list_picker(ui, &format!("Add {label} view here"), label, false).clicked() {
+                    menu_add = Some((i, at));
+                    ui.close();
+                }
+            }
+            if let Some(v) = target {
+                ui.separator();
+                if crate::ui_kit::list_picker(ui, "Edit scale…", "Edit scale…", false).clicked() {
+                    menu_scale = Some(v);
+                    ui.close();
+                }
+                if crate::ui_kit::list_picker(ui, "Delete view", "Delete view", false).clicked() {
+                    menu_remove = Some(v);
+                    ui.close();
+                }
+            }
+        });
+    }
+    if let Some((view, at)) = menu_add {
+        add_view(app, view);
+        if let Some(v) = app.drawing.placed.last_mut() {
+            v.x = f64::from(at.x);
+            v.y = f64::from(at.y);
+        }
+        refresh(app);
+    }
+    if let Some(v) = menu_scale {
+        app.drawing.scale_edit = Some(v);
+    }
+    if let Some(i) = menu_remove
+        && i < app.drawing.placed.len()
+    {
+        app.drawing.placed.remove(i);
+        app.drawing.selected = None;
+        app.drawing.scale_edit = None;
+        refresh(app);
+    }
+    if let Some(i) = app.drawing.scale_edit {
+        if i >= app.drawing.placed.len() {
+            app.drawing.scale_edit = None;
+        } else {
+            let title = format!("Scale of {}", VIEWS[app.drawing.placed[i].view.min(6)].1);
+            let mut changed = false;
+            let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_scale"), "scale", &title).show_body(ui.ctx(), |ui| {
+                ui.label("Blank = fit, 0.5 = 1:2, 2 = 2:1");
+                changed = crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_scale_pop", i)), &mut app.drawing.placed[i].scale, "auto", false, 12).changed();
+            });
+            if closed {
+                app.drawing.scale_edit = None;
+            }
+            if changed {
+                refresh(app);
+            }
         }
     }
     if app.drawing.drag.is_none() {
