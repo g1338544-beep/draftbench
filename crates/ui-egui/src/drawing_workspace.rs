@@ -3280,6 +3280,43 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let end = snapped.flatten().unwrap_or(h);
                 painter.line_segment([map(*first), map(end)], Stroke::new(1.0, Tokens::get().accent));
             }
+            // The dimension follows the pointer before it is placed: line, arrows and value.
+            if let Some(h) = hover_s
+                && let [pa, pb] = picks[..]
+                && (kind <= 2 || kind == 7)
+            {
+                let (dx, dy) = ((pb.x - pa.x).abs(), (pb.y - pa.y).abs());
+                let ek = if kind != 7 { kind } else if dx >= 2.0 * dy { 0 } else if dy >= 2.0 * dx { 1 } else { 2 };
+                let at = match DIM_KINDS[ek.min(6)].0 {
+                    "horizontal" => h.y,
+                    "vertical" => h.x,
+                    _ => {
+                        let (ux, uy) = (pb.x - pa.x, pb.y - pa.y);
+                        let n = ux.hypot(uy).max(1e-6);
+                        ((h.x - pa.x) * -uy + (h.y - pa.y) * ux) / n
+                    }
+                };
+                let tmp = DimItem { kind: ek, a: pa, b: pb, at, text: String::new(), slide: 0.0 };
+                let accent = Tokens::get().accent;
+                let mid = pos2((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0);
+                let k = sheet
+                    .boxes
+                    .iter()
+                    .find(|bx| (mid.x - bx.1).abs() <= bx.3 / 2.0 + 15.0 && (mid.y - bx.2).abs() <= bx.4 / 2.0 + 15.0)
+                    .and_then(|bx| sheet.scales.iter().find(|sc| sc.0 == bx.0))
+                    .map_or(1.0, |sc| sc.1)
+                    .max(1e-6);
+                let measured = match DIM_KINDS[ek.min(6)].0 {
+                    "horizontal" => dx,
+                    "vertical" => dy,
+                    _ => (pb - pa).length(),
+                } / k;
+                for (u, v) in dim_parts(&tmp) {
+                    painter.line_segment([map(u), map(v)], Stroke::new(1.5, accent));
+                }
+                let (l0, l1) = dim_segment(&tmp);
+                painter.text(map(pos2((l0.x + l1.x) / 2.0, (l0.y + l1.y) / 2.0)) + vec2(0.0, -4.0), egui::Align2::CENTER_BOTTOM, format!("{measured:.1}"), egui::FontId::proportional(Tokens::get().font_body + 2.0), accent);
+            }
             if response.clicked_by(egui::PointerButton::Primary)
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             {
