@@ -2089,7 +2089,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let extent = app.drawing.sheet.as_ref().map(|s| s.width.hypot(s.height)).unwrap_or(500.0);
     let map = sheet_map(app, rect, extent);
 
-    let mut erase_click: Option<[f32; 4]> = None;
+    let mut erase_click    // Base View: make the ghost of the chosen view when the view or scale changes.
+    if app.drawing.cline_tool.is_none()
+        && let Some((view, scale)) = app.drawing.base.clone()
+        && view <= 6
+    {
+        let key = format!("{view}|{scale}|{}|{}", app.drawing.paper, app.drawing.first_angle);
+        if app.drawing.base_preview.as_ref().is_none_or(|(k, _)| *k != key) {
+            let made = make_preview(app, view, &scale);
+            app.drawing.base_preview = Some((key, made));
+        }
+    }
+: Option<[f32; 4]> = None;
     // Dragging a placed view moves it; any other drag navigates (pan/zoom) as in the model view.
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).copied();
@@ -2596,11 +2607,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let Some((view, scale)) = app.drawing.base.clone()
         && view <= 6
     {
-        let key = format!("{view}|{scale}|{}|{}", app.drawing.paper, app.drawing.first_angle);
-        if app.drawing.base_preview.as_ref().is_none_or(|(k, _)| *k != key) {
-            let made = make_preview(app, view, &scale);
-            app.drawing.base_preview = Some((key, made));
-        }
         if let Some(at) = response.hover_pos().and_then(|q| m.to_sheet(q))
             && let Some((_, Some(pv))) = &app.drawing.base_preview
         {
