@@ -982,23 +982,60 @@ fn snap_circle(sheet: &Sheet, p: Pos2, tol: f32) -> Option<(Pos2, f32)> {
     best.map(|(_, c, r)| (c, r))
 }
 
-/// The circle a closed polyline traces (a hole drawn as many short segments), if it is round.
+/// The circle a polyline traces (a hole drawn as many short segments, or turns of a thread's
+/// helix seen end-on), if it goes most of the way round one.
 fn poly_circle(points: &[Pos2]) -> Option<(Pos2, f32)> {
     let n = points.len();
-    if !(12..=2000).contains(&n) {
+    if !(12..=20000).contains(&n) {
         return None;
     }
-    let first = *points.first()?;
-    let last = *points.last()?;
-    let sum = points.iter().fold(vec2(0.0, 0.0), |a, q| a + q.to_vec2());
-    let c = (sum / n as f32).to_pos2();
-    let r = points.iter().map(|q| (*q - c).length()).sum::<f32>() / n as f32;
-    if !(r.is_finite() && r > 1e-3) {
+    // Least squares (Kåsa): x² + y² + a·x + b·y + c = 0, about the middle of the points.
+    let mean = points.iter().fold(vec2(0.0, 0.0), |acc, q| acc + q.to_vec2()) / n as f32;
+    let (mut sxx, mut sxy, mut syy, mut sx, mut sy) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+    let (mut sxz, mut syz, mut sz) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for q in points {
+        let (x, y) = (f64::from(q.x - mean.x), f64::from(q.y - mean.y));
+        let z = x * x + y * y;
+        sxx += x * x;
+        sxy += x * y;
+        syy += y * y;
+        sx += x;
+        sy += y;
+        sxz += x * z;
+        syz += y * z;
+        sz += z;
+    }
+    let m = n as f64;
+    // Solve [sxx sxy sx; sxy syy sy; sx sy m]·[a b c] = -[sxz syz sz].
+    let det = sxx * (syy * m - sy * sy) - sxy * (sxy * m - sy * sx) + sx * (sxy * sy - syy * sx);
+    if det.abs() < 1e-12 {
         return None;
     }
-    let round = points.iter().all(|q| ((*q - c).length() - r).abs() <= r * 0.03);
-    let closed = (first - last).length() <= r * 0.3;
-    (round && closed).then_some((c, r))
+    let solve = |r0: f64, r1: f64, r2: f64, col: usize| {
+        let mut mat = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, m]];
+        mat[0][col] = r0;
+        mat[1][col] = r1;
+        mat[2][col] = r2;
+        mat[0][0] * (mat[1][1] * mat[2][2] - mat[1][2] * mat[2][1]) - mat[0][1] * (mat[1][0] * mat[2][2] - mat[1][2] * mat[2][0])
+            + mat[0][2] * (mat[1][0] * mat[2][1] - mat[1][1] * mat[2][0])
+    };
+    let (a, b, c) = (solve(-sxz, -syz, -sz, 0) / det, solve(-sxz, -syz, -sz, 1) / det, solve(-sxz, -syz, -sz, 2) / det);
+    let (cx, cy) = (-a / 2.0, -b / 2.0);
+    let r2 = cx * cx + cy * cy - c;
+    if !(r2.is_finite() && r2 > 1e-8) {
+        return None;
+    }
+    let r = r2.sqrt();
+    let centre = pos2(cx as f32 + mean.x, cy as f32 + mean.y);
+    let round = points.iter().all(|q| (((*q - centre).length() as f64) - r).abs() <= r * 0.03);
+    // Most of the way round: no gap of more than a third of a turn between neighbouring angles.
+    let mut angles: Vec<f32> = points.iter().map(|q| (q.y - centre.y).atan2(q.x - centre.x)).collect();
+    angles.sort_by(|x, y| x.total_cmp(y));
+    let mut gap = angles.first().zip(angles.last()).map_or(f32::MAX, |(lo, hi)| lo + std::f32::consts::TAU - hi);
+    for w in angles.windows(2) {
+        gap = gap.max(w[1] - w[0]);
+    }
+    (round && gap <= std::f32::consts::TAU / 3.0).then_some((centre, r as f32))
 }
 
 /// Remember the sheet's state each time it settles after a change, so Undo can step back.
