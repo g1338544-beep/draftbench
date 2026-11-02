@@ -168,7 +168,7 @@ fn order(s: &mut Session, p: &Value) -> Result<Value> {
 const ORIGIN: [&str; 7] = ["O", "X", "Y", "Z", "XY", "XZ", "YZ"];
 
 /// A browser item whose visibility can change.
-enum Shown {
+pub(super) enum Shown {
     Sketch(u64),
     Body(String),
     /// Origin items and construction geometry, by name.
