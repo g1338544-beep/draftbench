@@ -1470,6 +1470,34 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             }
             refresh(app);
         }
+        "drawing.ribbon.view3d" => {
+            use solidcraft_engine::render::StandardView as Sv;
+            let picked = app.drawing.selected.filter(|i| *i < app.drawing.placed.len());
+            let boxed = picked.and_then(|i| app.drawing.sheet.as_ref().and_then(|sh| sh.boxes.iter().find(|b| b.0 == i).copied()));
+            match (picked, boxed) {
+                (Some(i), Some(b)) if app.drawing.shaded.len() < 6 => {
+                    let v = &app.drawing.placed[i];
+                    let angles = match (v.custom, v.view) {
+                        (Some(c), _) => c,
+                        (None, 0) => Sv::Front.angles(),
+                        (None, 1) => Sv::Top.angles(),
+                        (None, 2) => Sv::Right.angles(),
+                        (None, 3) => Sv::Left.angles(),
+                        (None, 4) => Sv::Back.angles(),
+                        (None, 5) => Sv::Bottom.angles(),
+                        _ => Sv::Iso.angles(),
+                    };
+                    let width = b.3.clamp(20.0, 600.0);
+                    let mut pic = ShadedView::new(b.1, b.2, width, angles.0, angles.1);
+                    pic.bg = 1;
+                    pic.ratio = (b.4 / b.3.max(1e-3)).clamp(0.2, 3.0);
+                    app.drawing.shaded.push(pic);
+                    remove_view(app, i);
+                    refresh(app);
+                }
+                _ => add_shaded_view(app),
+            }
+        }
         "drawing.ribbon.scale" => app.drawing.scale_edit = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()),
         "drawing.ribbon.delete" => {
             if let Some(i) = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()) {
