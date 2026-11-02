@@ -417,6 +417,8 @@ pub struct Dialog {
     pub preview_enabled: bool,
     /// Preserve Apply intent across asynchronous evaluation; never a command parameter.
     repeat_after_apply: bool,
+    /// What the dialog was when Enter last previewed it: Enter again on the same values applies.
+    pub trial: Option<u64>,
     /// Parameters the dialog doesn't show but the command needs (kept when editing).
     pub extra: serde_json::Map<String, Value>,
     /// What the inputs were when OK was refused: `error` stays only while they still are.
@@ -564,6 +566,7 @@ impl Dialog {
             reset_scroll: true,
             preview_enabled: true,
             repeat_after_apply: false,
+            trial: None,
             extra: serde_json::Map::new(),
             refused: None,
             then_start: None,
@@ -2481,6 +2484,28 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 then_start = d.then_start;
             }
             Err(error) => d.refuse(app, error),
+        }
+    }
+    // Enter once is a trial: the preview shows what OK would make, and the dialog stays. Enter
+    // again on the same values applies for real. The OK button always applies at once.
+    if ok
+        && !cancel
+        && app.preferences.enter_previews
+        && d.previews()
+        && app.applying.is_none()
+        && !report_active
+        && ctx.input(|i| i.key_pressed(egui::Key::Enter))
+        && let Ok(cmds) = apply_commands(app, &d)
+    {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        format!("{cmds:?}").hash(&mut h);
+        let fingerprint = h.finish();
+        if d.trial != Some(fingerprint) {
+            d.trial = Some(fingerprint);
+            d.preview_enabled = true;
+            ok = false;
+            app.set_status("Preview shown: press Enter again to apply", false);
         }
     }
     if ok && app.applying.is_none() {

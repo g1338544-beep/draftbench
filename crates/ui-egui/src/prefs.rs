@@ -384,6 +384,9 @@ preference_settings! {
     edge_colour: String = String::new(), 1;
     /// Colour of sketch lines as `#rrggbb`; empty keeps the theme's own.
     sketch_colour: String = String::new(), 1;
+    /// Enter in a dialog previews the result first; Enter again applies it. (Off under test so the
+    /// many tests that press Enter once keep applying.)
+    enter_previews: bool = !cfg!(test), 1;
     /// Colour of new and uncoloured parts as `#rrggbb`; empty keeps the theme's own.
     part_colour: String = String::new(), 1;
     /// Colour of selected parts as `#rrggbb`; empty keeps the theme's own.
@@ -1512,6 +1515,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                 });
             }
+            ui_kit::checkbox(ui, crate::i18n::tr_label("Enter previews first (press Enter twice to apply)"), &mut app.preferences.enter_previews);
             for (label, which) in [("Part colour", 0), ("Selection colour", 1)] {
                 let reset_label = app.tr_label("Theme");
                 ui_kit::row(ui, app.tr_label(label), |ui| {
