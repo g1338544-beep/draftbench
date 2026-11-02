@@ -92,8 +92,14 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Kind) -> bool {
     enter
 }
 
-fn sel_point(s: Option<&Sel>) -> Option<Vec3> {
-    match s? {
+/// The point a pick stands for: a vertex, the centre of a circle edge or of a round or flat
+/// face, the middle of another edge.
+fn sel_point(app: &SolveApp, s: Option<&Sel>) -> Option<Vec3> {
+    let s = s?;
+    if let Some(snap) = crate::dialogs_assembly::snap_of(&app.session, s) {
+        return Some(snap.at);
+    }
+    match s {
         Sel::Vertex { point, .. } | Sel::Face { point, .. } | Sel::Edge { point, .. } => Some(*point),
         _ => None,
     }
@@ -127,7 +133,7 @@ fn bodies_center(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
 /// What a Free Move turns about: the picked pivot, else the kept one (editing), else the
 /// bodies' centre.
 fn pivot(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
-    if let Some(p) = sel_point(items(d, 1).first()) {
+    if let Some(p) = sel_point(app, items(d, 1).first()) {
         return Some(p);
     }
     if let Some(a) = d.extra.get("pivot").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()) {
@@ -163,7 +169,7 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     if bodies.is_empty() {
         return Err("select bodies first".into());
     }
-    let need_point = |i: usize, what: &str| sel_point(items(d, i).first()).ok_or(format!("select {what} first"));
+    let need_point = |i: usize, what: &str| sel_point(app, items(d, i).first()).ok_or(format!("select {what} first"));
     let num = |t: Vec3| json!([mm(t.x), mm(t.y), mm(t.z)]);
     let mut p = json!({ "bodies": bodies });
     match *mode {
