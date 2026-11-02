@@ -1573,7 +1573,15 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                         refresh(app);
                     }
                 }
-                None => app.set_status("Select a view first, then 3D View".to_string(), true),
+                // Nothing selected: every view that can has it, or (when they all do) none.
+                None => {
+                    let can = |v: &PlacedView| v.rot == 0 && v.section.is_none();
+                    let on = app.drawing.placed.iter().filter(|v| can(v)).any(|v| !v.colour);
+                    for v in app.drawing.placed.iter_mut().filter(|v| can(v)) {
+                        v.colour = on;
+                    }
+                    refresh(app);
+                }
             }
         }
         "drawing.ribbon.scale" => app.drawing.scale_edit = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()),
