@@ -48,7 +48,8 @@ fn colour_of(index: u8) -> Color32 {
 const VIEWS: [(&str, &str); 7] =
     [("front", "Front"), ("top", "Top"), ("right", "Right"), ("left", "Left"), ("back", "Back"), ("bottom", "Bottom"), ("iso", "Isometric (3D)")];
 
-const DIM_KINDS: [(&str, &str); 3] = [("horizontal", "Horizontal"), ("vertical", "Vertical"), ("aligned", "Aligned")];
+const DIM_KINDS: [(&str, &str); 5] =
+    [("horizontal", "Horizontal"), ("vertical", "Vertical"), ("aligned", "Aligned"), ("diameter", "Diameter (click a circle)"), ("radius", "Radius (click an arc or circle)")];
 
 /// A dimension the user placed, in sheet mm.
 #[derive(Clone)]
@@ -384,7 +385,7 @@ impl State {
                 };
                 let (Some(a), Some(b)) = (pt("a"), pt("b")) else { continue };
                 self.dims.push(DimItem {
-                    kind: v.get("kind").and_then(serde_json::Value::as_u64).map_or(0, |n| (n as usize).min(2)),
+                    kind: v.get("kind").and_then(serde_json::Value::as_u64).map_or(0, |n| (n as usize).min(4)),
                     a,
                     b,
                     at: f(v, "at").unwrap_or(0.0) as f32,
@@ -510,7 +511,7 @@ fn params(st: &State) -> Value {
         "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "note": st.notes, "sheet": st.sheet_no, "revision": st.revision},
         "tolerance": 0.15,
         "dimension_items": st.dims.iter().map(|d| json!({
-            "kind": DIM_KINDS[d.kind.min(2)].0,
+            "kind": DIM_KINDS[d.kind.min(4)].0,
             "a": [d.a.x, d.a.y],
             "b": [d.b.x, d.b.y],
             "at": d.at,
@@ -697,9 +698,14 @@ fn scale_picker(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
 
 /// The drawn line of a dimension, in sheet mm.
 fn dim_segment(d: &DimItem) -> (Pos2, Pos2) {
-    match DIM_KINDS[d.kind.min(2)].0 {
+    match DIM_KINDS[d.kind.min(4)].0 {
         "horizontal" => (pos2(d.a.x, d.at), pos2(d.b.x, d.at)),
         "vertical" => (pos2(d.at, d.a.y), pos2(d.at, d.b.y)),
+        "diameter" | "radius" => {
+            let (dir, r) = circle_dir(d);
+            let out = d.a + dir * d.at.max(r + 3.0);
+            (if DIM_KINDS[d.kind.min(4)].0 == "diameter" { d.a - dir * r } else { d.a }, out)
+        }
         _ => {
             let (dx, dy) = (d.b.x - d.a.x, d.b.y - d.a.y);
             let n = dx.hypot(dy).max(1e-6);
@@ -707,6 +713,30 @@ fn dim_segment(d: &DimItem) -> (Pos2, Pos2) {
             (d.a + off, d.b + off)
         }
     }
+}
+
+/// The unit direction from a circle dimension's centre to its rim point, and the radius.
+fn circle_dir(d: &DimItem) -> (egui::Vec2, f32) {
+    let v = d.b - d.a;
+    let r = v.length().max(1e-6);
+    (v / r, r)
+}
+
+/// The circle or arc of the drawing nearest to `p` (within `tol`): its centre and radius.
+fn snap_circle(sheet: &Sheet, p: Pos2, tol: f32) -> Option<(Pos2, f32)> {
+    let mut best: Option<(f32, Pos2, f32)> = None;
+    for (layer, shape) in &sheet.items {
+        if !matches!(layer, Layer::Visible | Layer::Hidden) {
+            continue;
+        }
+        if let Shape::Circle(c, r) | Shape::Arc(c, r, _, _) = shape {
+            let d = ((p - *c).length() - *r).abs();
+            if d <= tol && best.is_none_or(|(b, _, _)| d < b) {
+                best = Some((d, *c, *r));
+            }
+        }
+    }
+    best.map(|(_, c, r)| (c, r))
 }
 
 fn dist_to_segment(p: Pos2, (a, b): (Pos2, Pos2)) -> f32 {
@@ -1037,11 +1067,11 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     });
                     if app.drawing.dim_tool.is_some() {
-                        ui.small("Click two points on a view, then where the dimension line goes. Esc cancels.");
+                        ui.small("Length: click two points on a view, then where the dimension line goes. Diameter / radius: click the circle, then where the value goes. Esc cancels.");
                     }
                     let mut remove_dim: Option<usize> = None;
                     for i in 0..app.drawing.dims.len() {
-                        let kind = DIM_KINDS[app.drawing.dims[i].kind.min(2)].1;
+                        let kind = DIM_KINDS[app.drawing.dims[i].kind.min(4)].1;
                         ui.label(format!("{}. {kind}", i + 1));
                         dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_dim_text", i)), &mut app.drawing.dims[i].text, "measured value", false, 40).changed();
                         if crate::ui_kit::button(ui, "Remove dimension", crate::ui_kit::Button::Small).clicked() {
@@ -1236,9 +1266,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let (Some(i), Some(m)) = (app.drawing.drag_dim, &map) {
         if response.dragged() {
             if let (Some(s), Some(d)) = (response.interact_pointer_pos().and_then(|q| m.to_sheet(q)), app.drawing.dims.get_mut(i)) {
-                d.at = match DIM_KINDS[d.kind.min(2)].0 {
+                d.at = match DIM_KINDS[d.kind.min(4)].0 {
                     "horizontal" => s.y,
                     "vertical" => s.x,
+                    "diameter" | "radius" => (s - d.a).length(),
                     _ => {
                         let (dx, dy) = (d.b.x - d.a.x, d.b.y - d.a.y);
                         let n = dx.hypot(dy).max(1e-6);
@@ -1551,13 +1582,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             {
                 let hit_pt = snap_point(sheet, c, tol);
-                if picks.len() < 2 {
+                if kind >= 3 {
+                    // Diameter or radius: click the circle, then where the leader and value go.
+                    if let (Some(centre), Some(r)) = (picks.first().copied(), picks.get(1).map(|p| p.x)) {
+                        let v = c - centre;
+                        let len = v.length().max(1e-6);
+                        new_dim = Some(DimItem { kind, a: centre, b: centre + v / len * r, at: len, text: String::new() });
+                        app.drawing.dim_tool = Some((kind, Vec::new()));
+                    } else if let Some((centre, r)) = snap_circle(sheet, c, tol * 1.5) {
+                        app.drawing.dim_tool = Some((kind, vec![centre, pos2(r, 0.0)]));
+                    }
+                } else if picks.len() < 2 {
                     let mut next = picks.clone();
                     next.push(hit_pt.unwrap_or(c));
                     app.drawing.dim_tool = Some((kind, next));
                 } else {
                     let (a, b) = (picks[0], picks[1]);
-                    let at = match DIM_KINDS[kind.min(2)].0 {
+                    let at = match DIM_KINDS[kind.min(4)].0 {
                         "horizontal" => c.y,
                         "vertical" => c.x,
                         _ => {

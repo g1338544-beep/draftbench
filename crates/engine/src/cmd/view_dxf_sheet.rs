@@ -1013,6 +1013,45 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
         let n = (v.x * v.x + v.y * v.y).sqrt();
         if n > 1e-9 { Some(Vec2::new(v.x / n, v.y / n)) } else { None }
     };
+    if kind == "diameter" || kind == "radius" {
+        // A leader through the rim point out to the value; arrowheads on the circle.
+        let Some(dir) = unit(Vec2::new(b.x - a.x, b.y - a.y)) else { return };
+        let r = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt();
+        let out_len = at.max(r + 3.0);
+        let out = Vec2::new(a.x + dir.x * out_len, a.y + dir.y * out_len);
+        let far = Vec2::new(a.x - dir.x * r, a.y - dir.y * r);
+        let start = if kind == "diameter" { far } else { a };
+        line("DIM", start, out, entities);
+        let side = Vec2::new(-dir.y, dir.x);
+        let mut arrow = |tip: Vec2, sign: f64| {
+            for k in [-1.0, 1.0] {
+                let back = Vec2::new(tip.x + dir.x * 3.0 * sign + side.x * 0.9 * k, tip.y + dir.y * 3.0 * sign + side.y * 0.9 * k);
+                line("DIM", tip, back, entities);
+            }
+        };
+        arrow(b, 1.0);
+        if kind == "diameter" {
+            arrow(far, -1.0);
+        }
+        let scale = boxes
+            .iter()
+            .filter_map(|bx| {
+                let g = |k: &str| bx.get(k).and_then(Value::as_f64);
+                let (x, y, w, h, k) = (g("x")?, g("y")?, g("w")?, g("h")?, g("scale")?);
+                ((a.x - x).abs() <= w / 2.0 + 15.0 && (a.y - y).abs() <= h / 2.0 + 15.0 && k > 0.0).then_some(k)
+            })
+            .next()
+            .unwrap_or(1.0);
+        let measured = if kind == "diameter" { 2.0 * r / scale } else { r / scale };
+        let text_value: String = match d.get("text").and_then(Value::as_str).map(str::trim) {
+            Some(t) if !t.is_empty() => t.chars().take(40).collect(),
+            _ => format!("{}{}", if kind == "diameter" { "%%c" } else { "R" }, trim_mm(measured)),
+        };
+        let reach = 1.5 + th * 0.3 * text_value.chars().count() as f64;
+        let centre = Vec2::new(out.x + dir.x * reach, out.y + dir.y * reach);
+        entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: centre, height: th, angle_deg: 0.0, text: text_value } });
+        return;
+    }
     let (p1, p2) = match kind {
         "horizontal" => (Vec2::new(a.x, at), Vec2::new(b.x, at)),
         "vertical" => (Vec2::new(at, a.y), Vec2::new(at, b.y)),
