@@ -67,13 +67,27 @@ fn origin(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "wcs.origin";
     let at = match p.get("point") {
         Some(v) => vec3(v).ok_or_else(|| bad(cmd, "point must be [x, y, z]"))?,
-        None => s.selection.iter().find_map(point_of).ok_or_else(|| bad(cmd, "pick a vertex, edge or face first, or give a point"))?,
+        None => {
+            let picked = s.selection.iter().find_map(point_of).ok_or_else(|| bad(cmd, "pick a vertex, edge or face first, or give a point"))?;
+            // A pick on a round edge (a hole's rim) means the middle of that circle.
+            let edge = s.selection.iter().any(|x| matches!(x, Sel::Edge { .. }));
+            if edge { circle_centre(s, picked).unwrap_or(picked) } else { picked }
+        }
     };
     if !(at.x.is_finite() && at.y.is_finite() && at.z.is_finite()) {
         return Err(bad(cmd, "point must be finite"));
     }
     let w = Wcs { origin: at, ..current(s) };
     Ok(store(s, w))
+}
+
+/// The centre of the round end of a cylindrical face (a hole or a boss) that the point `pick` lies on.
+fn circle_centre(s: &Session, pick: Vec3) -> Option<Vec3> {
+    let st = s.model.state();
+    let c = st.bodies.iter().find_map(|b| solidcraft_doc::kernel::cylinder_face_at(&b.body, pick))?;
+    let along = (pick - c.axis_point).dot(c.axis);
+    let at = if (along - c.start).abs() <= (c.end - along).abs() { c.start } else { c.end };
+    Some(c.axis_point + c.axis * at)
 }
 
 /// `v` turned by `deg` about the unit axis `k`.
