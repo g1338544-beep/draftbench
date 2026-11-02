@@ -982,20 +982,47 @@ fn scale_picker(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
                 ui.close();
             }
         }
-        ui.separator();
-        ui.label("Custom (1:3, 2:1 or 0.25)");
-        let slot = egui::Id::new(("scale_custom", id));
-        let mut text: String = ui.data_mut(|d| d.get_temp::<String>(slot)).unwrap_or_default();
-        let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).hint_text("1:3"));
-        ui.data_mut(|d| d.insert_temp(slot, text.clone()));
-        let apply = crate::ui_kit::button(ui, "Apply", crate::ui_kit::Button::Small).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
-        if apply && let Some(k) = parse_scale(&text) {
-            *value = format!("{k}");
+        if scale_custom(ui, id, value) {
             changed = true;
             ui.close();
         }
     });
     changed
+}
+
+/// The custom-scale row: type 1:3, 2:1 or a factor, then Apply or Enter. True once a scale was set.
+fn scale_custom(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
+    ui.separator();
+    ui.label("Custom (1:3, 2:1 or 0.25)");
+    let slot = egui::Id::new(("scale_custom", id));
+    let mut text: String = ui.data_mut(|d| d.get_temp::<String>(slot)).unwrap_or_default();
+    let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).hint_text("1:3"));
+    ui.data_mut(|d| d.insert_temp(slot, text.clone()));
+    let apply = crate::ui_kit::button(ui, "Apply", crate::ui_kit::Button::Small).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+    if apply && let Some(k) = parse_scale(&text) {
+        *value = format!("{k}");
+        return true;
+    }
+    false
+}
+
+/// All the standard scales laid out in the window itself (one click sets one), then the custom row.
+fn scale_list(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        for (label, factor) in SCALES {
+            let on = if factor.is_empty() {
+                value.trim().is_empty()
+            } else {
+                value.trim().parse::<f64>().ok().zip(factor.parse::<f64>().ok()).is_some_and(|(a, b)| (a - b).abs() < 1e-9)
+            };
+            if ui.selectable_label(on, label).clicked() {
+                *value = factor.to_string();
+                changed = true;
+            }
+        }
+    });
+    changed | scale_custom(ui, id, value)
 }
 
 /// A typed scale: "1:3" (drawing : real, so 1:3 shrinks to a third), "2:1", or a plain factor such as 0.25.
@@ -1133,6 +1160,11 @@ fn poly_circle(points: &[Pos2]) -> Option<(Pos2, f32)> {
 
 /// Remember the sheet's state each time it settles after a change, so Undo can step back.
 fn track_history(app: &mut SolveApp, ui: &egui::Ui) {
+    // Serialising the sheet is not free: look a few times a second, not every frame.
+    if ui.ctx().cumulative_pass_nr() % 12 != 0 {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
+        return;
+    }
     let d = &app.drawing;
     let busy = d.drag.is_some() || d.drag_dim.is_some() || d.drag_end.is_some() || d.erase.is_some() || d.cl_drag.is_some() || ui.input(|i| i.pointer.any_down());
     if busy || d.sheet.is_none() {
@@ -2477,9 +2509,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let title = format!("Scale of {}", VIEWS[app.drawing.placed[i].view.min(6)].1);
             let mut changed = false;
             let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_scale"), "scale", &title).show_body(ui.ctx(), |ui| {
-                changed = scale_picker(ui, "drawing_scale_pop", &mut app.drawing.placed[i].scale);
+                changed = scale_list(ui, "drawing_scale_pop", &mut app.drawing.placed[i].scale);
             });
-            if closed {
+            if closed || changed {
                 app.drawing.scale_edit = None;
             }
             if changed {
