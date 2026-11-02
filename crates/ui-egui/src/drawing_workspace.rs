@@ -120,6 +120,98 @@ struct Sheet {
     items: Vec<(Layer, Shape)>,
     /// (placement index, centre x, centre y, width, height) of each view on the sheet, in mm.
     boxes: Vec<(usize, f32, f32, f32, f32)>,
+    /// The circles the drawing shows (found once, on first use) for snapping to their centres.
+    rounds: std::sync::OnceLock<Rounds>,
+}
+
+/// Round shapes of a sheet: circle, arc and polyline circles, and rings of short separate lines.
+struct Rounds {
+    circles: Vec<(Pos2, f32)>,
+    /// Quantised points that belong to a ring of segments (their ends are not snap targets).
+    ring: std::collections::HashSet<(i32, i32)>,
+}
+
+fn grid_key(p: Pos2) -> (i32, i32) {
+    ((p.x * 20.0).round().clamp(-1e9, 1e9) as i32, (p.y * 20.0).round().clamp(-1e9, 1e9) as i32)
+}
+
+impl Sheet {
+    fn rounds(&self) -> &Rounds {
+        self.rounds.get_or_init(|| find_rounds(&self.items))
+    }
+}
+
+fn find_rounds(items: &[(Layer, Shape)]) -> Rounds {
+    let mut out = Rounds { circles: Vec::new(), ring: std::collections::HashSet::new() };
+    let mut segments: Vec<(Pos2, Pos2)> = Vec::new();
+    for (layer, shape) in items {
+        if !matches!(layer, Layer::Visible | Layer::Hidden) {
+            continue;
+        }
+        match shape {
+            Shape::Circle(c, r) | Shape::Arc(c, r, _, _) => out.circles.push((*c, *r)),
+            Shape::Poly(points) => {
+                if let Some(round) = fit_circle(points, 12) {
+                    out.circles.push(round);
+                    out.ring.extend(points.iter().map(|q| grid_key(*q)));
+                } else {
+                    segments.extend(points.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))));
+                }
+            }
+            Shape::Line(a, b) => segments.push((*a, *b)),
+            Shape::Text(..) => {}
+        }
+    }
+    if segments.len() > 200_000 {
+        return out;
+    }
+    // Segments that meet end to end form chains; a chain that goes round a circle is a hole.
+    let mut ids: std::collections::HashMap<(i32, i32), usize> = std::collections::HashMap::new();
+    let mut at: Vec<Pos2> = Vec::new();
+    let mut parent: Vec<usize> = Vec::new();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while let Some(&p) = parent.get(i) {
+            if p == i {
+                break;
+            }
+            let up = parent.get(p).copied().unwrap_or(p);
+            if let Some(slot) = parent.get_mut(i) {
+                *slot = up;
+            }
+            i = up;
+        }
+        i
+    }
+    for (a, b) in &segments {
+        let mut id = |q: Pos2| {
+            *ids.entry(grid_key(q)).or_insert_with(|| {
+                at.push(q);
+                parent.push(parent.len());
+                parent.len() - 1
+            })
+        };
+        let (ia, ib) = (id(*a), id(*b));
+        let (ra, rb) = (root(&mut parent, ia), root(&mut parent, ib));
+        if let Some(slot) = parent.get_mut(ra) {
+            *slot = rb;
+        }
+    }
+    let mut groups: std::collections::HashMap<usize, Vec<Pos2>> = std::collections::HashMap::new();
+    for i in 0..at.len() {
+        let r = root(&mut parent, i);
+        if let Some(q) = at.get(i) {
+            groups.entry(r).or_default().push(*q);
+        }
+    }
+    for points in groups.values() {
+        if let Some((c, r)) = fit_circle(points, 8) {
+            if !out.circles.iter().any(|(oc, orad)| (*oc - c).length() < 0.05 && (orad - r).abs() < 0.05) {
+                out.circles.push((c, r));
+            }
+            out.ring.extend(points.iter().map(|q| grid_key(*q)));
+        }
+    }
+    out
 }
 
 pub struct State {
@@ -812,7 +904,7 @@ fn parse(v: &Value) -> Option<Sheet> {
                 .collect()
         })
         .unwrap_or_default();
-    Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items, boxes })
+    Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items, boxes, rounds: std::sync::OnceLock::new() })
 }
 
 /// Start an Update: the model first, then each placed view, one stage per frame.
@@ -1083,20 +1175,10 @@ fn circle_dir(d: &DimItem) -> (egui::Vec2, f32) {
 /// The circle or arc of the drawing nearest to `p` (within `tol`): its centre and radius.
 fn snap_circle(sheet: &Sheet, p: Pos2, tol: f32) -> Option<(Pos2, f32)> {
     let mut best: Option<(f32, Pos2, f32)> = None;
-    for (layer, shape) in &sheet.items {
-        if !matches!(layer, Layer::Visible | Layer::Hidden) {
-            continue;
-        }
-        let round = match shape {
-            Shape::Circle(c, r) | Shape::Arc(c, r, _, _) => Some((*c, *r)),
-            Shape::Poly(points) => poly_circle(points),
-            _ => None,
-        };
-        if let Some((c, r)) = round {
-            let d = ((p - c).length() - r).abs().min((p - c).length());
-            if d <= tol && best.is_none_or(|(b, _, _)| d < b) {
-                best = Some((d, c, r));
-            }
+    for (c, r) in &sheet.rounds().circles {
+        let d = ((p - *c).length() - r).abs().min((p - *c).length());
+        if d <= tol && best.is_none_or(|(b, _, _)| d < b) {
+            best = Some((d, *c, *r));
         }
     }
     best.map(|(_, c, r)| (c, r))
@@ -1104,9 +1186,9 @@ fn snap_circle(sheet: &Sheet, p: Pos2, tol: f32) -> Option<(Pos2, f32)> {
 
 /// The circle a polyline traces (a hole drawn as many short segments, or turns of a thread's
 /// helix seen end-on), if it goes most of the way round one.
-fn poly_circle(points: &[Pos2]) -> Option<(Pos2, f32)> {
+fn fit_circle(points: &[Pos2], least: usize) -> Option<(Pos2, f32)> {
     let n = points.len();
-    if !(12..=20000).contains(&n) {
+    if !(least..=20000).contains(&n) {
         return None;
     }
     // Least squares (Kåsa): x² + y² + a·x + b·y + c = 0, about the middle of the points.
@@ -3018,31 +3100,33 @@ fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
             best = Some((d, q));
         }
     };
-    let mut centres: Vec<(Pos2, f32)> = Vec::new();
+    let rounds = sheet.rounds();
+    let centres: Vec<(Pos2, f32)> = rounds.circles.clone();
+    for (c, _) in &centres {
+        offer(*c);
+    }
     for (layer, shape) in &sheet.items {
         if matches!(layer, Layer::Text | Layer::Dim) {
             continue;
         }
         match shape {
             Shape::Line(a, b) => {
-                offer(*a);
-                offer(*b);
+                // The ends of a ring of short segments are not targets: the ring's centre is.
+                if !rounds.ring.contains(&grid_key(*a)) {
+                    offer(*a);
+                }
+                if !rounds.ring.contains(&grid_key(*b)) {
+                    offer(*b);
+                }
                 if *layer == Layer::Center {
                     offer(pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0));
                 }
             }
             Shape::Poly(points) => {
                 // A hole drawn as many short segments offers its centre, not its vertices.
-                if let Some((c, r)) = poly_circle(points) {
-                    offer(c);
-                    centres.push((c, r));
-                } else {
-                    points.iter().for_each(|q| offer(*q));
-                }
+                points.iter().filter(|q| !rounds.ring.contains(&grid_key(**q))).for_each(|q| offer(*q));
             }
             Shape::Circle(c, r) => {
-                offer(*c);
-                centres.push((*c, *r));
                 for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
                     let q = pos2(c.x + dx * r, c.y + dy * r);
                     if (q - p).length() <= tol * 0.4 {
