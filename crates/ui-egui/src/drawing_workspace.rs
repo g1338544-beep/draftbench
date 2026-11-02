@@ -175,10 +175,11 @@ fn find_rounds(items: &[(Layer, Shape)]) -> Rounds {
         match shape {
             Shape::Circle(c, r) | Shape::Arc(c, r, _, _) => out.circles.push((*c, *r)),
             Shape::Poly(points) => {
-                if let Some(round) = fit_circle(points, 12) {
+                if let Some(round) = fit_circle(points, 12, true) {
                     out.circles.push(round);
                     out.ring.extend(points.iter().map(|q| grid_key(*q)));
                 } else {
+                    out.circles.extend(partial_arcs(points));
                     segments.extend(points.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))));
                 }
             }
@@ -228,7 +229,7 @@ fn find_rounds(items: &[(Layer, Shape)]) -> Rounds {
         }
     }
     for points in groups.values() {
-        if let Some((c, r)) = fit_circle(points, 8) {
+        if let Some((c, r)) = fit_circle(points, 8, true) {
             if !out.circles.iter().any(|(oc, orad)| (*oc - c).length() < 0.05 && (orad - r).abs() < 0.05) {
                 out.circles.push((c, r));
             }
@@ -1056,7 +1057,7 @@ fn parse(v: &Value) -> Option<Sheet> {
         } else if let Some(a) = it.get("arc").and_then(Value::as_array) {
             Shape::Arc(pt(a.first()?)?, a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32, a.get(3)?.as_f64()? as f32)
         } else if let Some(t) = it.get("text").and_then(Value::as_str) {
-            Shape::Text(pt(it.get("at")?)?, it.get("h")?.as_f64()? as f32, t.to_string(), it.get("angle").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0) as f32)
+            Shape::Text(pt(it.get("at")?)?, it.get("h")?.as_f64()? as f32, t.replace("%%c", "Ø").replace("%%C", "Ø"), it.get("angle").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0) as f32)
         } else {
             continue;
         };
@@ -1364,9 +1365,45 @@ fn snap_circle(sheet: &Sheet, p: Pos2, tol: f32) -> Option<(Pos2, f32)> {
     best.map(|(_, c, r)| (c, r))
 }
 
+/// Round parts of a polyline (a corner fillet drawn as a few short segments): runs of at least
+/// four points that lie on one circle and turn by 10° or more.
+fn partial_arcs(points: &[Pos2]) -> Vec<(Pos2, f32)> {
+    let mut out = Vec::new();
+    if points.len() < 4 || points.len() > 4000 {
+        return out;
+    }
+    let mut i = 0;
+    while i + 4 <= points.len() {
+        let mut best: Option<(usize, (Pos2, f32))> = None;
+        let mut j = i + 4;
+        while j <= points.len() && j - i <= 400 {
+            match points.get(i..j).and_then(|run| fit_circle(run, 4, false)) {
+                Some((c, r)) if r > 0.2 && r < 2000.0 => {
+                    let turn = |q: Option<&Pos2>| q.map_or(0.0, |q| (q.y - c.y).atan2(q.x - c.x));
+                    let span = (turn(points.get(j - 1)) - turn(points.get(i))).abs();
+                    let span = span.min(std::f32::consts::TAU - span);
+                    if span >= 0.17 {
+                        best = Some((j, (c, r)));
+                    }
+                }
+                _ => break,
+            }
+            j += 1;
+        }
+        match best {
+            Some((end, round)) => {
+                out.push(round);
+                i = end - 1;
+            }
+            None => i += 1,
+        }
+    }
+    out
+}
+
 /// The circle a polyline traces (a hole drawn as many short segments, or turns of a thread's
 /// helix seen end-on), if it goes most of the way round one.
-fn fit_circle(points: &[Pos2], least: usize) -> Option<(Pos2, f32)> {
+fn fit_circle(points: &[Pos2], least: usize, full: bool) -> Option<(Pos2, f32)> {
     let n = points.len();
     if !(least..=20000).contains(&n) {
         return None;
@@ -1417,7 +1454,7 @@ fn fit_circle(points: &[Pos2], least: usize) -> Option<(Pos2, f32)> {
     for w in angles.windows(2) {
         gap = gap.max(w[1] - w[0]);
     }
-    (round && gap <= std::f32::consts::TAU / 3.0).then_some((centre, r as f32))
+    (round && (!full || gap <= std::f32::consts::TAU / 3.0)).then_some((centre, r as f32))
 }
 
 /// Remember the sheet's state each time it settles after a change, so Undo can step back.
