@@ -31,6 +31,18 @@ fn colour_of(index: u8) -> Color32 {
 const VIEWS: [(&str, &str); 7] =
     [("front", "Front"), ("top", "Top"), ("right", "Right"), ("left", "Left"), ("back", "Back"), ("bottom", "Bottom"), ("iso", "Isometric (3D)")];
 
+const DIM_KINDS: [(&str, &str); 3] = [("horizontal", "Horizontal"), ("vertical", "Vertical"), ("aligned", "Aligned")];
+
+/// A dimension the user placed, in sheet mm.
+#[derive(Clone)]
+struct DimItem {
+    kind: usize,
+    a: Pos2,
+    b: Pos2,
+    at: f32,
+    text: String,
+}
+
 /// One view the user placed: its centre on the sheet in mm and how its lines are drawn.
 #[derive(Clone)]
 struct PlacedView {
@@ -86,6 +98,9 @@ pub struct State {
     centre: bool,
     text_height: String,
     placed: Vec<PlacedView>,
+    dims: Vec<DimItem>,
+    /// The dimension being placed: its kind and the points picked so far.
+    dim_tool: Option<(usize, Vec<Pos2>)>,
     selected: Option<usize>,
     title: String,
     number: String,
@@ -123,6 +138,8 @@ impl Default for State {
             centre: true,
             text_height: "3.5".into(),
             placed: Vec::new(),
+            dims: Vec::new(),
+            dim_tool: None,
             selected: None,
             title: String::new(),
             number: String::new(),
@@ -177,6 +194,13 @@ fn params(st: &State) -> Value {
         "title": st.title,
         "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "note": st.notes, "sheet": st.sheet_no, "revision": st.revision},
         "tolerance": 0.15,
+        "dimension_items": st.dims.iter().map(|d| json!({
+            "kind": DIM_KINDS[d.kind.min(2)].0,
+            "a": [d.a.x, d.a.y],
+            "b": [d.b.x, d.b.y],
+            "at": d.at,
+            "text": d.text,
+        })).collect::<Vec<_>>(),
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
         "bolt_circle": st.bolt,
         "hidden_style": if st.hidden_style == 1 { "dashed" } else { "hidden" },
@@ -472,6 +496,32 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     }
                     ui.separator();
+                    ui.label("Dimensions");
+                    crate::ui_kit::dropdown_menu(ui, "drawing_add_dim", "Add dimension…", |ui| {
+                        for (i, (_, label)) in DIM_KINDS.iter().enumerate() {
+                            if crate::ui_kit::list_picker(ui, label, label, false).clicked() {
+                                app.drawing.dim_tool = Some((i, Vec::new()));
+                                ui.close();
+                            }
+                        }
+                    });
+                    if app.drawing.dim_tool.is_some() {
+                        ui.small("Click two points on a view, then where the dimension line goes. Esc cancels.");
+                    }
+                    let mut remove_dim: Option<usize> = None;
+                    for i in 0..app.drawing.dims.len() {
+                        let kind = DIM_KINDS[app.drawing.dims[i].kind.min(2)].1;
+                        ui.label(format!("{}. {kind}", i + 1));
+                        dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_dim_text", i)), &mut app.drawing.dims[i].text, "measured value", false, 40).changed();
+                        if crate::ui_kit::button(ui, "Remove dimension", crate::ui_kit::Button::Small).clicked() {
+                            remove_dim = Some(i);
+                        }
+                    }
+                    if let Some(i) = remove_dim {
+                        app.drawing.dims.remove(i);
+                        dirty = true;
+                    }
+                    ui.separator();
                     ui.label("Title block");
                     ui.label("Text size (mm, 2–10)");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_text_height"), &mut app.drawing.text_height, "3.5", false, 6).changed();
@@ -613,13 +663,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging a placed view moves it; any other drag navigates (pan/zoom) as in the model view.
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).copied();
-        if response.drag_started_by(egui::PointerButton::Primary)
+        if app.drawing.dim_tool.is_none()
+            && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && let Some(b) = hit(s)
         {
             app.drawing.drag = Some((b.0, b.1 - s.x, b.2 - s.y));
             app.drawing.selected = Some(b.0);
-        } else if response.clicked()
+        } else if app.drawing.dim_tool.is_none()
+            && response.clicked()
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
         {
             app.drawing.selected = hit(s).map(|b| b.0);
@@ -689,6 +741,47 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Placing a dimension: snap to the drawn geometry, three clicks.
+    let mut new_dim: Option<DimItem> = None;
+    if let Some((kind, picks)) = app.drawing.dim_tool.clone() {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            app.drawing.dim_tool = None;
+        } else {
+            let tol = 14.0 / px_per_mm;
+            let hover_s = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
+            let snapped = hover_s.map(|h| snap_point(sheet, h, tol));
+            if let Some(Some(pt)) = snapped {
+                painter.circle_stroke(map(pt), 6.0, Stroke::new(1.5, Tokens::get().accent));
+            }
+            if let (Some(first), Some(h)) = (picks.first(), hover_s) {
+                let end = snapped.flatten().unwrap_or(h);
+                painter.line_segment([map(*first), map(end)], Stroke::new(1.0, Tokens::get().accent));
+            }
+            if response.clicked_by(egui::PointerButton::Primary)
+                && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            {
+                let hit_pt = snap_point(sheet, c, tol);
+                if picks.len() < 2 {
+                    let mut next = picks.clone();
+                    next.push(hit_pt.unwrap_or(c));
+                    app.drawing.dim_tool = Some((kind, next));
+                } else {
+                    let (a, b) = (picks[0], picks[1]);
+                    let at = match DIM_KINDS[kind.min(2)].0 {
+                        "horizontal" => c.y,
+                        "vertical" => c.x,
+                        _ => {
+                            let (dx, dy) = (b.x - a.x, b.y - a.y);
+                            let n = dx.hypot(dy).max(1e-6);
+                            ((c.x - a.x) * -dy + (c.y - a.y) * dx) / n
+                        }
+                    };
+                    new_dim = Some(DimItem { kind, a, b, at, text: String::new() });
+                    app.drawing.dim_tool = Some((kind, Vec::new()));
+                }
+            }
+        }
+    }
     // Frames of the placed views: the selected one stands out; a dragged one follows the pointer.
     let accent = Tokens::get().accent;
     for b in &sheet.boxes {
@@ -715,6 +808,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         Color32::from_gray(220),
     );
     let (sw, sh) = (sheet.width, sheet.height);
+    if let Some(d) = new_dim {
+        app.drawing.dims.push(d);
+        refresh(app);
+    }
     if let Some((index, ox, oy)) = app.drawing.drag
         && response.drag_stopped()
     {
@@ -728,6 +825,38 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else if app.drawing.drag.is_some() && !response.dragged() {
         app.drawing.drag = None;
     }
+}
+
+/// The nearest drawn corner, end, centre or circle quadrant within `tol` mm of `p`.
+fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
+    let mut best: Option<(f32, Pos2)> = None;
+    let mut offer = |q: Pos2| {
+        let d = (q - p).length();
+        if d <= tol && best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, q));
+        }
+    };
+    for (layer, shape) in &sheet.items {
+        if matches!(layer, Layer::Text | Layer::Dim | Layer::Center) {
+            continue;
+        }
+        match shape {
+            Shape::Line(a, b) => {
+                offer(*a);
+                offer(*b);
+            }
+            Shape::Poly(points) => points.iter().for_each(|q| offer(*q)),
+            Shape::Circle(c, r) => {
+                offer(*c);
+                for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+                    offer(pos2(c.x + dx * r, c.y + dy * r));
+                }
+            }
+            Shape::Arc(c, _, _, _) => offer(*c),
+            Shape::Text(..) => {}
+        }
+    }
+    best.map(|(_, q)| q)
 }
 
 fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {

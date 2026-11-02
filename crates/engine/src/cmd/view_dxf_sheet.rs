@@ -193,6 +193,11 @@ fn manual(
         boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));
         names.push(view_name(view).to_string());
     }
+    if let Some(list) = p.get("dimension_items").and_then(Value::as_array) {
+        for d in list.iter().take(200) {
+            add_dimension(&mut entities, d, &boxes, th);
+        }
+    }
     let entities = projection::connect(entities);
     finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, any_centre, names, path, boxes)
 }
@@ -727,6 +732,84 @@ fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
         out.push((c, r));
     }
     out
+}
+
+/// One placed dimension: `{kind: horizontal|vertical|aligned, a: [x, y], b: [x, y], at, text?}`, the
+/// points and `at` in sheet mm (`at` is the dimension line's y for horizontal, its x for vertical,
+/// its distance from the points' line for aligned). The value is measured on the sheet and divided
+/// by the scale of the view the dimension sits on (the placed box it is in or near).
+fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: f64) {
+    let pt = |k: &str| -> Option<Vec2> {
+        let a = d.get(k)?.as_array()?;
+        let (x, y) = (a.first()?.as_f64()?, a.get(1)?.as_f64()?);
+        (x.is_finite() && y.is_finite() && x.abs() < 1e5 && y.abs() < 1e5).then(|| Vec2::new(x, y))
+    };
+    let (Some(a), Some(b)) = (pt("a"), pt("b")) else { return };
+    let Some(at) = d.get("at").and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e5) else { return };
+    let kind = d.get("kind").and_then(Value::as_str).unwrap_or("aligned");
+    let unit = |v: Vec2| {
+        let n = (v.x * v.x + v.y * v.y).sqrt();
+        if n > 1e-9 { Some(Vec2::new(v.x / n, v.y / n)) } else { None }
+    };
+    let (p1, p2) = match kind {
+        "horizontal" => (Vec2::new(a.x, at), Vec2::new(b.x, at)),
+        "vertical" => (Vec2::new(at, a.y), Vec2::new(at, b.y)),
+        _ => {
+            let Some(u) = unit(Vec2::new(b.x - a.x, b.y - a.y)) else { return };
+            let n = Vec2::new(-u.y, u.x);
+            (Vec2::new(a.x + n.x * at, a.y + n.y * at), Vec2::new(b.x + n.x * at, b.y + n.y * at))
+        }
+    };
+    let Some(dir) = unit(Vec2::new(p2.x - p1.x, p2.y - p1.y)) else { return };
+    // The scale of the view this sits on.
+    let mid = Vec2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+    let scale = boxes
+        .iter()
+        .filter_map(|bx| {
+            let g = |k: &str| bx.get(k).and_then(Value::as_f64);
+            let (x, y, w, h, k) = (g("x")?, g("y")?, g("w")?, g("h")?, g("scale")?);
+            let pad = 15.0;
+            ((mid.x - x).abs() <= w / 2.0 + pad && (mid.y - y).abs() <= h / 2.0 + pad && k > 0.0).then_some(k)
+        })
+        .next()
+        .unwrap_or(1.0);
+    let measured = match kind {
+        "horizontal" => (b.x - a.x).abs(),
+        "vertical" => (b.y - a.y).abs(),
+        _ => ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt(),
+    } / scale;
+    let text_value = match d.get("text").and_then(Value::as_str).map(str::trim) {
+        Some(t) if !t.is_empty() => t.chars().take(40).collect(),
+        _ => trim_mm(measured),
+    };
+    // Extension lines from each point past the dimension line, with a small gap at the point.
+    for (from, to) in [(a, p1), (b, p2)] {
+        if let Some(e) = unit(Vec2::new(to.x - from.x, to.y - from.y)) {
+            let start = Vec2::new(from.x + e.x * 1.5, from.y + e.y * 1.5);
+            let end = Vec2::new(to.x + e.x * 2.0, to.y + e.y * 2.0);
+            if (end.x - start.x) * e.x + (end.y - start.y) * e.y > 0.0 {
+                line("DIM", start, end, entities);
+            }
+        }
+    }
+    line("DIM", p1, p2, entities);
+    // Arrowheads pointing at the extension lines.
+    let side = Vec2::new(-dir.y, dir.x);
+    for (tip, sign) in [(p1, 1.0), (p2, -1.0)] {
+        for k in [-1.0, 1.0] {
+            let back = Vec2::new(tip.x + dir.x * 3.0 * sign + side.x * 0.9 * k, tip.y + dir.y * 3.0 * sign + side.y * 0.9 * k);
+            line("DIM", tip, back, entities);
+        }
+    }
+    // The value above the line (rotated along it, kept readable).
+    let mut angle = dir.y.atan2(dir.x).to_degrees();
+    let mut up = Vec2::new(-dir.y, dir.x);
+    if angle > 90.0 + 1e-6 || angle <= -90.0 + 1e-6 {
+        angle += 180.0;
+        up = Vec2::new(-up.x, -up.y);
+    }
+    let centre = Vec2::new((p1.x + p2.x) / 2.0 + up.x * 1.2, (p1.y + p2.y) / 2.0 + up.y * 1.2);
+    entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: centre, height: th, angle_deg: angle.rem_euclid(360.0), text: text_value } });
 }
 
 fn view_name(v: StandardView) -> &'static str {
