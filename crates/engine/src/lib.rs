@@ -247,7 +247,7 @@ pub struct Session {
     pub log: Vec<String>,
     /// Increments on every document change (views use it to refresh).
     pub revision: u64,
-    /// Project a face's edges into a sketch created on it (the default; `sketch.auto_project`).
+    /// Project a face's edges into a sketch created on it (off by default; `sketch.auto_project`).
     pub auto_project: bool,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
@@ -411,7 +411,7 @@ impl Session {
             open_preview: None,
             log: Vec::new(),
             revision: 1,
-            auto_project: true,
+            auto_project: false,
             param_check: schema::ParamCheck::Off,
             active_component: 0,
             active_occurrence_path: None,

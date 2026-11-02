@@ -668,6 +668,7 @@ impl SolveApp {
             "perspective": self.ui.perspective,
             "pick_bodies": self.ui.pick_bodies,
             "auto_project": self.session.auto_project,
+            "auto_project_default_off": true,
             "visual_style": self.ui.visual_style,
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
@@ -702,7 +703,8 @@ impl SolveApp {
         if let Some(b) = flag("pick_bodies") {
             self.ui.pick_bodies = b;
         }
-        if let Some(a) = flag("auto_project") {
+        // Saved before the default became off: that value was never a choice, so it is ignored.
+        if let Some(a) = flag("auto_project").filter(|_| flag("auto_project_default_off") == Some(true)) {
             self.session.auto_project = a;
         }
         if let Some(m) = v.get("autosave_minutes").and_then(Value::as_f64).filter(|m| m.is_finite()) {

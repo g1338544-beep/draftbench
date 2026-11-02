@@ -795,7 +795,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
             }
         }
         5 => {
-            app.session.auto_project = true;
+            app.session.auto_project = false;
         }
         _ => {
             app.ui.pick_bodies = false;
