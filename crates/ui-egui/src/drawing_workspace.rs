@@ -1523,10 +1523,12 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                         (None, 5) => Sv::Bottom.angles(),
                         _ => Sv::Iso.angles(),
                     };
-                    let width = b.3.clamp(20.0, 600.0);
+                    // A picture frame about the size of the view's, close enough for the model to fill it
+                    // (Zoom and Height in the panel change it).
+                    let width = (b.3.max(b.4) * 1.1).clamp(60.0, 600.0);
                     let mut pic = ShadedView::new(b.1, b.2, width, angles.0, angles.1);
                     pic.bg = 1;
-                    pic.ratio = (b.4 / b.3.max(1e-3)).clamp(0.2, 3.0);
+                    pic.zoom = 0.5;
                     app.drawing.shaded.push(pic);
                     remove_view(app, i);
                     refresh(app);
