@@ -2630,6 +2630,7 @@ fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
             best = Some((d, q));
         }
     };
+    let mut centres: Vec<(Pos2, f32)> = Vec::new();
     for (layer, shape) in &sheet.items {
         if matches!(layer, Layer::Text | Layer::Dim) {
             continue;
@@ -2642,9 +2643,16 @@ fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
                     offer(pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0));
                 }
             }
-            Shape::Poly(points) => points.iter().for_each(|q| offer(*q)),
+            Shape::Poly(points) => {
+                points.iter().for_each(|q| offer(*q));
+                if let Some((c, r)) = poly_circle(points) {
+                    offer(c);
+                    centres.push((c, r));
+                }
+            }
             Shape::Circle(c, r) => {
                 offer(*c);
+                centres.push((*c, *r));
                 for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
                     offer(pos2(c.x + dx * r, c.y + dy * r));
                 }
@@ -2653,7 +2661,15 @@ fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
             Shape::Text(..) => {}
         }
     }
-    best.map(|(_, q)| q)
+    // Pointing into a hole (not only at its centre) takes the hole's centre, as long as no
+    // corner or end point is nearer.
+    let near = best.map_or(f32::INFINITY, |(d, _)| d);
+    let inside = centres
+        .iter()
+        .filter(|(c, r)| (*c - p).length() <= r + tol * 0.5)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .filter(|(c, _)| (*c - p).length() < near.max(tol));
+    inside.map(|(c, _)| *c).or_else(|| best.map(|(_, q)| q))
 }
 
 fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
