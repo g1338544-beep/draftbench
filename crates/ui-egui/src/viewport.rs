@@ -557,6 +557,22 @@ pub(crate) struct CachedBlock {
     meshes: Vec<std::sync::Arc<solidcraft_engine::geom::Mesh>>,
 }
 
+/// Whether an edge's polyline winds through space like a thread: many points that do not lie in one plane.
+fn helix_like(e: &[Vec3]) -> bool {
+    let n = e.len();
+    if n < 24 {
+        return false;
+    }
+    let (p0, pm, pf) = (e[0], e[n / 3], e[2 * n / 3]);
+    let Some(normal) = (pm - p0).cross(pf - p0).normalized() else { return false };
+    let span = e.iter().map(|p| (*p - p0).len()).fold(0.0, f64::max);
+    if span < 1e-9 {
+        return false;
+    }
+    let off = e.iter().map(|p| (*p - p0).dot(normal).abs()).fold(0.0, f64::max);
+    off > 0.1 * span
+}
+
 /// One body as the model scene draws it.
 struct BodyDraw {
     mesh: std::sync::Arc<solidcraft_engine::geom::Mesh>,
@@ -615,8 +631,15 @@ impl BodyDraw {
         } else {
             1.0
         };
+        // A modelled thread is a bundle of helix edges, which buries the part in lines: shaded,
+        // they are left out (its faces still show the thread), as smooth joins are.
+        let helices: Vec<bool> = if shaded && edges { m.edges.iter().map(|e| helix_like(e)).collect() } else { Vec::new() };
+        let thread_like = helices.iter().filter(|h| **h).count() >= 4;
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
             if !m.edge_pickable(ei) || (shaded && !m.shaded_edge_visible(ei)) {
+                continue;
+            }
+            if thread_like && helices.get(ei).copied().unwrap_or(false) {
                 continue;
             }
             for w in e.windows(2) {
