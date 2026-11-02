@@ -104,6 +104,10 @@ pub struct State {
     dims: Vec<DimItem>,
     /// The dimension being placed: its kind and the points picked so far.
     dim_tool: Option<(usize, Vec<Pos2>)>,
+    /// The selected dimension, the one being dragged, and the one whose text is being edited.
+    sel_dim: Option<usize>,
+    drag_dim: Option<usize>,
+    text_edit: Option<usize>,
     selected: Option<usize>,
     title: String,
     number: String,
@@ -150,6 +154,9 @@ impl Default for State {
             placed: Vec::new(),
             dims: Vec::new(),
             dim_tool: None,
+            sel_dim: None,
+            drag_dim: None,
+            text_edit: None,
             selected: None,
             title: String::new(),
             number: String::new(),
@@ -484,6 +491,63 @@ fn add_view(app: &mut SolveApp, view: usize) {
     begin(app);
 }
 
+const SCALES: [(&str, &str); 10] = [
+    ("Auto fit", ""),
+    ("5 : 1", "5"),
+    ("2 : 1", "2"),
+    ("1 : 1", "1"),
+    ("1 : 2", "0.5"),
+    ("1 : 5", "0.2"),
+    ("1 : 10", "0.1"),
+    ("1 : 20", "0.05"),
+    ("1 : 50", "0.02"),
+    ("1 : 100", "0.01"),
+];
+
+/// A scale chosen from the standard ratios (the factor is kept as text: blank = fit).
+fn scale_picker(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
+    let shown = match value.trim().parse::<f64>() {
+        _ if value.trim().is_empty() => "Auto fit".to_string(),
+        Ok(k) => SCALES
+            .iter()
+            .find(|(_, f)| f.parse::<f64>().is_ok_and(|x| (x - k).abs() < 1e-9))
+            .map_or_else(|| format!("× {}", value.trim()), |(l, _)| (*l).to_string()),
+        Err(_) => "Auto fit".to_string(),
+    };
+    let mut changed = false;
+    crate::ui_kit::dropdown_menu(ui, id, &shown, |ui| {
+        for (label, factor) in SCALES {
+            if crate::ui_kit::list_picker(ui, label, label, false).clicked() {
+                *value = factor.to_string();
+                changed = true;
+                ui.close();
+            }
+        }
+    });
+    changed
+}
+
+/// The drawn line of a dimension, in sheet mm.
+fn dim_segment(d: &DimItem) -> (Pos2, Pos2) {
+    match DIM_KINDS[d.kind.min(2)].0 {
+        "horizontal" => (pos2(d.a.x, d.at), pos2(d.b.x, d.at)),
+        "vertical" => (pos2(d.at, d.a.y), pos2(d.at, d.b.y)),
+        _ => {
+            let (dx, dy) = (d.b.x - d.a.x, d.b.y - d.a.y);
+            let n = dx.hypot(dy).max(1e-6);
+            let off = vec2(-dy / n * d.at, dx / n * d.at);
+            (d.a + off, d.b + off)
+        }
+    }
+}
+
+fn dist_to_segment(p: Pos2, (a, b): (Pos2, Pos2)) -> f32 {
+    let ab = b - a;
+    let len2 = ab.length_sq();
+    let t = if len2 < 1e-9 { 0.0 } else { ((p - a).dot(ab) / len2).clamp(0.0, 1.0) };
+    (p - (a + ab * t)).length()
+}
+
 /// A Drawing ribbon button was pressed.
 pub fn ribbon(app: &mut SolveApp, id: &str) {
     match id {
@@ -615,8 +679,8 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_cw"), &mut app.drawing.custom_w, "420", false, 8).changed();
                         dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_ch"), &mut app.drawing.custom_h, "297", false, 8).changed();
                     }
-                    ui.label("Sheet scale (blank = fit each view; 0.5 = 1:2)");
-                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_sheet_scale"), &mut app.drawing.sheet_scale, "auto", false, 10).changed();
+                    ui.label("Sheet scale (all views)");
+                    dirty |= scale_picker(ui, "drawing_sheet_scale", &mut app.drawing.sheet_scale);
                     ui.label("Sheet number · Revision");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_sheet_no"), &mut app.drawing.sheet_no, "1", false, 8).changed();
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_rev"), &mut app.drawing.revision, "A", false, 8).changed();
@@ -688,8 +752,8 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                         if selected {
                             let v = &mut app.drawing.placed[i];
-                            ui.label("Scale (blank = fit, 0.5 = 1:2, 2 = 2:1)");
-                            dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_scale", i)), &mut v.scale, "auto", false, 12).changed();
+                            ui.label("Scale");
+                            dirty |= scale_picker(ui, &format!("drawing_scale_{i}"), &mut v.scale);
                             dirty |= crate::ui_kit::checkbox(ui, "Hidden lines (dashed)", &mut v.dashed).changed();
                             dirty |= crate::ui_kit::checkbox(ui, "Overall dimensions", &mut v.dims).changed();
                             let mut cut = v.section.is_some();
@@ -885,11 +949,29 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging a placed view moves it; any other drag navigates (pan/zoom) as in the model view.
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).copied();
+        let tol = 8.0 / m.px_per_mm();
+        let dims = &app.drawing.dims;
+        let dim_hit = |s: Pos2| dims.iter().enumerate().rev().find(|(_, d)| dist_to_segment(s, dim_segment(d)) <= tol).map(|(i, _)| i);
+        let pointer = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
         if app.drawing.dim_tool.is_none()
+            && let Some(s) = pointer
+            && (response.drag_started_by(egui::PointerButton::Primary) || response.clicked() || response.double_clicked())
+            && let Some(i) = dim_hit(s)
+        {
+            app.drawing.sel_dim = Some(i);
+            app.drawing.selected = None;
+            if response.drag_started_by(egui::PointerButton::Primary) {
+                app.drawing.drag_dim = Some(i);
+            }
+            if response.double_clicked() {
+                app.drawing.text_edit = Some(i);
+            }
+        } else if app.drawing.dim_tool.is_none()
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && let Some(b) = hit(s)
         {
+            app.drawing.sel_dim = None;
             app.drawing.drag = Some((b.0, b.1 - s.x, b.2 - s.y));
             app.drawing.selected = Some(b.0);
         } else if app.drawing.dim_tool.is_none()
@@ -897,12 +979,69 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
         {
             app.drawing.selected = hit(s).map(|b| b.0);
+            app.drawing.sel_dim = None;
+        }
+    }
+    // Moving a dimension: its line follows the pointer; Delete removes it.
+    if let (Some(i), Some(m)) = (app.drawing.drag_dim, &map) {
+        if response.dragged() {
+            if let (Some(s), Some(d)) = (response.interact_pointer_pos().and_then(|q| m.to_sheet(q)), app.drawing.dims.get_mut(i)) {
+                d.at = match DIM_KINDS[d.kind.min(2)].0 {
+                    "horizontal" => s.y,
+                    "vertical" => s.x,
+                    _ => {
+                        let (dx, dy) = (d.b.x - d.a.x, d.b.y - d.a.y);
+                        let n = dx.hypot(dy).max(1e-6);
+                        ((s.x - d.a.x) * -dy + (s.y - d.a.y) * dx) / n
+                    }
+                };
+            }
+        } else {
+            app.drawing.drag_dim = None;
+            refresh(app);
+        }
+    }
+    if let Some(i) = app.drawing.sel_dim
+        && !ui.ctx().egui_wants_keyboard_input()
+        && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+        && i < app.drawing.dims.len()
+    {
+        app.drawing.dims.remove(i);
+        app.drawing.sel_dim = None;
+        app.drawing.text_edit = None;
+        refresh(app);
+    }
+    if let Some(i) = app.drawing.text_edit {
+        if i >= app.drawing.dims.len() {
+            app.drawing.text_edit = None;
+        } else {
+            let mut changed = false;
+            let mut remove = false;
+            let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_dim_text"), "dimension", "Dimension text").show_body(ui.ctx(), |ui| {
+                ui.label("Text shown on the dimension (blank = measured value)");
+                changed = crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_dim_pop", i)), &mut app.drawing.dims[i].text, "measured value", false, 40).changed();
+                remove = crate::ui_kit::button(ui, "Delete dimension", crate::ui_kit::Button::Small).clicked();
+            });
+            if remove && i < app.drawing.dims.len() {
+                app.drawing.dims.remove(i);
+                app.drawing.sel_dim = None;
+                app.drawing.text_edit = None;
+                refresh(app);
+            } else {
+                if closed {
+                    app.drawing.text_edit = None;
+                }
+                if changed {
+                    refresh(app);
+                }
+            }
         }
     }
     // Double-click a view to edit its scale; right-click for the add / remove menu.
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let under = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).map(|b| b.0);
         if app.drawing.dim_tool.is_none()
+            && app.drawing.text_edit.is_none()
             && response.double_clicked()
             && let Some(v) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)).and_then(under)
         {
@@ -969,8 +1108,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let title = format!("Scale of {}", VIEWS[app.drawing.placed[i].view.min(6)].1);
             let mut changed = false;
             let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_scale"), "scale", &title).show_body(ui.ctx(), |ui| {
-                ui.label("Blank = fit, 0.5 = 1:2, 2 = 2:1");
-                changed = crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_scale_pop", i)), &mut app.drawing.placed[i].scale, "auto", false, 12).changed();
+                changed = scale_picker(ui, "drawing_scale_pop", &mut app.drawing.placed[i].scale);
             });
             if closed {
                 app.drawing.scale_edit = None;
@@ -980,7 +1118,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -1084,6 +1222,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         }
+    }
+    if let Some(d) = app.drawing.sel_dim.and_then(|i| app.drawing.dims.get(i)) {
+        let (a, b) = dim_segment(d);
+        painter.line_segment([map(a), map(b)], Stroke::new(3.0, Tokens::get().accent));
     }
     // Frames of the placed views: the selected one stands out; a dragged one follows the pointer.
     let accent = Tokens::get().accent;
