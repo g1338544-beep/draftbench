@@ -137,6 +137,8 @@ struct Sheet {
     items: Vec<(Layer, Shape)>,
     /// (placement index, centre x, centre y, width, height) of each view on the sheet, in mm.
     boxes: Vec<(usize, f32, f32, f32, f32)>,
+    /// The scale (drawing : model) each placed view was drawn at.
+    scales: Vec<(usize, f32)>,
     /// The circles the drawing shows (found once, on first use) for snapping to their centres.
     rounds: std::sync::OnceLock<Rounds>,
 }
@@ -329,6 +331,9 @@ pub struct State {
     base: Option<(usize, String)>,
     /// The ghost of the Base View's chosen view (keyed by view and scale), drawn under the pointer; `None` inside = it could not be made.
     base_preview: Option<(String, Option<Sheet>)>,
+    /// The view and turn the Projected View tool would place under the pointer, and at what scale; its ghost follows.
+    proj_want: Option<(usize, u8, String)>,
+    proj_preview: Option<(String, Option<Sheet>)>,
     /// Per-design views and dimensions kept between runs, by design name.
     saved_designs: serde_json::Map<String, serde_json::Value>,
     /// Every sheet of the drawing as saved JSON (the current one is refreshed when switching).
@@ -399,6 +404,8 @@ impl Default for State {
             total: 0,
             painted: false,
             base_preview: None,
+            proj_want: None,
+            proj_preview: None,
             drag: None,
             menu_at: None,
             scale_edit: None,
@@ -954,7 +961,12 @@ fn parse(v: &Value) -> Option<Sheet> {
                 .collect()
         })
         .unwrap_or_default();
-    Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items, boxes, rounds: std::sync::OnceLock::new() })
+    let scales = v
+        .pointer("/summary/boxes")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|b| Some((b.get("index")?.as_u64()? as usize, b.get("scale")?.as_f64()? as f32))).collect())
+        .unwrap_or_default();
+    Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items, boxes, scales, rounds: std::sync::OnceLock::new() })
 }
 
 /// Start an Update: the model first, then each placed view, one stage per frame.
@@ -1029,7 +1041,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
 }
 
 /// The chosen view alone on a blank sheet, for the ghost that follows the pointer while the Base View is open.
-fn make_preview(app: &mut SolveApp, view: usize, scale: &str) -> Option<Sheet> {
+fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option<Sheet> {
     let name = VIEWS.get(view)?.0;
     app.drawing.placed.push(PlacedView {
         view,
@@ -1041,7 +1053,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str) -> Option<Sheet> {
         section: None,
         align: None,
         custom: None,
-        rot: 0,
+        rot,
         label: None,
     });
     let mut p = params(&app.drawing);
@@ -2367,8 +2379,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         let key = format!("{view}|{scale}|{}|{}|{}", app.drawing.paper, app.drawing.first_angle, app.drawing.base_dashed);
         if app.drawing.base_preview.as_ref().is_none_or(|(k, _)| *k != key) {
-            let made = make_preview(app, view, &scale);
+            let made = make_preview(app, view, &scale, 0);
             app.drawing.base_preview = Some((key, made));
+        }
+    }
+    // Projected View: make the ghost of the view the pointer's side would place.
+    if let Some((view, rot, scale)) = app.drawing.proj_want.clone()
+        && app.drawing.proj_tool.is_some()
+    {
+        let key = format!("{view}|{rot}|{scale}|{}", app.drawing.first_angle);
+        if app.drawing.proj_preview.as_ref().is_none_or(|(k, _)| *k != key) {
+            let made = make_preview(app, view, &scale, rot);
+            app.drawing.proj_preview = Some((key, made));
         }
     }
     let mut erase_click: Option<[f32; 4]> = None;
@@ -2852,6 +2874,25 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             let at = if horizontal { pos2(h.x, b.2) } else { pos2(b.1, h.y) };
             let label = found.map_or("No view on this side", |v| VIEWS[v].1);
+            // The ghost of that view, at the parent's scale, follows along the line.
+            let rot = match (free, found, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
+                (true, Some(2 | 3), 1 | 5) => {
+                    if dx >= 0.0 { 1 } else { 3 }
+                }
+                (true, Some(1 | 5), 2 | 3) => {
+                    if dy >= 0.0 { 1 } else { 3 }
+                }
+                _ => 0,
+            };
+            app.drawing.proj_want = match (found, sheet.scales.iter().find(|(i, _)| *i == parent)) {
+                (Some(v), Some((_, k))) => Some((v, rot, format!("{k}"))),
+                _ => None,
+            };
+            if let (Some((_, Some(pv))), Some(_)) = (&app.drawing.proj_preview, found)
+                && app.drawing.proj_want.is_some()
+            {
+                paint_preview(&painter, &m, pv, at);
+            }
             painter.line_segment([map(pos2(b.1, b.2)), map(at)], Stroke::new(1.0, Tokens::get().accent));
             painter.text(map(at) + vec2(14.0, -14.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(Tokens::get().font_body), Tokens::get().accent);
             if let Some(view) = found
