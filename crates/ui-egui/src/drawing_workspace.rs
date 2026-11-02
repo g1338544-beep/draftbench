@@ -192,6 +192,8 @@ pub struct State {
     orient: Option<[String; 3]>,
     /// The Sheet window shown when Drawing opens on a design with no views yet.
     setup: bool,
+    /// The text the next Note gets.
+    note_text: String,
     /// The Base View window: the view to use (7 = as the 3D window shows it) and its scale; the next click on the sheet places it.
     base: Option<(usize, String)>,
     /// Per-design views and dimensions kept between runs, by design name.
@@ -257,6 +259,7 @@ impl Default for State {
             scale_edit: None,
             orient: None,
             setup: false,
+            note_text: "NOTE".into(),
             base: None,
             saved_designs: serde_json::Map::new(),
             pages: Vec::new(),
@@ -1009,6 +1012,10 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             app.drawing.dim_tool = None;
         }
         "drawing.ribbon.base" => app.drawing.base = Some((1, app.drawing.sheet_scale.clone())),
+        "drawing.ribbon.note" => {
+            app.drawing.dim_tool = Some((6, Vec::new()));
+            app.drawing.mark_tool = false;
+        }
         "drawing.ribbon.orient" => app.drawing.orient = Some(["1".into(), "-1".into(), "1".into()]),
         "drawing.ribbon.shaded" => add_shaded_view(app),
         "drawing.ribbon.print" => print_sheet(app),
@@ -1182,6 +1189,7 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     if tool.is_none() && sel.is_none() {
         return;
     }
+    let mut note = app.drawing.note_text.clone();
     let mut pick: Option<usize> = None;
     let mut changed = false;
     let mut remove = false;
@@ -1197,6 +1205,10 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         });
+        if tool == Some(6) {
+            ui.label("Note text");
+            crate::ui_kit::bounded_cell_editor(ui, ui.id().with("dimwin_note"), &mut note, "NOTE", false, 40);
+        }
         if tool.is_some() {
             ui.small("Click the points on a view, then where the dimension goes. Esc ends.");
         }
@@ -1213,6 +1225,7 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
             close = true;
         }
     });
+    app.drawing.note_text = note;
     if let Some(i) = pick {
         app.drawing.dim_tool = Some((i, Vec::new()));
         app.drawing.mark_tool = false;
@@ -2219,7 +2232,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     // Balloon or note: the point on the part, then where it goes; balloons are numbered in turn.
                     if let Some(target) = picks.first().copied() {
                         let number = app.drawing.dims.iter().filter(|d| d.kind == 5).count() + 1;
-                        let text = if kind == 5 { number.to_string() } else { "NOTE".to_string() };
+                        let text = if kind == 5 { number.to_string() } else if app.drawing.note_text.trim().is_empty() { "NOTE".to_string() } else { app.drawing.note_text.trim().to_string() };
                         new_dim = Some(DimItem { kind, a: target, b: c, at: 0.0, text, slide: 0.0 });
                         app.drawing.dim_tool = Some((kind, Vec::new()));
                     } else {
