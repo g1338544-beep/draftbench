@@ -1336,7 +1336,7 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
             .unwrap_or(1.0);
         let measured = if kind == "diameter" { 2.0 * r / scale } else { r / scale };
         let text_value: String = match d.get("text").and_then(Value::as_str).map(str::trim) {
-            Some(t) if !t.is_empty() => t.chars().take(40).collect(),
+            Some(t) if !t.is_empty() => t.replace("<>", &dim_value(measured, decimals)).chars().take(40).collect(),
             _ => format!("{}{}", if kind == "diameter" { "%%c" } else { "R" }, dim_value(measured, decimals)),
         };
         let reach = 1.5 + th * 0.3 * text_value.chars().count() as f64;
@@ -1372,7 +1372,7 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
         _ => ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt(),
     } / scale;
     let text_value = match d.get("text").and_then(Value::as_str).map(str::trim) {
-        Some(t) if !t.is_empty() => t.chars().take(40).collect(),
+        Some(t) if !t.is_empty() => t.replace("<>", &dim_value(measured, decimals)).chars().take(40).collect(),
         _ => dim_value(measured, decimals),
     };
     // Extension lines from each point past the dimension line, with a small gap at the point.

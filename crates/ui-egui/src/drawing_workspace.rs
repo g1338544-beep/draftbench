@@ -2853,6 +2853,25 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_dim_text"), "dimension", "Dimension text").show_body(ui.ctx(), |ui| {
                 ui.label("Text shown on the dimension (blank = measured value)");
                 changed = crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_dim_pop", i)), &mut app.drawing.dims[i].text, "measured value", false, 40).changed();
+                // Mechanical symbols: each is put before the measured value (`<>` stands for it).
+                ui.label("Symbols (<> = measured value)");
+                ui.horizontal_wrapped(|ui| {
+                    for (sym, tip) in [("Ø", "Diameter"), ("R", "Radius"), ("□", "Square"), ("°", "Degree"), ("±", "Plus-minus"), ("⌴", "Counterbore"), ("↧", "Depth"), ("M", "Thread"), ("SR", "Spherical radius"), ("SØ", "Spherical diameter"), ("(<>)", "Reference")] {
+                        if ui.small_button(sym).on_hover_text(tip).clicked() {
+                            let t = &mut app.drawing.dims[i].text;
+                            if t.chars().count() < 36 {
+                                if t.is_empty() {
+                                    *t = if sym == "°" || sym == "±" { format!("<>{sym}") } else if sym == "(<>)" { sym.to_string() } else { format!("{sym}<>") };
+                                } else if sym == "°" || sym == "±" {
+                                    t.push_str(sym);
+                                } else {
+                                    t.insert_str(0, sym);
+                                }
+                                changed = true;
+                            }
+                        }
+                    }
+                });
                 remove = crate::ui_kit::button(ui, "Delete dimension", crate::ui_kit::Button::Small).clicked();
             });
             if remove && i < app.drawing.dims.len() {
