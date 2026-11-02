@@ -1990,5 +1990,5 @@ fn native_cad_hint(path: &str) -> Option<&'static str> {
 /// mesh file.
 fn is_design_path(path: &str) -> bool {
     let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    matches!(ext.as_str(), "solidcraft" | "solvecraft" | "json")
+    matches!(ext.as_str(), "draftnew" | "solidcraft" | "solvecraft" | "json")
 }

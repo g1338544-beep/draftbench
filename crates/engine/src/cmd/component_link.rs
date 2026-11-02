@@ -244,8 +244,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
     let file = absolute(Path::new(given));
-    if !file.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("solidcraft")) {
-        return Err(bad(cmd, "choose a saved .solidcraft design"));
+    if !file.extension().and_then(|e| e.to_str()).is_some_and(|e| solidcraft_io::DESIGN_EXTS.iter().any(|x| e.eq_ignore_ascii_case(x))) {
+        return Err(bad(cmd, "choose a saved .draftnew design"));
     }
     // The ordinary lexical check in linked_bodies also works in the browser VFS. On native
     // hosts, reject an alias of this assembly too (a symlink or a path with different case).

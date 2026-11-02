@@ -96,7 +96,16 @@ fn valid_id(id: &str) -> bool {
 fn design_file(dir: &Path, id: &str) -> PathBuf {
     let current = file(dir, id, solidcraft_io::DESIGN_EXT);
     let legacy = file(dir, id, solidcraft_io::LEGACY_DESIGN_EXT);
-    if !current.is_file() && legacy.is_file() { legacy } else { current }
+    let solidcraft = file(dir, id, solidcraft_io::SOLIDCRAFT_DESIGN_EXT);
+    if current.is_file() {
+        current
+    } else if solidcraft.is_file() {
+        solidcraft
+    } else if legacy.is_file() {
+        legacy
+    } else {
+        current
+    }
 }
 
 fn file(dir: &Path, id: &str, ext: &str) -> PathBuf {
@@ -157,7 +166,7 @@ pub fn remove(dir: &Path, id: &str) -> Result<()> {
     if !is_entry {
         return Err(EngineError::Other(format!("no recovered design `{id}`")));
     }
-    for ext in ["json", solidcraft_io::DESIGN_EXT, solidcraft_io::LEGACY_DESIGN_EXT, "lock"] {
+    for ext in ["json", solidcraft_io::DESIGN_EXT, solidcraft_io::SOLIDCRAFT_DESIGN_EXT, solidcraft_io::LEGACY_DESIGN_EXT, "lock"] {
         let _ = fs::remove_file(file(dir, id, ext));
     }
     Ok(())
@@ -312,7 +321,7 @@ impl Autosaver {
         self.last_at = Instant::now();
         if !s.is_dirty() {
             if self.has_entry {
-                for ext in ["json", "solidcraft"] {
+                for ext in ["json", solidcraft_io::DESIGN_EXT, solidcraft_io::SOLIDCRAFT_DESIGN_EXT] {
                     let _ = fs::remove_file(file(&self.dir, &self.id, ext));
                 }
                 self.has_entry = false;

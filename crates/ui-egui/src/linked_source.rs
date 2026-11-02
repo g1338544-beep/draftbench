@@ -35,7 +35,7 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
         return;
     }
     let document = app.session.doc.clone();
-    app.pick_open_for(&["solidcraft"], move |app, path| {
+    app.pick_open_for(&["draftnew", "solidcraft"], move |app, path| {
         let Some(path) = path else { return };
         // A host or programmatic caller can replace/edit a design while a native picker is
         // pending. Never apply that old component id to a different design or newer revision.
@@ -86,7 +86,7 @@ mod tests {
 
     fn answer(app: &mut SolveApp, path: Option<String>) {
         app.services.pick_open = Some(Box::new(move |extensions| {
-            assert_eq!(extensions, &["solidcraft"]);
+            assert_eq!(extensions, &["draftnew", "solidcraft"]);
             let result = path.clone();
             Box::pin(async move { result })
         }));

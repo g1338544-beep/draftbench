@@ -2030,7 +2030,7 @@ mod header_report_tests {
         h.step(&json!({"widget":"Download design"})).unwrap();
         let got = got.borrow();
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].0, "Plate.solidcraft");
+        assert_eq!(got[0].0, "Plate.draftnew");
         assert!(solidcraft_engine::io::is_design_container(&got[0].1));
         assert!(h.app.session.path.is_none(), "a download is no save: the design keeps no file");
     }

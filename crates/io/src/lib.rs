@@ -45,12 +45,15 @@ use solidcraft_doc::{Document, Metadata, ModelState};
 use solidcraft_geom::{Mesh, Vec3};
 
 /// Design file extension.
-pub const DESIGN_EXT: &str = "solidcraft";
+pub const DESIGN_EXT: &str = "draftnew";
+/// The design extension of the SolidCraft base. Compatibility shim (docs/compatibility.md):
+/// such files still open everywhere a design opens.
+pub const SOLIDCRAFT_DESIGN_EXT: &str = "solidcraft";
 /// The design extension of earlier releases. Compatibility shim (docs/compatibility.md): such
 /// files still open everywhere a design opens; new designs are saved as [`DESIGN_EXT`].
 pub const LEGACY_DESIGN_EXT: &str = "solvecraft";
 /// Every extension a design file may have, current first.
-pub const DESIGN_EXTS: [&str; 2] = [DESIGN_EXT, LEGACY_DESIGN_EXT];
+pub const DESIGN_EXTS: [&str; 3] = [DESIGN_EXT, SOLIDCRAFT_DESIGN_EXT, LEGACY_DESIGN_EXT];
 
 /// Is this a design file name (`.solidcraft`, or the legacy extension), any case?
 pub fn is_design_path(path: &str) -> bool {
@@ -344,7 +347,7 @@ impl Format {
             "3mf" => Format::ThreeMf,
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
-            "solidcraft" | "solvecraft" | "json" => Format::Design,
+            "draftnew" | "solidcraft" | "solvecraft" | "json" => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
     }

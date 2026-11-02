@@ -185,6 +185,7 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
                     "Designs, CAD files and meshes",
                     &[
                         io::DESIGN_EXT,
+                        io::SOLIDCRAFT_DESIGN_EXT,
                         io::LEGACY_DESIGN_EXT,
                         "json",
                         "step",
@@ -211,7 +212,7 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
                         "GLTF",
                     ],
                 )
-                .add_filter("SolidCraft design (container or JSON)", &[io::DESIGN_EXT, io::LEGACY_DESIGN_EXT, "json"])
+                .add_filter("SolidCraft design (container or JSON)", &[io::DESIGN_EXT, io::SOLIDCRAFT_DESIGN_EXT, io::LEGACY_DESIGN_EXT, "json"])
                 .add_filter("STEP", &["step", "stp", "STEP", "STP"])
                 .add_filter("IGES", &["igs", "iges", "IGS", "IGES"])
                 .add_filter("FreeCAD and Rhino", &["FCStd", "fcstd", "3dm", "3DM"])
@@ -247,9 +248,9 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
             let dialog = parent.clone().set_file_name(name);
             let dialog = if exts == [io::DESIGN_EXT, "json"] {
                 if name.ends_with(".json") {
-                    dialog.add_filter("Plain JSON design", &["json"]).add_filter("SolidCraft container", &[io::DESIGN_EXT])
+                    dialog.add_filter("Plain JSON design", &["json"]).add_filter("DraftNew container", &[io::DESIGN_EXT])
                 } else {
-                    dialog.add_filter("SolidCraft container", &[io::DESIGN_EXT]).add_filter("Plain JSON design", &["json"])
+                    dialog.add_filter("DraftNew container", &[io::DESIGN_EXT]).add_filter("Plain JSON design", &["json"])
                 }
             } else {
                 dialog.add_filter("File", exts)
