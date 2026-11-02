@@ -1726,6 +1726,39 @@ fn normal_angles(n: [f64; 3]) -> Option<(f64, f64)> {
     Some((yaw, z.clamp(-1.0, 1.0).asin()))
 }
 
+/// A section-view icon: a block cut by a dashed plane, the cut face hatched, with the arrows
+/// that show the viewing direction. Drawn here, original artwork.
+fn section_icon(ui: &mut egui::Ui, on: bool) -> egui::Response {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(t.control_height * 1.3, t.control_height * 1.3), Sense::click());
+    let bg = if on { t.accent_soft } else if response.hovered() { t.hover } else { Color32::TRANSPARENT };
+    let p = ui.painter();
+    p.rect(rect, t.control_radius, bg, Stroke::new(if on { 1.5 } else { 1.0 }, if on { t.accent } else { t.control_border }), egui::StrokeKind::Inside);
+    let ink = if on { t.form_ink } else { t.form_dim };
+    let b = rect.shrink(rect.width() * 0.2);
+    let (w, h) = (b.width(), b.height());
+    // The cut face (right half of a block) with diagonal hatching.
+    let face = Rect::from_min_max(pos2(b.left() + w * 0.45, b.top() + h * 0.12), pos2(b.right(), b.bottom() - h * 0.12));
+    p.rect(face, 0.0, ink.gamma_multiply(0.15), Stroke::new(1.0, ink), egui::StrokeKind::Inside);
+    for k in 1..4 {
+        let o = face.height() * 0.3 * k as f32;
+        let (x0, y0) = (face.left(), face.top() + o);
+        let n = o.min(face.width());
+        p.line_segment([pos2(x0, y0), pos2(x0 + n, y0 - n)], Stroke::new(1.0, ink));
+    }
+    // The left half is outlined only (removed material), with the cutting line between the halves.
+    let gone = Rect::from_min_max(pos2(b.left(), face.top()), pos2(face.left(), face.bottom()));
+    p.extend(egui::Shape::dashed_line(&[gone.left_top(), gone.right_top(), gone.right_bottom(), gone.left_bottom(), gone.left_top()], Stroke::new(1.0, ink.gamma_multiply(0.6)), 2.0, 2.0));
+    let x = face.left();
+    p.line_segment([pos2(x, b.top()), pos2(x, b.bottom())], Stroke::new(1.5, t.accent));
+    // Viewing arrows at both ends of the cutting line, pointing right.
+    for y in [b.top() + 1.0, b.bottom() - 1.0] {
+        p.line_segment([pos2(x, y), pos2(x + w * 0.22, y)], Stroke::new(1.5, t.accent));
+        p.add(egui::Shape::convex_polygon(vec![pos2(x + w * 0.3, y), pos2(x + w * 0.18, y - 2.5), pos2(x + w * 0.18, y + 2.5)], t.accent, Stroke::NONE));
+    }
+    response.on_hover_text("Section view")
+}
+
 /// The model views as icon buttons: a small cube with the face being looked at filled in
 /// (hidden faces, seen from behind, are outlined with a dotted face). The last one is "as the 3D window".
 fn view_buttons(ui: &mut egui::Ui, view: &mut usize) {
@@ -2250,7 +2283,13 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 }
                             });
                             let mut cut = v.section.is_some();
-                            if crate::ui_kit::checkbox(ui, "Section cut (hatched)", &mut cut).changed() {
+                            let mut toggled = false;
+                            ui.horizontal(|ui| {
+                                toggled = section_icon(ui, cut).clicked();
+                                ui.label("Section view (cut, hatched)");
+                            });
+                            if toggled {
+                                cut = !cut;
                                 v.section = cut.then(|| (0, String::new()));
                                 // Look straight at the cut: right for X, front for Y, top for Z.
                                 v.view = 2;
