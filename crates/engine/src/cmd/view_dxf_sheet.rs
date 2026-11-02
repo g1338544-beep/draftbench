@@ -578,11 +578,13 @@ fn finish(
     let (sheet_w, sheet_h) = sheet;
     let th = text_height(p);
     // Border and title block.
-    rect("SHEET", Vec2::new(MARGIN, MARGIN), Vec2::new(sheet_w - MARGIN, sheet_h - MARGIN), &mut entities);
-    let block_w = 190.0_f64.min(sheet_w - 2.0 * MARGIN);
-    let (bx0, by0) = (sheet_w - MARGIN - block_w, MARGIN);
+    let margin = p.get("margin").and_then(Value::as_f64).filter(|v| v.is_finite() && (2.0..=40.0).contains(v)).unwrap_or(MARGIN);
+    rect("SHEET", Vec2::new(margin, margin), Vec2::new(sheet_w - margin, sheet_h - margin), &mut entities);
+    let wanted = p.get("block_w").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 60.0).unwrap_or(190.0);
+    let block_w = wanted.min(sheet_w - 2.0 * margin).max(10.0);
+    let (bx0, by0) = (sheet_w - margin - block_w, margin);
     let row = TITLE_H / 3.0;
-    let right = sheet_w - MARGIN;
+    let right = sheet_w - margin;
     rect("SHEET", Vec2::new(bx0, by0), Vec2::new(right, by0 + TITLE_H), &mut entities);
     line("SHEET", Vec2::new(bx0, by0 + row), Vec2::new(right, by0 + row), &mut entities);
     line("SHEET", Vec2::new(bx0, by0 + 2.0 * row), Vec2::new(right, by0 + 2.0 * row), &mut entities);
@@ -591,20 +593,25 @@ fn finish(
     }
     let field = |key: &str| -> String { p.get("block").and_then(|b| b.get(key)).and_then(Value::as_str).unwrap_or("").chars().take(60).collect() };
     let cap = |label: &str, value: String| if value.is_empty() { String::new() } else { format!("{label} {value}") };
-    let company = field("company");
-    text("TEXT", Vec2::new(bx0 + block_w / 2.0, by0 + 2.0 * row + row * 0.3), th * 1.4, if title.is_empty() { "Untitled".into() } else { title }, &mut entities);
+    // Cells the user typed over: title, company, number, date, scale, drawn by, paper.
+    let cells = p.get("block_cells").and_then(Value::as_array);
+    let cell = |i: usize, default: String| -> String {
+        cells.and_then(|c| c.get(i)).and_then(Value::as_str).filter(|t| !t.trim().is_empty()).map_or(default, |t| t.chars().take(80).collect())
+    };
+    let company = cell(1, field("company"));
+    text("TEXT", Vec2::new(bx0 + block_w / 2.0, by0 + 2.0 * row + row * 0.3), th * 1.4, cell(0, if title.is_empty() { "Untitled".into() } else { title }), &mut entities);
     if !company.is_empty() {
         text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row + row * 0.3), th, company, &mut entities);
     }
-    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row + row * 0.3), th, cap("No.", [field("number"), cap("Sh", field("sheet")), cap("Rev", field("revision"))].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("  ")), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.85, by0 + row + row * 0.3), th, cap("Date", field("date")), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row * 0.3), th, cap("Scale", scale_text.clone()), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row * 0.3), th, cap("By", field("author")), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row + row * 0.3), th, cell(2, cap("No.", [field("number"), cap("Sh", field("sheet")), cap("Rev", field("revision"))].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("  "))), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.85, by0 + row + row * 0.3), th, cell(3, cap("Date", field("date"))), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row * 0.3), th, cell(4, cap("Scale", scale_text.clone())), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row * 0.3), th, cell(5, cap("By", field("author"))), &mut entities);
     text(
         "TEXT",
         Vec2::new(bx0 + block_w * 0.85, by0 + row * 0.3),
         th,
-        format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" }),
+        cell(6, format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" })),
         &mut entities,
     );
     for n in field("note").split('|').filter(|n| !n.trim().is_empty()).take(3).enumerate() {

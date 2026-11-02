@@ -103,6 +103,11 @@ pub struct State {
     centre: bool,
     hole_table: bool,
     text_height: String,
+    /// Frame margin and title block width in mm, and the title block cells typed over.
+    margin: String,
+    block_w: String,
+    cells: [String; 7],
+    cell_edit: Option<usize>,
     placed: Vec<PlacedView>,
     dims: Vec<DimItem>,
     /// The dimension being placed: its kind and the points picked so far.
@@ -156,6 +161,10 @@ impl Default for State {
             centre: true,
             hole_table: false,
             text_height: "3.5".into(),
+            margin: "10".into(),
+            block_w: "190".into(),
+            cells: Default::default(),
+            cell_edit: None,
             placed: Vec::new(),
             dims: Vec::new(),
             dim_tool: None,
@@ -209,7 +218,7 @@ impl State {
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
             "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "author": self.author,
-            "company": self.company, "designs": designs,
+            "company": self.company, "margin": self.margin, "block_w": self.block_w, "cells": self.cells, "designs": designs,
         })
     }
 
@@ -247,6 +256,8 @@ impl State {
             ("sheet_no", &mut self.sheet_no, 40),
             ("revision", &mut self.revision, 40),
             ("text_height", &mut self.text_height, 6),
+            ("margin", &mut self.margin, 6),
+            ("block_w", &mut self.block_w, 6),
             ("author", &mut self.author, 80),
             ("company", &mut self.company, 80),
         ] {
@@ -259,6 +270,11 @@ impl State {
                 if let Some(n) = n.as_u64().filter(|n| *n <= 255) {
                     *slot = n as u8;
                 }
+            }
+        }
+        if let Some(c) = v.get("cells").and_then(serde_json::Value::as_array) {
+            for (slot, t) in self.cells.iter_mut().zip(c) {
+                *slot = t.as_str().unwrap_or("").chars().take(80).collect();
             }
         }
         if let Some(d) = v.get("designs").and_then(serde_json::Value::as_object) {
@@ -376,6 +392,7 @@ fn params(st: &State) -> Value {
             "text": d.text,
         })).collect::<Vec<_>>(),
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
+        "block_cells": st.cells,
         "bolt_circle": st.bolt,
         "hole_table": st.hole_table,
         "hidden_style": if st.hidden_style == 1 { "dashed" } else { "hidden" },
@@ -384,6 +401,13 @@ fn params(st: &State) -> Value {
     if st.paper >= 5 {
         let num = |t: &str, d: f64| t.trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(d);
         p["size"] = json!([num(&st.custom_w, 420.0), num(&st.custom_h, 297.0)]);
+    }
+    for (key, text) in [("margin", &st.margin), ("block_w", &st.block_w)] {
+        if let Ok(k) = text.trim().parse::<f64>()
+            && k.is_finite()
+        {
+            p[key] = json!(k);
+        }
     }
     if let Ok(k) = st.sheet_scale.trim().parse::<f64>()
         && k.is_finite()
@@ -863,7 +887,10 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         dirty = true;
                     }
                     ui.separator();
-                    ui.label("Title block");
+                    ui.label("Title block (double-click a cell on the sheet to type in it)");
+                    ui.label("Frame margin · Title block width (mm)");
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_margin"), &mut app.drawing.margin, "10", false, 6).changed();
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_block_w"), &mut app.drawing.block_w, "190", false, 6).changed();
                     ui.label("Text size (mm, 2–10)");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_text_height"), &mut app.drawing.text_height, "3.5", false, 6).changed();
                     for (label, key) in [
@@ -1094,11 +1121,65 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Double-click a title block cell to type in it.
+    if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
+        && response.double_clicked()
+        && let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref())
+        && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+    {
+        let num = |t: &str, d: f32| t.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
+        let margin = num(&app.drawing.margin, 10.0).clamp(2.0, 40.0);
+        let block_w = num(&app.drawing.block_w, 190.0).max(60.0).min(sheet.width - 2.0 * margin).max(10.0);
+        let x0 = sheet.width - margin - block_w;
+        if s.x >= x0 && s.x <= sheet.width - margin && s.y >= margin && s.y <= margin + 36.0 {
+            let row = (((s.y - margin) / 12.0) as usize).min(2);
+            let col = if (s.x - x0) / block_w < 0.4 { 0 } else if (s.x - x0) / block_w < 0.7 { 1 } else { 2 };
+            let index = match (row, col) {
+                (2, _) => 0,
+                (1, c) => 1 + c,
+                (_, c) => 4 + c,
+            };
+            if app.drawing.cells[index].trim().is_empty() {
+                // Start from the text shown there.
+                let centre = pos2(x0 + block_w * [0.2, 0.55, 0.85][col], margin + 12.0 * row as f32 + 4.0);
+                let shown = sheet
+                    .items
+                    .iter()
+                    .filter_map(|(_, sh)| if let Shape::Text(p, _, t) = sh { Some((p, t)) } else { None })
+                    .filter(|(p, _)| (p.x - centre.x).abs() < block_w * 0.3 && (p.y - centre.y).abs() < 6.0)
+                    .min_by(|a, b| (*a.0 - centre).length().total_cmp(&(*b.0 - centre).length()))
+                    .map(|(_, t)| t.clone());
+                if let Some(t) = shown {
+                    app.drawing.cells[index] = t.chars().take(80).collect();
+                }
+            }
+            app.drawing.cell_edit = Some(index);
+        }
+    }
+    if let Some(i) = app.drawing.cell_edit {
+        let mut changed = false;
+        let mut reset = false;
+        let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_cell"), "cell", "Title block text").show_body(ui.ctx(), |ui| {
+            ui.label(["Title", "Company", "Number / sheet / revision", "Date", "Scale", "Drawn by", "Paper"][i.min(6)]);
+            changed = crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_cell_text", i)), &mut app.drawing.cells[i.min(6)], "", false, 80).changed();
+            reset = crate::ui_kit::button(ui, "Reset to automatic", crate::ui_kit::Button::Small).clicked();
+        });
+        if reset {
+            app.drawing.cells[i.min(6)].clear();
+        }
+        if closed {
+            app.drawing.cell_edit = None;
+        }
+        if changed || reset {
+            refresh(app);
+        }
+    }
     // Double-click a view to edit its scale; right-click for the add / remove menu.
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let under = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).map(|b| b.0);
         if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
             && app.drawing.text_edit.is_none()
+            && app.drawing.cell_edit.is_none()
             && response.double_clicked()
             && let Some(v) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)).and_then(under)
         {
