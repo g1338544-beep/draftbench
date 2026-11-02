@@ -143,6 +143,9 @@ pub struct State {
     scale_edit: Option<usize>,
     /// Per-design views and dimensions kept between runs, by design name.
     saved_designs: serde_json::Map<String, serde_json::Value>,
+    /// Every sheet of the drawing as saved JSON (the current one is refreshed when switching).
+    pages: Vec<serde_json::Value>,
+    page: usize,
 }
 
 impl Default for State {
@@ -191,24 +194,42 @@ impl Default for State {
             menu_at: None,
             scale_edit: None,
             saved_designs: serde_json::Map::new(),
+            pages: Vec::new(),
+            page: 0,
         }
     }
 }
 
 impl State {
+    /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
+    fn page_json(&self) -> serde_json::Value {
+        json!({
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p]))})).collect::<Vec<_>>(),
+            "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text})).collect::<Vec<_>>(),
+            "title": self.title, "number": self.number, "notes": self.notes,
+            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
+            "paper": self.paper, "landscape": self.landscape,
+        })
+    }
+
+    /// All sheets, the one on screen included.
+    fn all_pages(&self) -> Vec<serde_json::Value> {
+        let mut pages = self.pages.clone();
+        if pages.is_empty() {
+            pages.push(self.page_json());
+        } else if let Some(slot) = pages.get_mut(self.page) {
+            *slot = self.page_json();
+        }
+        pages
+    }
+
     /// Everything worth keeping between runs: the sheet settings for all designs, and this
     /// design's views, dimensions and title block.
     pub fn prefs(&self, design: &str) -> serde_json::Value {
         let mut designs = self.saved_designs.clone();
-        if !design.is_empty() && (!self.placed.is_empty() || !self.dims.is_empty()) {
-            designs.insert(
-                design.chars().take(120).collect(),
-                json!({
-                    "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p]))})).collect::<Vec<_>>(),
-                    "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text})).collect::<Vec<_>>(),
-                    "title": self.title, "number": self.number, "notes": self.notes,
-                }),
-            );
+        let pages = self.all_pages();
+        if !design.is_empty() && pages.iter().any(|p| p.get("views").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty()) || p.get("dims").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty())) {
+            designs.insert(design.chars().take(120).collect(), json!({"pages": pages}));
         }
         while designs.len() > 40 {
             let Some(k) = designs.keys().next().cloned() else { break };
@@ -284,12 +305,35 @@ impl State {
         }
     }
 
-    /// Bring back the views saved for this design (only into an empty sheet).
+    /// Bring back the sheets saved for this design (only into an empty drawing).
     fn restore_design(&mut self, design: &str) {
-        if !self.placed.is_empty() || !self.dims.is_empty() {
+        if !self.placed.is_empty() || !self.dims.is_empty() || self.pages.len() > 1 {
             return;
         }
-        let Some(d) = self.saved_designs.get(design) else { return };
+        let Some(d) = self.saved_designs.get(design).cloned() else { return };
+        match d.get("pages").and_then(serde_json::Value::as_array) {
+            Some(list) if !list.is_empty() => {
+                self.pages = list.iter().take(30).cloned().collect();
+                self.page = 0;
+                if let Some(first) = self.pages.first().cloned() {
+                    self.load_page(&first);
+                }
+            }
+            _ => {
+                self.pages.clear();
+                self.page = 0;
+                self.load_page(&d);
+            }
+        }
+    }
+
+    /// Put one saved sheet on screen.
+    fn load_page(&mut self, d: &serde_json::Value) {
+        self.placed.clear();
+        self.dims.clear();
+        self.selected = None;
+        self.sel_dim = None;
+        self.sheet = None;
         let f = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_f64).filter(|x| x.is_finite());
         if let Some(list) = d.get("views").and_then(serde_json::Value::as_array) {
             for v in list.iter().take(24) {
@@ -336,7 +380,60 @@ impl State {
                 *field = t.chars().take(400).collect();
             }
         }
+        for (k, field, max) in [("sheet_no", &mut self.sheet_no, 40), ("sheet_scale", &mut self.sheet_scale, 12)] {
+            if let Some(t) = d.get(k).and_then(serde_json::Value::as_str) {
+                *field = t.chars().take(max).collect();
+            }
+        }
+        if let Some(c) = d.get("cells").and_then(serde_json::Value::as_array) {
+            for (slot, t) in self.cells.iter_mut().zip(c) {
+                *slot = t.as_str().unwrap_or("").chars().take(80).collect();
+            }
+        }
+        if let Some(n) = d.get("paper").and_then(serde_json::Value::as_u64).filter(|n| *n <= 5) {
+            self.paper = n as usize;
+        }
+        if let Some(b) = d.get("landscape").and_then(serde_json::Value::as_bool) {
+            self.landscape = b;
+        }
     }
+}
+
+/// Show another sheet of the drawing.
+fn switch_page(app: &mut SolveApp, to: usize) {
+    let st = &mut app.drawing;
+    st.pages = st.all_pages();
+    let Some(next) = st.pages.get(to).cloned() else { return };
+    st.page = to;
+    st.load_page(&next);
+    begin(app);
+}
+
+/// Add a blank sheet after the last one and switch to it.
+fn add_page(app: &mut SolveApp) {
+    let st = &mut app.drawing;
+    if st.all_pages().len() >= 30 {
+        return;
+    }
+    st.pages = st.all_pages();
+    let n = st.pages.len() + 1;
+    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": st.cells, "paper": st.paper, "landscape": st.landscape}));
+    switch_page(app, n - 1);
+}
+
+/// Remove the sheet on screen (the last one cannot go).
+fn delete_page(app: &mut SolveApp) {
+    let st = &mut app.drawing;
+    st.pages = st.all_pages();
+    if st.pages.len() < 2 {
+        return;
+    }
+    st.pages.remove(st.page);
+    let to = st.page.min(st.pages.len() - 1);
+    st.page = to;
+    let next = st.pages.get(to).cloned().unwrap_or_default();
+    st.load_page(&next);
+    begin(app);
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -642,6 +739,8 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
         "drawing.ribbon.right" => add_view(app, 2),
         "drawing.ribbon.iso" => add_view(app, 6),
         "drawing.ribbon.model" => add_model_view(app),
+        "drawing.ribbon.addsheet" => add_page(app),
+        "drawing.ribbon.delsheet" => delete_page(app),
         "drawing.ribbon.dimension" => app.drawing.dim_tool = Some((0, Vec::new())),
         "drawing.ribbon.centre" => {
             app.drawing.centre = !app.drawing.centre;
@@ -764,6 +863,29 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let mut start_projected: Option<usize> = None;
                     ui.heading("Drawing");
                     ui.small("Add the views you want, then drag each one on the sheet.");
+                    ui.separator();
+                    ui.label("Sheets");
+                    let count = app.drawing.pages.len().max(1);
+                    let mut go: Option<usize> = None;
+                    ui.horizontal_wrapped(|ui| {
+                        for i in 0..count {
+                            if ui.add(egui::Button::selectable(i == app.drawing.page, format!("{}", i + 1))).clicked() && i != app.drawing.page {
+                                go = Some(i);
+                            }
+                        }
+                    });
+                    ui.small(format!("Sheet {} of {}", app.drawing.page + 1, count));
+                    ui.horizontal(|ui| {
+                        if crate::ui_kit::button(ui, "Add sheet", crate::ui_kit::Button::Small).clicked() {
+                            add_page(app);
+                        }
+                        if count > 1 && crate::ui_kit::button(ui, "Delete sheet", crate::ui_kit::Button::Small).clicked() {
+                            delete_page(app);
+                        }
+                    });
+                    if let Some(i) = go {
+                        switch_page(app, i);
+                    }
                     ui.separator();
                     ui.label("Paper");
                     let current = if app.drawing.paper >= 5 { "Custom size" } else { PAPERS[app.drawing.paper.min(4)] };
