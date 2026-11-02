@@ -513,6 +513,32 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if opts.tapped {
                 enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread);
             }
+            // Where the hole goes on its face, as numbers or expressions (editing them moves the hole).
+            if !opts.multiple
+                && let Some(Sel::Face { point, .. }) = d.inputs.first().and_then(|i| i.items.first())
+            {
+                let tag = pt(*point);
+                let shown = |v: f64| format!("{} mm", (v * 1000.0).round() / 1000.0);
+                let defaults = vec![shown(point.x), shown(point.y), shown(point.z)];
+                let mut at: Vec<String> = d
+                    .extra
+                    .get("position_exprs")
+                    .filter(|k| k["point"] == tag)
+                    .and_then(|k| k["at"].as_array())
+                    .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
+                    .filter(|a: &Vec<String>| a.len() == 3)
+                    .unwrap_or_else(|| defaults.clone());
+                for (i, name) in ["Position X", "Position Y", "Position Z"].iter().enumerate() {
+                    if let Some(text) = at.get_mut(i) {
+                        enter |= expr_row(ui, name, text);
+                    }
+                }
+                if at == defaults {
+                    d.extra.remove("position_exprs");
+                } else {
+                    d.extra.insert("position_exprs".into(), json!({"at": at, "point": tag}));
+                }
+            }
             if *kind == 0 {
                 form_row(ui, "Drill Point", |ui| {
                     let mut tip = usize::from(opts.angled);
