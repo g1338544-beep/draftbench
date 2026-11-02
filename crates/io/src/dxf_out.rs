@@ -361,12 +361,14 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
     // and a drawing in sheet coordinates seems empty until Zoom Extents.
     let t = o.table("VPORT", 1);
     o.record("VPORT", "AcDbViewportTableRecord", &t);
-    o.code(2, "*Active");
+    o.code(2, "*ACTIVE");
     o.code(70, 0);
     o.point(10, Vec2::new(0.0, 0.0));
     o.point(11, Vec2::new(1.0, 1.0));
     let (w, h) = ((hi.x - lo.x).max(1.0), (hi.y - lo.y).max(1.0));
     let centre = Vec2::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0);
+    // The view centre (12) is in the view's own coordinates, measured from the target point (17):
+    // the target stays at the origin, or the centre would be counted twice.
     o.point(12, centre);
     o.point(13, Vec2::new(0.0, 0.0));
     o.point(14, Vec2::new(10.0, 10.0));
@@ -374,9 +376,35 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
     o.num(16, 0.0);
     o.num(26, 0.0);
     o.num(36, 1.0);
-    o.point(17, centre);
+    o.point(17, Vec2::new(0.0, 0.0));
     o.num(40, h * 1.1);
     o.num(41, w / h);
+    o.num(42, 50.0);
+    o.num(43, 0.0);
+    o.num(44, 0.0);
+    o.num(50, 0.0);
+    o.num(51, 0.0);
+    o.code(71, 0);
+    o.code(72, 100);
+    o.code(73, 1);
+    o.code(74, 3);
+    o.code(75, 0);
+    o.code(76, 1);
+    o.code(77, 0);
+    o.code(78, 0);
+    o.code(281, 0);
+    o.code(65, 1);
+    o.num(110, 0.0);
+    o.num(120, 0.0);
+    o.num(130, 0.0);
+    o.num(111, 1.0);
+    o.num(121, 0.0);
+    o.num(131, 0.0);
+    o.num(112, 0.0);
+    o.num(122, 1.0);
+    o.num(132, 0.0);
+    o.code(79, 0);
+    o.num(146, 0.0);
     o.code(0, "ENDTAB");
     // The three every drawing has, and DASHED, which the dashed layers name: dash and gap lengths
     // (a gap is negative) after the pattern's total.
@@ -428,6 +456,12 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
     o.num(42, 2.5);
     o.code(3, "txt");
     o.code(4, "");
+    o.code(0, "ENDTAB");
+    // The registered application that owns the standard entity data.
+    let t = o.table("APPID", 1);
+    o.record("APPID", "AcDbRegAppTableRecord", &t);
+    o.code(2, "ACAD");
+    o.code(70, 0);
     o.code(0, "ENDTAB");
     let t = o.table("BLOCK_RECORD", 2);
     for (h, name) in [(&model, "*Model_Space"), (&paper, "*Paper_Space")] {
@@ -601,7 +635,7 @@ mod tests {
         let e = DxfEntity { layer: "0".into(), shape: DxfShape::Line(Vec2::new(0.0, 0.0), Vec2::new(841.0, 594.0)) };
         let text = write_dxf_drawing(&[], &[e]);
         let p = pairs(&text);
-        let at = p.iter().position(|x| x == &(2, "*Active".to_string()));
+        let at = p.iter().position(|x| x == &(2, "*ACTIVE".to_string()));
         assert!(at.is_some());
         let tail = &p[at.unwrap_or(0)..];
         assert!(tail.contains(&(12, "420.5".to_string())) && tail.contains(&(22, "297.0".to_string())));
