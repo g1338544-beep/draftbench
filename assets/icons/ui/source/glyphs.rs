@@ -99,10 +99,13 @@ pub(crate) fn breadcrumb(p: &egui::Painter, c: egui::Pos2, col: Color32) {
 }
 
 pub(crate) fn brand_mark(p: &egui::Painter, c: Pos2) {
-    // Draftbench mark: an isometric block with a sketch-plane window cut into its top face.
+    // DraftNew mark: a green isometric block with a gear on its top face.
+    const GEAR: &[(f32, f32)] = &[(56.9, -9.0), (71.7, -6.4), (71.7, 6.4), (56.9, 9.0), (53.8, 20.6), (65.3, 30.3), (58.9, 41.4), (44.8, 36.2), (36.2, 44.8), (41.4, 58.9), (30.3, 65.3), (20.6, 53.8), (9.0, 56.9), (6.4, 71.7), (-6.4, 71.7), (-9.0, 56.9), (-20.6, 53.8), (-30.3, 65.3), (-41.4, 58.9), (-36.2, 44.8), (-44.8, 36.2), (-58.9, 41.4), (-65.3, 30.3), (-53.8, 20.6), (-56.9, 9.0), (-71.7, 6.4), (-71.7, -6.4), (-56.9, -9.0), (-53.8, -20.6), (-65.3, -30.3), (-58.9, -41.4), (-44.8, -36.2), (-36.2, -44.8), (-41.4, -58.9), (-30.3, -65.3), (-20.6, -53.8), (-9.0, -56.9), (-6.4, -71.7), (6.4, -71.7), (9.0, -56.9), (20.6, -53.8), (30.3, -65.3), (41.4, -58.9), (36.2, -44.8), (44.8, -36.2), (58.9, -41.4), (65.3, -30.3), (53.8, -20.6)];
     let s = 20.0 / 380.0;
     let m = |pts: &[(f32, f32)]| -> Vec<egui::Pos2> { pts.iter().map(|&(x, y)| pos2(c.x + (x - 200.0) * s, c.y + (y - 200.0) * s)).collect() };
-    let [light, mid, dark, _] = crate::theme::Tokens::get().logo;
+    let light = Color32::from_rgb(0x4a, 0xde, 0x80);
+    let mid = Color32::from_rgb(0x16, 0xa3, 0x4a);
+    let dark = Color32::from_rgb(0x15, 0x80, 0x3d);
     let gap = crate::theme::Tokens::get().app_bar;
     let face = |col: Color32, pts: &[(f32, f32)]| {
         p.add(egui::Shape::convex_polygon(m(pts), col, Stroke::NONE));
@@ -110,13 +113,20 @@ pub(crate) fn brand_mark(p: &egui::Painter, c: Pos2) {
     face(light, &[(200.0, 10.0), (365.0, 105.0), (200.0, 200.0), (35.0, 105.0)]);
     face(mid, &[(35.0, 105.0), (200.0, 200.0), (200.0, 390.0), (35.0, 295.0)]);
     face(dark, &[(365.0, 105.0), (365.0, 295.0), (200.0, 390.0), (200.0, 200.0)]);
-    // Light catches the left half of the top face and the upper part of the orange face.
-    face(Color32::from_white_alpha(46), &[(200.0, 10.0), (200.0, 200.0), (35.0, 105.0)]);
-    face(Color32::from_white_alpha(26), &[(35.0, 105.0), (200.0, 200.0), (200.0, 250.0), (35.0, 155.0)]);
-    // The sketch window and the seams between faces show the application bar.
-    face(gap, &[(200.0, 62.0), (274.0, 105.0), (200.0, 148.0), (126.0, 105.0)]);
-    // A small orange diamond sits in the window: the sketch point.
-    face(light, &[(200.0, 88.0), (222.0, 105.0), (200.0, 122.0), (178.0, 105.0)]);
+    // The gear lies flat on the top face (y squashed by tan 30 degrees); fan of triangles from its centre.
+    let sq = 0.5774;
+    let at = |&(x, y): &(f32, f32)| (200.0 + x, 105.0 + y * sq);
+    for (k, a) in GEAR.iter().enumerate() {
+        let b = GEAR.get((k + 1) % GEAR.len()).unwrap_or(a);
+        face(Color32::WHITE, &[(200.0, 105.0), at(a), at(b)]);
+    }
+    let hole: Vec<(f32, f32)> = (0..16)
+        .map(|k| {
+            let t = k as f32 * std::f32::consts::TAU / 16.0;
+            (200.0 + 21.0 * t.cos(), 105.0 + 21.0 * sq * t.sin())
+        })
+        .collect();
+    face(light, &hole);
     let seam = Stroke::new(10.0 * s, gap);
     p.line_segment([m(&[(200.0, 200.0)])[0], m(&[(200.0, 390.0)])[0]], seam);
     p.line_segment([m(&[(200.0, 200.0)])[0], m(&[(35.0, 105.0)])[0]], seam);
