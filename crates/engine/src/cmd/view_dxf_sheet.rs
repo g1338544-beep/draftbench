@@ -769,6 +769,25 @@ fn finish(
         cell(6, format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" })),
         &mut entities,
     );
+    // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go.
+    if let Some(cuts) = p.get("centre_cut").and_then(Value::as_array) {
+        let frames: Vec<[f64; 4]> = cuts
+            .iter()
+            .take(400)
+            .filter_map(|c| {
+                let n: Vec<f64> = c.as_array()?.iter().filter_map(Value::as_f64).collect();
+                match n[..] {
+                    [a, b, c, d] if [a, b, c, d].iter().all(|v| v.is_finite() && v.abs() < 1e5) => Some([a, b, c, d]),
+                    _ => None,
+                }
+            })
+            .collect();
+        entities.retain(|e| match (&e.shape, e.layer.as_str()) {
+            (DxfShape::Line(a, b), "CENTER") => !frames.iter().any(|r| touches(*a, *b, *r)),
+            _ => true,
+        });
+    }
+: header at the bottom, items counted upward.
     // Centre marks the user placed by hand: x, y and how far each arm reaches (mm on the sheet).
     let mut centre = centre;
     if let Some(list) = p.get("clines").and_then(Value::as_array) {
@@ -795,25 +814,7 @@ fn finish(
             }
         }
     }
-    // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go.
-    if let Some(cuts) = p.get("centre_cut").and_then(Value::as_array) {
-        let frames: Vec<[f64; 4]> = cuts
-            .iter()
-            .take(400)
-            .filter_map(|c| {
-                let n: Vec<f64> = c.as_array()?.iter().filter_map(Value::as_f64).collect();
-                match n[..] {
-                    [a, b, c, d] if [a, b, c, d].iter().all(|v| v.is_finite() && v.abs() < 1e5) => Some([a, b, c, d]),
-                    _ => None,
-                }
-            })
-            .collect();
-        entities.retain(|e| match (&e.shape, e.layer.as_str()) {
-            (DxfShape::Line(a, b), "CENTER") => !frames.iter().any(|r| touches(*a, *b, *r)),
-            _ => true,
-        });
-    }
-: header at the bottom, items counted upward.
+    // The parts list (BOM) over the title block: header at the bottom, items counted upward.
     if let Some(rows) = p.get("bom").and_then(Value::as_array).filter(|r| !r.is_empty()) {
         let edges = [0.0, 0.10, 0.56, 0.68, 1.0];
         let rh = 7.0;
