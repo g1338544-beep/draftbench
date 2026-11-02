@@ -19,6 +19,9 @@ use crate::viewport::{Proj, projected_polygon};
 /// Where the dialog's geometry is: a base point and, for values that can be dragged, the
 /// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
+    if matches!(d.kind, Kind::Split) {
+        return split_anchor(app, d);
+    }
     let st = app.session.world_state();
     let first = d.inputs.first()?.items.first()?;
     let (at, normal) = match first {
@@ -116,7 +119,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
             let dir = by_sketch.first().and_then(|(sk, ids)| solidcraft_engine::doc::sketch_hole_direction(&st, *sk, ids, flip));
             (at, normal.or(dir.map(|d| -d)))
         }
-        Kind::Section { .. } | Kind::OffsetPlane { .. } | Kind::OffsetFaces { .. } => (at, normal),
+        Kind::Section { .. } | Kind::OffsetPlane { .. } | Kind::OffsetFaces { .. } | Kind::Emboss { .. } => (at, normal),
         // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
         // on an outside edge, into the open corner on an inside one); shell thickness grows into
         // the body.
@@ -142,6 +145,26 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         Kind::SketchModify(_) => (at, crate::sketch_modify_ui::arrow(app, d).or(normal)),
         _ => (at, None),
     })
+}
+
+/// Split Body: the cutting plane's origin and normal, so its Distance can be dragged. A WCS axis
+/// (XC, YC, ZC) cuts square to that axis from the WCS origin; a planar face moves along its normal.
+fn split_anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
+    d.inputs.first()?.items.first()?;
+    let axis = d.extra.get("wcs_axis").and_then(serde_json::Value::as_str).filter(|a| matches!(*a, "x" | "y" | "z"));
+    if let Some(axis) = axis {
+        let w = app.session.wcs.unwrap_or(solidcraft_engine::cmd::wcs::Wcs::WORLD);
+        let n = match axis {
+            "x" => w.x,
+            "y" => w.y,
+            _ => w.z(),
+        };
+        return Some((w.origin, Some(n)));
+    }
+    match d.inputs.get(1)?.items.first()? {
+        Sel::Face { body, index, point } => Some((*point, crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| n))),
+        _ => None,
+    }
 }
 
 /// The direction a rectangular pattern's Spacing 2 grows along (#2462): a solid pattern's picked
@@ -532,6 +555,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 *taper_present = true;
             }
         }
+    }
+    // Split Body: an arrow along the cutting plane's normal sets Distance; the plane is shown.
+    if matches!(d.kind, Kind::Split) {
+        if let Some(n) = dir {
+            let text = d.extra.get("distance").and_then(serde_json::Value::as_str).unwrap_or("0 mm").to_string();
+            let l = text.trim().trim_end_matches("mm").trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+            let mut v = text.clone();
+            drag_arrow(ui, painter, proj, base, bs, n, l, true, egui::Id::new("sc_manipulator"), half_height, &mut v);
+            if v != text {
+                d.extra.insert("distance".into(), serde_json::json!(v));
+            }
+            if let Some(q) = offset_plane_quad(proj, base + n * l, n, half_height * 0.25) {
+                painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
+            }
+        }
+        return;
     }
     if let (Kind::Hole { depth, opts, .. }, Some(n)) = (&mut d.kind, dir) {
         let l = if opts.all { 0.0 } else { app.session.doc.eval(depth, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0) };
