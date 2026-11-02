@@ -568,7 +568,7 @@ impl State {
         }
         if let Some(c) = v.get("cells").and_then(serde_json::Value::as_array) {
             for (slot, t) in self.cells.iter_mut().zip(c) {
-                *slot = t.as_str().unwrap_or("").chars().take(80).collect();
+                *slot = t.as_str().unwrap_or("").chars().take(110).collect();
             }
         }
         if let Some(d) = v.get("designs").and_then(serde_json::Value::as_object) {
@@ -735,7 +735,7 @@ impl State {
         }
         if let Some(c) = d.get("cells").and_then(serde_json::Value::as_array) {
             for (slot, t) in self.cells.iter_mut().zip(c) {
-                *slot = t.as_str().unwrap_or("").chars().take(80).collect();
+                *slot = t.as_str().unwrap_or("").chars().take(110).collect();
             }
         }
         if let Some(n) = d.get("paper").and_then(serde_json::Value::as_u64).filter(|n| *n <= 5) {
@@ -1724,6 +1724,23 @@ fn normal_angles(n: [f64; 3]) -> Option<(f64, f64)> {
     let (x, y, z) = (n[0] / len, n[1] / len, n[2] / len);
     let yaw = if x.abs() < 1e-9 && y.abs() < 1e-9 { 0.0 } else { (-x).atan2(-y) };
     Some((yaw, z.clamp(-1.0, 1.0).asin()))
+}
+
+/// A title block cell is `{dx;dy;k}text`: split it into the move (mm), the size factor and the text.
+fn split_cell(raw: &str) -> (f32, f32, f32, String) {
+    if let Some((style, rest)) = raw.strip_prefix('{').and_then(|r| r.split_once('}')) {
+        let n: Vec<f32> = style.split(';').filter_map(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite()).collect();
+        return (n.first().copied().unwrap_or(0.0), n.get(1).copied().unwrap_or(0.0), n.get(2).copied().unwrap_or(1.0), rest.to_string());
+    }
+    (0.0, 0.0, 1.0, raw.to_string())
+}
+
+fn join_cell(dx: f32, dy: f32, k: f32, body: &str) -> String {
+    if dx == 0.0 && dy == 0.0 && (k - 1.0).abs() < 1e-3 {
+        body.to_string()
+    } else {
+        format!("{{{dx};{dy};{k:.2}}}{body}")
+    }
 }
 
 /// A section-view icon: a block cut by a dashed plane, the cut face hatched, with the arrows
@@ -2950,7 +2967,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (1, c) => 1 + c,
                 (_, c) => 4 + c,
             };
-            if app.drawing.cells[index].trim().is_empty() {
+            if split_cell(&app.drawing.cells[index]).3.trim().is_empty() {
                 // Start from the text shown there.
                 let centre = pos2(x0 + block_w * [c1 / 2.0, (c1 + c2) / 2.0, (c2 + 1.0) / 2.0][col], margin + rowh * row as f32 + rowh * 0.3);
                 let shown = sheet
@@ -2961,7 +2978,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .min_by(|a, b| (*a.0 - centre).length().total_cmp(&(*b.0 - centre).length()))
                     .map(|(_, t)| t.clone());
                 if let Some(t) = shown {
-                    app.drawing.cells[index] = t.chars().take(80).collect();
+                    {
+                        let (dx, dy, k, _) = split_cell(&app.drawing.cells[index]);
+                        app.drawing.cells[index] = join_cell(dx, dy, k, &t.chars().take(80).collect::<String>());
+                    }
                 }
             }
             app.drawing.cell_edit = Some(index);
@@ -2970,11 +2990,58 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(i) = app.drawing.cell_edit {
         let mut changed = false;
         let mut reset = false;
+        let names = ["Title", "Company", "Number / sheet / revision", "Date", "Scale", "Drawn by", "Paper"];
+        let slot = i.min(6);
+        // The cell is `{dx;dy;k}text`: moved by dx, dy mm and scaled by k.
+        let (mut dx, mut dy, mut k, mut body) = split_cell(&app.drawing.cells[slot]);
+        let before = (dx, dy, k, body.clone());
+        let mut copy_from: Option<usize> = None;
         let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_cell"), "cell", "Title block text").show_body(ui.ctx(), |ui| {
-            ui.label(["Title", "Company", "Number / sheet / revision", "Date", "Scale", "Drawn by", "Paper"][i.min(6)]);
-            changed = crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_cell_text", i)), &mut app.drawing.cells[i.min(6)], "", false, 80).changed();
-            reset = crate::ui_kit::button(ui, "Reset to automatic", crate::ui_kit::Button::Small).clicked();
+            ui.label(names[slot]);
+            crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_cell_text", i)), &mut body, "", false, 80);
+            ui.label("Move (mm)");
+            ui.horizontal(|ui| {
+                for (label, ddx, ddy) in [("←", -1.0, 0.0), ("→", 1.0, 0.0), ("↑", 0.0, 1.0), ("↓", 0.0, -1.0)] {
+                    if ui.small_button(label).clicked() {
+                        dx += ddx;
+                        dy += ddy;
+                    }
+                }
+                ui.label(format!("x {dx:+.0}  y {dy:+.0}"));
+            });
+            ui.label("Size");
+            ui.horizontal(|ui| {
+                if ui.small_button("A−").clicked() {
+                    k = (k / 1.15).max(0.2);
+                }
+                if ui.small_button("A+").clicked() {
+                    k = (k * 1.15).min(8.0);
+                }
+                ui.label(format!("{:.0}%", k * 100.0));
+            });
+            ui.label("Copy text and style from");
+            ui.horizontal_wrapped(|ui| {
+                for (n, name) in names.iter().enumerate() {
+                    if n != slot && ui.small_button(*name).clicked() {
+                        copy_from = Some(n);
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                if crate::ui_kit::button(ui, "Copy to clipboard", crate::ui_kit::Button::Small).clicked() {
+                    ui.ctx().copy_text(body.clone());
+                }
+                reset = crate::ui_kit::button(ui, "Reset to automatic", crate::ui_kit::Button::Small).clicked();
+            });
         });
+        if let Some(n) = copy_from {
+            let src = app.drawing.cells[n].clone();
+            app.drawing.cells[slot] = src;
+            changed = true;
+        } else if (dx, dy, k, &body) != (before.0, before.1, before.2, &before.3) {
+            app.drawing.cells[slot] = join_cell(dx, dy, k, &body);
+            changed = true;
+        }
         if reset {
             app.drawing.cells[i.min(6)].clear();
         }

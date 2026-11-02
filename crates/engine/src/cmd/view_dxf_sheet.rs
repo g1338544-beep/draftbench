@@ -803,26 +803,34 @@ fn finish(
     let cap = |label: &str, value: String| if value.is_empty() { String::new() } else { format!("{label} {value}") };
     // Cells the user typed over: title, company, number, date, scale, drawn by, paper.
     let cells = p.get("block_cells").and_then(Value::as_array);
-    let cell = |i: usize, default: String| -> String {
-        cells.and_then(|c| c.get(i)).and_then(Value::as_str).filter(|t| !t.trim().is_empty()).map_or(default, |t| t.chars().take(80).collect())
+    // A cell may start with `{dx;dy;k}`: the text moved by dx, dy mm and scaled by k.
+    let cell = |i: usize, default: String| -> (String, f64, f64, f64) {
+        let raw: String = cells.and_then(|c| c.get(i)).and_then(Value::as_str).unwrap_or("").chars().take(100).collect();
+        let (style, body) = match raw.strip_prefix('{').and_then(|r| r.split_once('}')) {
+            Some((st, rest)) => (st.to_string(), rest.to_string()),
+            None => (String::new(), raw.clone()),
+        };
+        let n: Vec<f64> = style.split(';').filter_map(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite()).collect();
+        let dx = n.first().copied().unwrap_or(0.0).clamp(-300.0, 300.0);
+        let dy = n.get(1).copied().unwrap_or(0.0).clamp(-300.0, 300.0);
+        let k = n.get(2).copied().unwrap_or(1.0).clamp(0.2, 8.0);
+        let body = body.trim();
+        (if body.is_empty() { default } else { body.chars().take(80).collect() }, dx, dy, k)
+    };
+    let put = |x: f64, y: f64, h: f64, (t, dx, dy, k): (String, f64, f64, f64), entities: &mut Vec<DxfEntity>| {
+        text("TEXT", Vec2::new(x + dx, y + dy), h * k, t, entities);
     };
     let text_from = entities.len();
     let company = cell(1, field("company"));
-    text("TEXT", Vec2::new(bx0 + block_w / 2.0, by0 + 2.0 * row + row * 0.3), th * 1.4, cell(0, if title.is_empty() { "Untitled".into() } else { title }), &mut entities);
-    if !company.is_empty() {
-        text("TEXT", Vec2::new(bx0 + block_w * m0, by0 + row + row * 0.3), th, company, &mut entities);
+    put(bx0 + block_w / 2.0, by0 + 2.0 * row + row * 0.3, th * 1.4, cell(0, if title.is_empty() { "Untitled".into() } else { title }), &mut entities);
+    if !company.0.is_empty() {
+        put(bx0 + block_w * m0, by0 + row + row * 0.3, th, company, &mut entities);
     }
-    text("TEXT", Vec2::new(bx0 + block_w * m1, by0 + row + row * 0.3), th, cell(2, cap("No.", [field("number"), cap("Sh", field("sheet")), cap("Rev", field("revision"))].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("  "))), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * m2, by0 + row + row * 0.3), th, cell(3, cap("Date", field("date"))), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * m0, by0 + row * 0.3), th, cell(4, cap("Scale", scale_text.clone())), &mut entities);
-    text("TEXT", Vec2::new(bx0 + block_w * m1, by0 + row * 0.3), th, cell(5, cap("By", field("author"))), &mut entities);
-    text(
-        "TEXT",
-        Vec2::new(bx0 + block_w * m2, by0 + row * 0.3),
-        th,
-        cell(6, format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" })),
-        &mut entities,
-    );
+    put(bx0 + block_w * m1, by0 + row + row * 0.3, th, cell(2, cap("No.", [field("number"), cap("Sh", field("sheet")), cap("Rev", field("revision"))].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("  "))), &mut entities);
+    put(bx0 + block_w * m2, by0 + row + row * 0.3, th, cell(3, cap("Date", field("date"))), &mut entities);
+    put(bx0 + block_w * m0, by0 + row * 0.3, th, cell(4, cap("Scale", scale_text.clone())), &mut entities);
+    put(bx0 + block_w * m1, by0 + row * 0.3, th, cell(5, cap("By", field("author"))), &mut entities);
+    put(bx0 + block_w * m2, by0 + row * 0.3, th, cell(6, format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" })), &mut entities);
     if !block_on {
         entities.truncate(text_from);
     }
