@@ -11,6 +11,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.ribbon.top", "Top View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds a top view to the sheet."),
     CommandSpec::new("drawing.ribbon.right", "Right View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds a right view to the sheet."),
     CommandSpec::new("drawing.ribbon.iso", "Isometric View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds an isometric (3D) view to the sheet."),
+    CommandSpec::new("drawing.ribbon.projected", "Projected View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("lookat").params("No parameters. UI only: places a view projected from the selected view."),
     CommandSpec::new("drawing.ribbon.dimension", "Dimension", ui_only).noundo().doc_only().at("DRAWING", "ANNOTATE").icon("dimension").params("No parameters. UI only: starts the dimension tool on the sheet."),
     CommandSpec::new("drawing.ribbon.centre", "Centre Lines", ui_only).noundo().doc_only().at("DRAWING", "ANNOTATE").icon("centerline").params("No parameters. UI only: switches centre lines on circles on or off."),
     CommandSpec::new("drawing.ribbon.hidden", "Hidden Lines", ui_only).noundo().doc_only().at("DRAWING", "EDIT").icon("eye").params("No parameters. UI only: switches dashed hidden lines on or off for all views."),

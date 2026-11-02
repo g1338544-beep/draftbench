@@ -54,6 +54,9 @@ struct PlacedView {
     dims: bool,
     /// A section cut: the world axis (0 X, 1 Y, 2 Z) and the position (blank = the middle).
     section: Option<(usize, String)>,
+    /// Projected from another view: its index, and whether it sits beside it (shares the y
+    /// position) rather than above or below it (shares x).
+    align: Option<(usize, bool)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -106,6 +109,8 @@ pub struct State {
     dim_tool: Option<(usize, Vec<Pos2>)>,
     /// The selected dimension, the one being dragged, and the one whose text is being edited.
     sel_dim: Option<usize>,
+    /// The view a projected view is being placed from.
+    proj_tool: Option<usize>,
     drag_dim: Option<usize>,
     text_edit: Option<usize>,
     selected: Option<usize>,
@@ -155,6 +160,7 @@ impl Default for State {
             dims: Vec::new(),
             dim_tool: None,
             sel_dim: None,
+            proj_tool: None,
             drag_dim: None,
             text_edit: None,
             selected: None,
@@ -187,7 +193,7 @@ impl State {
             designs.insert(
                 design.chars().take(120).collect(),
                 json!({
-                    "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t]))})).collect::<Vec<_>>(),
+                    "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h]))})).collect::<Vec<_>>(),
                     "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text})).collect::<Vec<_>>(),
                     "title": self.title, "number": self.number, "notes": self.notes,
                 }),
@@ -281,6 +287,9 @@ impl State {
                         let axis = a.first()?.as_u64().filter(|n| *n <= 2)? as usize;
                         Some((axis, a.get(1)?.as_str()?.chars().take(12).collect()))
                     }),
+                    align: v.get("align").and_then(serde_json::Value::as_array).and_then(|a| {
+                        Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?))
+                    }),
                 });
             }
         }
@@ -325,6 +334,11 @@ fn params(st: &State) -> Value {
                 "dims": v.dims,
                 "center": st.centre,
             });
+            if let Some((parent, _)) = v.align
+                && v.scale.trim().is_empty()
+            {
+                o["scale_from"] = json!(parent);
+            }
             if let Some((axis, at)) = &v.section {
                 let name = ["x", "y", "z"][(*axis).min(2)];
                 let mut sec = json!({ "axis": name });
@@ -486,6 +500,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         dashed: false,
         dims: true,
         section: None,
+        align: None,
     });
     app.drawing.selected = Some(n);
     begin(app);
@@ -548,6 +563,38 @@ fn dist_to_segment(p: Pos2, (a, b): (Pos2, Pos2)) -> f32 {
     (p - (a + ab * t)).length()
 }
 
+/// The view grid position (right, up) of a standard view in the projection layout.
+fn grid_cell(view: usize, first_angle: bool) -> Option<(i32, i32)> {
+    let s = if first_angle { -1 } else { 1 };
+    match view {
+        0 => Some((0, 0)),
+        1 => Some((0, s)),
+        5 => Some((0, -s)),
+        2 => Some((s, 0)),
+        3 => Some((-s, 0)),
+        4 => Some((2 * s, 0)),
+        _ => None,
+    }
+}
+
+/// Remove a view and what depends on it: projected views lose their link, later links shift.
+fn remove_view(app: &mut SolveApp, i: usize) {
+    if i >= app.drawing.placed.len() {
+        return;
+    }
+    app.drawing.placed.remove(i);
+    for v in &mut app.drawing.placed {
+        v.align = match v.align {
+            Some((p, _)) if p == i => None,
+            Some((p, h)) if p > i => Some((p - 1, h)),
+            other => other,
+        };
+    }
+    app.drawing.selected = None;
+    app.drawing.scale_edit = None;
+    app.drawing.proj_tool = None;
+}
+
 /// A Drawing ribbon button was pressed.
 pub fn ribbon(app: &mut SolveApp, id: &str) {
     match id {
@@ -568,10 +615,14 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
         "drawing.ribbon.scale" => app.drawing.scale_edit = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()),
         "drawing.ribbon.delete" => {
             if let Some(i) = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()) {
-                app.drawing.placed.remove(i);
-                app.drawing.selected = None;
-                app.drawing.scale_edit = None;
+                remove_view(app, i);
                 refresh(app);
+            }
+        }
+        "drawing.ribbon.projected" => {
+            app.drawing.proj_tool = app.drawing.selected.filter(|i| app.drawing.placed.get(*i).is_some_and(|v| v.view < 6));
+            if app.drawing.proj_tool.is_none() {
+                app.set_status("Select a view first, then Projected View".to_string(), true);
             }
         }
         "drawing.ribbon.fit" => fit(app),
@@ -660,6 +711,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let mut dirty = false;
                     let mut add: Option<usize> = None;
                     let mut remove: Option<usize> = None;
+                    let mut start_projected: Option<usize> = None;
                     ui.heading("Drawing");
                     ui.small("Add the views you want, then drag each one on the sheet.");
                     ui.separator();
@@ -776,6 +828,9 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 ui.label("Cut position (mm, blank = middle)");
                                 dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_section_at", i)), at, "middle", false, 12).changed();
                             }
+                            if v.view < 6 && crate::ui_kit::button(ui, "Projected view…", crate::ui_kit::Button::Small).clicked() {
+                                start_projected = Some(i);
+                            }
                             if crate::ui_kit::button(ui, "Remove view", crate::ui_kit::Button::Small).clicked() {
                                 remove = Some(i);
                             }
@@ -851,9 +906,11 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ui.colored_label(Tokens::get().error, e.as_str());
                     }
                     if let Some(i) = remove {
-                        app.drawing.placed.remove(i);
-                        app.drawing.selected = None;
+                        remove_view(app, i);
                         dirty = true;
+                    }
+                    if let Some(i) = start_projected {
+                        app.drawing.proj_tool = Some(i);
                     }
                     if let Some(view) = add {
                         add_view(app, view);
@@ -953,7 +1010,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let dims = &app.drawing.dims;
         let dim_hit = |s: Pos2| dims.iter().enumerate().rev().find(|(_, d)| dist_to_segment(s, dim_segment(d)) <= tol).map(|(i, _)| i);
         let pointer = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
-        if app.drawing.dim_tool.is_none()
+        if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
             && let Some(s) = pointer
             && (response.drag_started_by(egui::PointerButton::Primary) || response.clicked() || response.double_clicked())
             && let Some(i) = dim_hit(s)
@@ -966,7 +1023,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if response.double_clicked() {
                 app.drawing.text_edit = Some(i);
             }
-        } else if app.drawing.dim_tool.is_none()
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && let Some(b) = hit(s)
@@ -974,7 +1031,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.sel_dim = None;
             app.drawing.drag = Some((b.0, b.1 - s.x, b.2 - s.y));
             app.drawing.selected = Some(b.0);
-        } else if app.drawing.dim_tool.is_none()
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
             && response.clicked()
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
         {
@@ -1040,7 +1097,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Double-click a view to edit its scale; right-click for the add / remove menu.
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let under = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).map(|b| b.0);
-        if app.drawing.dim_tool.is_none()
+        if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
             && app.drawing.text_edit.is_none()
             && response.double_clicked()
             && let Some(v) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)).and_then(under)
@@ -1061,6 +1118,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut menu_add: Option<(usize, Pos2)> = None;
     let mut menu_remove: Option<usize> = None;
     let mut menu_scale: Option<usize> = None;
+    let mut menu_proj: Option<usize> = None;
     if let Some((target, at)) = app.drawing.menu_at {
         crate::ui_kit::Menu::context(&response, |ui| {
             for (i, (_, label)) in VIEWS.iter().enumerate() {
@@ -1071,6 +1129,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if let Some(v) = target {
                 ui.separator();
+                if crate::ui_kit::list_picker(ui, "Projected view…", "Projected view…", false).clicked() {
+                    menu_proj = Some(v);
+                    ui.close();
+                }
                 if crate::ui_kit::list_picker(ui, "Edit scale…", "Edit scale…", false).clicked() {
                     menu_scale = Some(v);
                     ui.close();
@@ -1090,15 +1152,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         refresh(app);
     }
+    if let Some(v) = menu_proj.filter(|v| app.drawing.placed.get(*v).is_some_and(|p| p.view < 6)) {
+        app.drawing.proj_tool = Some(v);
+    }
     if let Some(v) = menu_scale {
         app.drawing.scale_edit = Some(v);
     }
     if let Some(i) = menu_remove
         && i < app.drawing.placed.len()
     {
-        app.drawing.placed.remove(i);
-        app.drawing.selected = None;
-        app.drawing.scale_edit = None;
+        remove_view(app, i);
         refresh(app);
     }
     if let Some(i) = app.drawing.scale_edit {
@@ -1182,6 +1245,43 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Placing a projected view: the pointer's side of the parent view picks which view it is.
+    if let Some(parent) = app.drawing.proj_tool {
+        let first = app.drawing.first_angle;
+        let from = app.drawing.placed.get(parent).and_then(|v| grid_cell(v.view, first));
+        let pb = sheet.boxes.iter().find(|b| b.0 == parent).copied();
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || from.is_none() || pb.is_none() {
+            app.drawing.proj_tool = None;
+        } else if let (Some(from), Some(b), Some(h)) = (from, pb, ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q))) {
+            let (dx, dy) = (h.x - b.1, h.y - b.2);
+            let horizontal = dx.abs() >= dy.abs();
+            let target = if horizontal { (from.0 + if dx >= 0.0 { 1 } else { -1 }, from.1) } else { (from.0, from.1 + if dy >= 0.0 { 1 } else { -1 }) };
+            let found = (0..6).find(|v| grid_cell(*v, first) == Some(target));
+            let at = if horizontal { pos2(h.x, b.2) } else { pos2(b.1, h.y) };
+            let label = found.map_or("No view on this side", |v| VIEWS[v].1);
+            painter.line_segment([map(pos2(b.1, b.2)), map(at)], Stroke::new(1.0, Tokens::get().accent));
+            painter.text(map(at) + vec2(14.0, -14.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(Tokens::get().font_body), Tokens::get().accent);
+            if let Some(view) = found
+                && response.clicked_by(egui::PointerButton::Primary)
+            {
+                let dashed = app.drawing.placed.get(parent).is_some_and(|v| v.dashed);
+                let n = app.drawing.placed.len();
+                app.drawing.placed.push(PlacedView {
+                    view,
+                    x: f64::from(at.x),
+                    y: f64::from(at.y),
+                    scale: String::new(),
+                    dashed,
+                    dims: true,
+                    section: None,
+                    align: Some((parent, horizontal)),
+                });
+                app.drawing.selected = Some(n);
+                app.drawing.proj_tool = None;
+                begin(app);
+            }
+        }
+    }
     // Placing a dimension: snap to the drawn geometry, three clicks.
     let mut new_dim: Option<DimItem> = None;
     if let Some((kind, picks)) = app.drawing.dim_tool.clone() {
@@ -1234,7 +1334,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let dragging = app.drawing.drag.map(|d| d.0) == Some(b.0);
         let (cx, cy) = if dragging {
             match (app.drawing.drag, response.interact_pointer_pos().and_then(|q| m.to_sheet(q))) {
-                (Some(d), Some(s)) => (s.x + d.1, s.y + d.2),
+                (Some(d), Some(s)) => {
+                    let (mut x, mut y) = (s.x + d.1, s.y + d.2);
+                    if let Some((p, horizontal)) = app.drawing.placed.get(b.0).and_then(|v| v.align)
+                        && let Some(parent) = app.drawing.placed.get(p)
+                    {
+                        if horizontal {
+                            y = parent.y as f32;
+                        } else {
+                            x = parent.x as f32;
+                        }
+                    }
+                    (x, y)
+                }
                 _ => (b.1, b.2),
             }
         } else {
@@ -1262,9 +1374,36 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         let target = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
         app.drawing.drag = None;
-        if let (Some(s), Some(v)) = (target, app.drawing.placed.get_mut(index)) {
-            v.x = f64::from((s.x + ox).clamp(0.0, sw));
-            v.y = f64::from((s.y + oy).clamp(0.0, sh));
+        if let (Some(s), Some(old)) = (target, app.drawing.placed.get(index).map(|v| (v.x, v.y, v.align))) {
+            let mut nx = f64::from((s.x + ox).clamp(0.0, sw));
+            let mut ny = f64::from((s.y + oy).clamp(0.0, sh));
+            // A projected view keeps its alignment with its parent.
+            if let Some((p, horizontal)) = old.2
+                && let Some(parent) = app.drawing.placed.get(p)
+            {
+                if horizontal {
+                    ny = parent.y;
+                } else {
+                    nx = parent.x;
+                }
+            }
+            let (ddx, ddy) = (nx - old.0, ny - old.1);
+            if let Some(v) = app.drawing.placed.get_mut(index) {
+                v.x = nx;
+                v.y = ny;
+            }
+            // Views projected from it move along.
+            let mut moved = vec![index];
+            for _ in 0..4 {
+                for k in 0..app.drawing.placed.len() {
+                    let follows = app.drawing.placed[k].align.is_some_and(|(p, _)| moved.contains(&p));
+                    if follows && !moved.contains(&k) {
+                        app.drawing.placed[k].x += ddx;
+                        app.drawing.placed[k].y += ddy;
+                        moved.push(k);
+                    }
+                }
+            }
             refresh(app);
         }
     } else if app.drawing.drag.is_some() && !response.dragged() {

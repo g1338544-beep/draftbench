@@ -116,6 +116,7 @@ fn manual(
     let mut any_dashed = false;
     let want_table = p.get("hole_table").and_then(Value::as_bool).unwrap_or(false);
     let mut table: Option<Vec<(Vec2, f64)>> = None;
+    let mut scales: std::collections::BTreeMap<usize, f64> = std::collections::BTreeMap::new();
     for (index, item) in list.iter().take(12).enumerate() {
         let name = item.get("view").and_then(Value::as_str).ok_or_else(|| bad(CMD, "each placement needs a view"))?;
         let view = StandardView::parse(name).ok_or_else(|| bad(CMD, format!("unknown view `{name}`")))?;
@@ -157,9 +158,12 @@ fn manual(
             continue;
         }
         let (w, h) = (all.hi.x - all.lo.x, all.hi.y - all.lo.y);
+        // A view projected from another keeps that view's scale unless it has its own.
+        let inherited = item.get("scale_from").and_then(Value::as_u64).and_then(|i| scales.get(&(i as usize)).copied());
         let scale = match item.get("scale").and_then(Value::as_f64) {
             Some(k) if k.is_finite() && (1e-4..=1e3).contains(&k) => k,
             Some(_) => return Err(bad(CMD, "scale must be 0.0001…1000")),
+            None if inherited.is_some() => inherited.unwrap_or(1.0),
             None if p.get("scale").and_then(Value::as_f64).is_some_and(|k| k.is_finite() && (1e-4..=1e3).contains(&k)) => {
                 p.get("scale").and_then(Value::as_f64).unwrap_or(1.0)
             }
@@ -243,6 +247,7 @@ fn manual(
             None => format!("{}  {}", view_name(view), ratio_label(scale)),
         };
         text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, caption, &mut entities);
+        scales.insert(index, scale);
         boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));
         names.push(view_name(view).to_string());
     }
