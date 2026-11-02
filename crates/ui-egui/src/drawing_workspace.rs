@@ -12,6 +12,22 @@ use crate::{SolveApp, theme::Tokens};
 
 const PAPERS: [&str; 5] = ["A0", "A1", "A2", "A3", "A4"];
 const SIZES: [(f32, f32); 5] = [(1189.0, 841.0), (841.0, 594.0), (594.0, 420.0), (420.0, 297.0), (297.0, 210.0)];
+/// AutoCAD colour numbers offered for lines, with how they look on the white sheet.
+const COLOURS: [(u8, &str, Color32); 8] = [
+    (7, "Black", Color32::from_rgb(20, 20, 24)),
+    (8, "Grey", Color32::from_rgb(120, 120, 120)),
+    (1, "Red", Color32::from_rgb(200, 40, 40)),
+    (3, "Green", Color32::from_rgb(0, 130, 70)),
+    (5, "Blue", Color32::from_rgb(30, 70, 200)),
+    (6, "Magenta", Color32::from_rgb(170, 40, 160)),
+    (4, "Cyan", Color32::from_rgb(0, 140, 160)),
+    (2, "Yellow", Color32::from_rgb(190, 150, 0)),
+];
+
+fn colour_of(index: u8) -> Color32 {
+    COLOURS.iter().find(|c| c.0 == index).map(|c| c.2).unwrap_or(COLOURS[0].2)
+}
+
 const VIEWS: [(&str, &str); 7] =
     [("front", "Front"), ("top", "Top"), ("right", "Right"), ("left", "Left"), ("back", "Back"), ("bottom", "Bottom"), ("iso", "Isometric (3D)")];
 
@@ -57,6 +73,16 @@ pub struct State {
     paper: usize,
     landscape: bool,
     first_angle: bool,
+    custom_w: String,
+    custom_h: String,
+    sheet_scale: String,
+    sheet_no: String,
+    revision: String,
+    centre_mode: usize,
+    bolt: bool,
+    hidden_style: usize,
+    /// AutoCAD colour numbers: visible, hidden, centre, dimension.
+    colours: [u8; 4],
     centre: bool,
     text_height: String,
     placed: Vec<PlacedView>,
@@ -85,6 +111,15 @@ impl Default for State {
             paper: 3,
             landscape: true,
             first_angle: true,
+            custom_w: "1189".into(),
+            custom_h: "841".into(),
+            sheet_scale: String::new(),
+            sheet_no: "1".into(),
+            revision: "A".into(),
+            centre_mode: 0,
+            bolt: false,
+            hidden_style: 0,
+            colours: [7, 8, 1, 3],
             centre: true,
             text_height: "3.5".into(),
             placed: Vec::new(),
@@ -133,16 +168,31 @@ fn params(st: &State) -> Value {
         })
         .collect();
     let text_height = st.text_height.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (2.0..=10.0).contains(h)).unwrap_or(3.5);
-    json!({
+    let mut p = json!({
         "text_height": text_height,
         "paper": PAPERS[st.paper.min(4)],
         "orientation": if st.landscape { "landscape" } else { "portrait" },
         "projection": if st.first_angle { "first" } else { "third" },
         "placements": placements,
         "title": st.title,
-        "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "note": st.notes},
+        "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "note": st.notes, "sheet": st.sheet_no, "revision": st.revision},
         "tolerance": 0.15,
-    })
+        "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
+        "bolt_circle": st.bolt,
+        "hidden_style": if st.hidden_style == 1 { "dashed" } else { "hidden" },
+        "colors": {"visible": st.colours[0], "hidden": st.colours[1], "center": st.colours[2], "dim": st.colours[3]},
+    });
+    if st.paper >= 5 {
+        let num = |t: &str, d: f64| t.trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(d);
+        p["size"] = json!([num(&st.custom_w, 420.0), num(&st.custom_h, 297.0)]);
+    }
+    if let Ok(k) = st.sheet_scale.trim().parse::<f64>()
+        && k.is_finite()
+        && k > 0.0
+    {
+        p["scale"] = json!(k);
+    }
+    p
 }
 
 fn pt(v: &Value) -> Option<Pos2> {
@@ -232,8 +282,13 @@ pub fn update(app: &mut SolveApp) {
 }
 
 fn add_view(app: &mut SolveApp, view: usize) {
-    let (mut w, mut h) = SIZES[app.drawing.paper.min(4)];
-    if !app.drawing.landscape {
+    let (mut w, mut h) = if app.drawing.paper >= 5 {
+        let num = |t: &str, d: f32| t.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
+        (num(&app.drawing.custom_w, 420.0), num(&app.drawing.custom_h, 297.0))
+    } else {
+        SIZES[app.drawing.paper.min(4)]
+    };
+    if !app.drawing.landscape && app.drawing.paper < 5 {
         std::mem::swap(&mut w, &mut h);
     }
     let n = app.drawing.placed.len();
@@ -320,9 +375,9 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.small("Add the views you want, then drag each one on the sheet.");
                     ui.separator();
                     ui.label("Paper");
-                    let current = PAPERS[app.drawing.paper.min(4)];
+                    let current = if app.drawing.paper >= 5 { "Custom size" } else { PAPERS[app.drawing.paper.min(4)] };
                     crate::ui_kit::dropdown_menu(ui, "drawing_paper", current, |ui| {
-                        for (i, name) in PAPERS.iter().enumerate() {
+                        for (i, name) in PAPERS.iter().chain(["Custom size"].iter()).enumerate() {
                             if crate::ui_kit::list_picker(ui, name, name, i == app.drawing.paper).clicked() {
                                 app.drawing.paper = i;
                                 dirty = true;
@@ -330,11 +385,58 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                     });
+                    if app.drawing.paper >= 5 {
+                        ui.label("Length × height (mm)");
+                        dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_cw"), &mut app.drawing.custom_w, "420", false, 8).changed();
+                        dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_ch"), &mut app.drawing.custom_h, "297", false, 8).changed();
+                    }
+                    ui.label("Sheet scale (blank = fit each view; 0.5 = 1:2)");
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_sheet_scale"), &mut app.drawing.sheet_scale, "auto", false, 10).changed();
+                    ui.label("Sheet number · Revision");
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_sheet_no"), &mut app.drawing.sheet_no, "1", false, 8).changed();
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_rev"), &mut app.drawing.revision, "A", false, 8).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "Landscape", &mut app.drawing.landscape).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "First-angle projection (ISO)", &mut app.drawing.first_angle).changed();
                     ui.separator();
                     ui.label("Lines");
                     dirty |= crate::ui_kit::checkbox(ui, "Centre lines on circles", &mut app.drawing.centre).changed();
+                    if app.drawing.centre {
+                        let mode = ["Centre lines (full cross)", "Centre marks (small cross)"][app.drawing.centre_mode.min(1)];
+                        crate::ui_kit::dropdown_menu(ui, "drawing_centre_mode", mode, |ui| {
+                            for (i, name) in ["Centre lines (full cross)", "Centre marks (small cross)"].iter().enumerate() {
+                                if crate::ui_kit::list_picker(ui, name, name, i == app.drawing.centre_mode).clicked() {
+                                    app.drawing.centre_mode = i;
+                                    dirty = true;
+                                    ui.close();
+                                }
+                            }
+                        });
+                        dirty |= crate::ui_kit::checkbox(ui, "Bolt circle centreline", &mut app.drawing.bolt).changed();
+                    }
+                    ui.label("Hidden line style");
+                    let style = ["Short dashes", "Long dashes"][app.drawing.hidden_style.min(1)];
+                    crate::ui_kit::dropdown_menu(ui, "drawing_hidden_style", style, |ui| {
+                        for (i, name) in ["Short dashes", "Long dashes"].iter().enumerate() {
+                            if crate::ui_kit::list_picker(ui, name, name, i == app.drawing.hidden_style).clicked() {
+                                app.drawing.hidden_style = i;
+                                dirty = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                    for (slot, label) in ["Visible line colour", "Hidden line colour", "Centre line colour", "Dimension colour"].iter().enumerate() {
+                        ui.label(*label);
+                        let current = COLOURS.iter().find(|c| c.0 == app.drawing.colours[slot]).map(|c| c.1).unwrap_or("Black");
+                        crate::ui_kit::dropdown_menu(ui, ("drawing_colour", slot), current, |ui| {
+                            for (index, name, _) in COLOURS.iter() {
+                                if crate::ui_kit::list_picker(ui, name, name, app.drawing.colours[slot] == *index).clicked() {
+                                    app.drawing.colours[slot] = *index;
+                                    dirty = true;
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
                     let mut all_dashed = !app.drawing.placed.is_empty() && app.drawing.placed.iter().all(|v| v.dashed);
                     if crate::ui_kit::checkbox(ui, "Hidden lines dashed (all views)", &mut all_dashed).changed() {
                         for v in &mut app.drawing.placed {
@@ -542,13 +644,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let paper = Rect::from_two_pos(map(pos2(0.0, 0.0)), map(pos2(sheet.width, sheet.height)));
     painter.rect_filled(paper.translate(vec2(4.0, 4.0)), 0.0, Color32::from_black_alpha(90));
     painter.rect_filled(paper, 0.0, Color32::WHITE);
+    let cols = app.drawing.colours;
     let stroke = |l: Layer| match l {
-        Layer::Visible => Stroke::new(1.6, Color32::from_rgb(20, 20, 24)),
-        Layer::Hidden => Stroke::new(1.0, Color32::from_gray(120)),
-        Layer::Dim => Stroke::new(1.0, Color32::from_rgb(0, 120, 70)),
+        Layer::Visible => Stroke::new(1.6, colour_of(cols[0])),
+        Layer::Hidden => Stroke::new(1.0, colour_of(cols[1])),
+        Layer::Dim => Stroke::new(1.0, colour_of(cols[3])),
         Layer::Sheet => Stroke::new(1.4, Color32::BLACK),
         Layer::Text => Stroke::new(1.0, Color32::BLACK),
-        Layer::Center => Stroke::new(1.0, Color32::from_rgb(200, 40, 40)),
+        Layer::Center => Stroke::new(1.0, colour_of(cols[2])),
     };
     for (layer, shape) in &sheet.items {
         let s = stroke(*layer);
@@ -567,8 +670,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 painter.add(egui::Shape::line(pts, s));
             }
             Shape::Circle(c, r) => {
-                let pts = arc_points(*c, *r, 0.0, 360.0).into_iter().map(map).collect();
-                painter.add(egui::Shape::line(pts, s));
+                let pts: Vec<Pos2> = arc_points(*c, *r, 0.0, 360.0).into_iter().map(map).collect();
+                if *layer == Layer::Center {
+                    painter.extend(egui::Shape::dashed_line(&pts, s, 14.0, 4.0));
+                } else {
+                    painter.add(egui::Shape::line(pts, s));
+                }
             }
             Shape::Arc(c, r, a0, a1) => {
                 let pts = arc_points(*c, *r, *a0, *a1).into_iter().map(map).collect();

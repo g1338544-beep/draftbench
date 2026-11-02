@@ -36,6 +36,19 @@ fn paper(name: &str) -> Option<(f64, f64)> {
     })
 }
 
+/// `size: [length, height]` in mm: a sheet of any size (100…5000), instead of `paper`.
+fn custom_size(p: &Value) -> Result<Option<(f64, f64)>> {
+    let Some(v) = p.get("size") else { return Ok(None) };
+    let ok = |x: &Value| x.as_f64().filter(|n| n.is_finite() && (100.0..=5000.0).contains(n));
+    match v.as_array().map(Vec::as_slice) {
+        Some([w, h]) => match (ok(w), ok(h)) {
+            (Some(w), Some(h)) => Ok(Some((w, h))),
+            _ => Err(bad(CMD, "size must be [length, height] between 100 and 5000 mm")),
+        },
+        _ => Err(bad(CMD, "size must be [length, height] between 100 and 5000 mm")),
+    }
+}
+
 /// The grid cell of a view around the front view (column right, row up).
 fn cell(view: StandardView, first_angle: bool) -> (i32, i32) {
     let s = if first_angle { -1 } else { 1 };
@@ -117,6 +130,9 @@ fn manual(
         let scale = match item.get("scale").and_then(Value::as_f64) {
             Some(k) if k.is_finite() && (1e-4..=1e3).contains(&k) => k,
             Some(_) => return Err(bad(CMD, "scale must be 0.0001…1000")),
+            None if p.get("scale").and_then(Value::as_f64).is_some_and(|k| k.is_finite() && (1e-4..=1e3).contains(&k)) => {
+                p.get("scale").and_then(Value::as_f64).unwrap_or(1.0)
+            }
             None => {
                 let (aw, ah) = ((sheet_w - 2.0 * MARGIN - 44.0) / 2.0, (sheet_h - 2.0 * MARGIN - TITLE_H - 44.0) / 2.0);
                 let fit = (aw / w.max(1e-9)).min(ah / h.max(1e-9));
@@ -135,15 +151,24 @@ fn manual(
             line(if *hidden { "HIDDEN" } else { "VISIBLE" }, to_sheet(*a), to_sheet(*b), &mut entities);
         }
         if item.get("center").and_then(Value::as_bool).unwrap_or(true) {
-            for (c, r) in circles(&all.lines, dashed) {
-                let (cs, rs) = (to_sheet(c), r * scale);
+            let mode = str_(p, "centre_mode").unwrap_or("lines");
+            let found = circles(&all.lines, dashed);
+            for (c, r) in &found {
+                let (cs, rs) = (to_sheet(*c), *r * scale);
                 if rs < 0.4 {
                     continue;
                 }
-                let reach = rs + 3.0;
+                // lines: a full cross through the circle; marks: a small cross at its centre.
+                let reach = if mode == "marks" { (rs * 0.5).clamp(1.5, 4.0) } else { rs + 3.0 };
                 line("CENTER", Vec2::new(cs.x - reach, cs.y), Vec2::new(cs.x + reach, cs.y), &mut entities);
                 line("CENTER", Vec2::new(cs.x, cs.y - reach), Vec2::new(cs.x, cs.y + reach), &mut entities);
                 any_centre = true;
+            }
+            if p.get("bolt_circle").and_then(Value::as_bool).unwrap_or(false) {
+                for (c, big) in bolt_circles(&found) {
+                    entities.push(DxfEntity { layer: "CENTER".into(), shape: DxfShape::Circle { c: to_sheet(c), r: big * scale } });
+                    any_centre = true;
+                }
             }
         }
         let dims = item.get("dims").and_then(Value::as_bool).unwrap_or(default_dims) && view != StandardView::Iso;
@@ -181,11 +206,16 @@ struct Built {
 }
 
 fn build(s: &mut Session, p: &Value) -> Result<Built> {
-    let (pw, ph) = paper(str_(p, "paper").unwrap_or("A3")).ok_or_else(|| bad(CMD, "paper must be A0, A1, A2, A3 or A4"))?;
-    let (sheet_w, sheet_h) = match str_(p, "orientation").unwrap_or("landscape") {
-        "landscape" => (pw, ph),
-        "portrait" => (ph, pw),
-        _ => return Err(bad(CMD, "orientation must be landscape or portrait")),
+    let (sheet_w, sheet_h) = match custom_size(p)? {
+        Some(size) => size,
+        None => {
+            let (pw, ph) = paper(str_(p, "paper").unwrap_or("A3")).ok_or_else(|| bad(CMD, "paper must be A0, A1, A2, A3 or A4"))?;
+            match str_(p, "orientation").unwrap_or("landscape") {
+                "landscape" => (pw, ph),
+                "portrait" => (ph, pw),
+                _ => return Err(bad(CMD, "orientation must be landscape or portrait")),
+            }
+        }
     };
     let first_angle = match str_(p, "projection").unwrap_or("first") {
         "first" => true,
@@ -391,7 +421,7 @@ fn finish(
     if !company.is_empty() {
         text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row + row * 0.3), th, company, &mut entities);
     }
-    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row + row * 0.3), th, cap("No.", field("number")), &mut entities);
+    text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row + row * 0.3), th, cap("No.", [field("number"), cap("Sh", field("sheet")), cap("Rev", field("revision"))].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("  ")), &mut entities);
     text("TEXT", Vec2::new(bx0 + block_w * 0.85, by0 + row + row * 0.3), th, cap("Date", field("date")), &mut entities);
     text("TEXT", Vec2::new(bx0 + block_w * 0.2, by0 + row * 0.3), th, cap("Scale", scale_text.clone()), &mut entities);
     text("TEXT", Vec2::new(bx0 + block_w * 0.55, by0 + row * 0.3), th, cap("By", field("author")), &mut entities);
@@ -399,7 +429,7 @@ fn finish(
         "TEXT",
         Vec2::new(bx0 + block_w * 0.85, by0 + row * 0.3),
         th,
-        format!("{} {} - mm", str_(p, "paper").unwrap_or("A3").to_ascii_uppercase(), if first_angle { "1st angle" } else { "3rd angle" }),
+        format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" }),
         &mut entities,
     );
     for n in field("note").split('|').filter(|n| !n.trim().is_empty()).take(3).enumerate() {
@@ -421,12 +451,13 @@ fn finish(
         DxfLayer::new("TEXT", colour("text", 7)?),
     ];
     if dashed {
-        layers.push(DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", colour("hidden", 8)?) });
+        let linetype = if str_(p, "hidden_style") == Some("dashed") { DxfLinetype::Dashed } else { DxfLinetype::Hidden };
+        layers.push(DxfLayer { linetype, ..DxfLayer::new("HIDDEN", colour("hidden", 8)?) });
     }
     if centre {
         layers.push(DxfLayer { linetype: DxfLinetype::Center, ..DxfLayer::new("CENTER", colour("center", 1)?) });
     }
-    let summary = json!({"paper": str_(p, "paper").unwrap_or("A3"), "scale": scale_text, "views": names, "units": "mm", "boxes": boxes});
+    let summary = json!({"paper": paper_label(p, (sheet_w, sheet_h)), "scale": scale_text, "views": names, "units": "mm", "boxes": boxes});
     Ok(Built { sheet: (sheet_w, sheet_h), layers, entities, summary, path })
 }
 
@@ -569,6 +600,10 @@ fn warm(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"warmed": stage}))
 }
 
+fn paper_label(p: &Value, size: (f64, f64)) -> String {
+    if p.get("size").is_some() { format!("{}x{}", trim_mm(size.0), trim_mm(size.1)) } else { str_(p, "paper").unwrap_or("A3").to_ascii_uppercase() }
+}
+
 /// Text height on the sheet in mm (the template's text size): 2…10, default 3.5.
 fn text_height(p: &Value) -> f64 {
     p.get("text_height").and_then(Value::as_f64).filter(|h| (2.0..=10.0).contains(h)).unwrap_or(TEXT_H)
@@ -587,6 +622,37 @@ fn circles(lines: &[(Vec2, Vec2, bool)], hidden: bool) -> Vec<(Vec2, f64)> {
         }
     }
     found
+}
+
+/// Circles of one radius whose centres lie on a common circle (three or more): its centre and radius.
+fn bolt_circles(found: &[(Vec2, f64)]) -> Vec<(Vec2, f64)> {
+    let mut used = vec![false; found.len()];
+    let mut out = Vec::new();
+    for i in 0..found.len() {
+        if used.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        let Some(&(_, ri)) = found.get(i) else { continue };
+        let group: Vec<usize> = (0..found.len())
+            .filter(|j| !used.get(*j).copied().unwrap_or(true) && found.get(*j).is_some_and(|(_, r)| (r - ri).abs() <= 0.02 * ri))
+            .collect();
+        if group.len() < 3 {
+            continue;
+        }
+        let centres: Vec<Vec2> = group.iter().filter_map(|j| found.get(*j).map(|(c, _)| *c)).collect();
+        let n = centres.len() as f64;
+        let c = Vec2::new(centres.iter().map(|p| p.x).sum::<f64>() / n, centres.iter().map(|p| p.y).sum::<f64>() / n);
+        let big = centres.iter().map(|p| p.dist(c)).sum::<f64>() / n;
+        if big > 2.0 * ri && centres.iter().all(|p| (p.dist(c) - big).abs() <= 0.03 * big) {
+            out.push((c, big));
+            for j in group {
+                if let Some(u) = used.get_mut(j) {
+                    *u = true;
+                }
+            }
+        }
+    }
+    out
 }
 
 fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
