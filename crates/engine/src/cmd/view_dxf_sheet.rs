@@ -214,7 +214,7 @@ fn manual(
             if *hidden && !dashed {
                 continue;
             }
-            if on_loop(if *hidden { &hid } else { &seen }, *a, *b) {
+            if on_loop(if *hidden { hid.as_slice() } else { seen.as_slice() }, *a, *b) {
                 continue;
             }
             any_dashed |= *hidden;
@@ -812,7 +812,6 @@ fn finish(
             _ => true,
         });
     }
-: header at the bottom, items counted upward.
     // Centre marks the user placed by hand: x, y and how far each arm reaches (mm on the sheet).
     let mut centre = centre;
     if let Some(list) = p.get("clines").and_then(Value::as_array) {
