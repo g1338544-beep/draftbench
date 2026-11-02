@@ -3061,6 +3061,28 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         (ps.first().map(|x| json!(x.0)).unwrap_or(Value::Null), json!(ps.iter().map(|x| x.1).collect::<Vec<_>>()))
     };
     let face_points = |i: usize| -> Vec<Value> { sels(d, i).face_points().into_iter().map(pt).collect() };
+    // Move Face with several sets: each set of faces has its own offset, one command per set.
+    if let Kind::OffsetFaces { distance } = &d.kind
+        && let Some(sets) = d.extra.get("sets").and_then(Value::as_array).filter(|a| !a.is_empty())
+    {
+        let mut out: Vec<(String, Value)> = sets
+            .iter()
+            .filter_map(|set| {
+                let faces = set.get("faces").and_then(Value::as_array).filter(|f| !f.is_empty())?;
+                let dist = set.get("distance").and_then(Value::as_str).filter(|t| !t.trim().is_empty())?;
+                Some(("solid.offset_face".to_string(), json!({"faces": faces, "distance": dist})))
+            })
+            .collect();
+        if !sels(d, 0).is_empty() {
+            let reverse = d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false);
+            let dist = if reverse { format!("-({distance})") } else { distance.clone() };
+            out.push(("solid.offset_face".into(), json!({"faces": face_points(0), "distance": s.doc.with_design_unit(&dist, ValueKind::Length)})));
+        }
+        if out.is_empty() {
+            return Err("select faces and give an offset".into());
+        }
+        return Ok(out);
+    }
     let (cmd, params): (&str, Value) = match &d.kind {
         Kind::Extrude {
             distance,
@@ -3799,9 +3821,19 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             params["distance"] = json!(format!("({dist}) * {f}"));
         }
     }
+    if matches!(d.kind, Kind::OffsetFaces { .. }) && d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false) {
+        if let Some(dist) = params.get("distance").and_then(Value::as_str).map(str::to_string) {
+            params["distance"] = json!(format!("-({dist})"));
+        }
+    }
     if let Value::Object(m) = &mut params {
         for (k, v) in &d.extra {
             m.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        if matches!(d.kind, Kind::OffsetFaces { .. }) {
+            for k in ["reverse", "sets", "move_dir"] {
+                m.remove(k);
+            }
         }
     }
     Ok(vec![(cmd.to_string(), params)])

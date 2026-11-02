@@ -798,7 +798,46 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             enter |= expr_row(ui, "Scale factor", factor);
         }
         Kind::OffsetFaces { distance } => {
-            enter |= expr_row(ui, "Distance", distance);
+            enter |= expr_row(ui, "Offset", distance);
+            form_row(ui, "Reverse Direction", |ui| {
+                extra_check(ui, &mut d.extra, "reverse");
+            });
+            // Faces picked now are one set; "Add New Set" keeps them with their own offset so the next
+            // faces can take another one. All sets are applied together on OK.
+            let picked = d.inputs.first().map_or(0, |i| i.items.len());
+            ui.horizontal(|ui| {
+                if picked > 0 && ui_kit::button(ui, "Add New Set", ui_kit::Button::Small).clicked() {
+                    let faces: Vec<Value> = sels(d, 0).face_points().into_iter().map(pt).collect();
+                    let reverse = d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false);
+                    let dist = if reverse { format!("-({distance})") } else { distance.clone() };
+                    let sets = d.extra.entry("sets").or_insert_with(|| json!([]));
+                    if let Some(list) = sets.as_array_mut().filter(|l| l.len() < 20) && !faces.is_empty() {
+                        list.push(json!({"faces": faces, "distance": dist}));
+                        if let Some(i) = d.inputs.first_mut() {
+                            i.items.clear();
+                        }
+                        d.extra.remove("reverse");
+                    }
+                }
+            });
+            let mut remove: Option<usize> = None;
+            if let Some(list) = d.extra.get_mut("sets").and_then(Value::as_array_mut) {
+                for (n, set) in list.iter_mut().enumerate() {
+                    let count = set.get("faces").and_then(Value::as_array).map_or(0, Vec::len);
+                    let mut text = set.get("distance").and_then(Value::as_str).unwrap_or("").to_string();
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Set {} · {count} face{}", n + 1, if count == 1 { "" } else { "s" }));
+                        ui_kit::bounded_cell_editor(ui, ui.id().with(("offset_set", n)), &mut text, "2 mm", false, 40);
+                        if ui_kit::button(ui, "×", ui_kit::Button::Small).clicked() {
+                            remove = Some(n);
+                        }
+                    });
+                    set["distance"] = json!(text);
+                }
+                if let Some(n) = remove {
+                    list.remove(n);
+                }
+            }
             // The faces slide along this direction; a plane moved sideways does not change the part.
             form_row(ui, "Direction", |ui| {
                 extra_segments(ui, &mut d.extra, "move_dir", &[("Normal", "normal"), ("X", "x"), ("Y", "y"), ("Z", "z")]);
