@@ -309,6 +309,9 @@ pub struct State {
     dim_back: bool,
     /// Decimal places of measured values: -1 = as needed (up to one), else 0 to 4.
     dim_decimals: i32,
+    /// Height of the measured values and length of the arrows in mm (blank = the text height, 3).
+    dim_text: String,
+    dim_arrow: String,
     /// The selected dimension, the one being dragged, and the one whose text is being edited.
     sel_dim: Option<usize>,
     /// The view a projected view is being placed from.
@@ -413,6 +416,8 @@ impl Default for State {
             dim_tool: None,
             dim_back: false,
             dim_decimals: -1,
+            dim_text: String::new(),
+            dim_arrow: String::new(),
             sel_dim: None,
             proj_tool: None,
             drag_dim: None,
@@ -460,6 +465,7 @@ impl State {
             "clines": self.clines,
             "centre_cut": self.centre_cut,
             "dim_decimals": self.dim_decimals,
+            "dim_text": self.dim_text, "dim_arrow": self.dim_arrow,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch, v.ratio, v.bg, v.style, v.zoom])).collect::<Vec<_>>(),
             "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
             "paper": self.paper, "landscape": self.landscape,
@@ -671,6 +677,11 @@ impl State {
                     }
                     self.shaded.push(sv);
                 }
+            }
+        }
+        for (k, field) in [("dim_text", &mut self.dim_text), ("dim_arrow", &mut self.dim_arrow)] {
+            if let Some(t) = d.get(k).and_then(serde_json::Value::as_str) {
+                *field = t.chars().take(6).collect();
             }
         }
         if let Some(n) = d.get("dim_decimals").and_then(serde_json::Value::as_i64).filter(|n| (-1..=4).contains(n)) {
@@ -983,6 +994,8 @@ fn params(st: &State) -> Value {
         "clines": st.clines,
         "centre_cut": st.centre_cut,
         "dim_decimals": st.dim_decimals,
+        "dim_text_height": st.dim_text.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (1.0..=15.0).contains(h)),
+        "dim_arrow": st.dim_arrow.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (0.5..=12.0).contains(h)),
         "bom": st.bom.iter().filter(|r| r.iter().any(|c| !c.trim().is_empty())).collect::<Vec<_>>(),
         "bolt_circle": st.bolt,
         "hole_table": st.hole_table,
@@ -1861,6 +1874,8 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     let mut note = app.drawing.note_text.clone();
     let mut pick: Option<usize> = None;
     let mut decimals = app.drawing.dim_decimals;
+    let (mut dtext, mut darrow) = (app.drawing.dim_text.clone(), app.drawing.dim_arrow.clone());
+    let mut size_changed = false;
     let mut changed = false;
     let mut remove = false;
     let mut close = false;
@@ -1886,6 +1901,11 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         });
+        ui.label("Value height (mm) and arrow length (mm)");
+        ui.horizontal(|ui| {
+            size_changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("dimwin_text_h"), &mut dtext, "3.5", false, 6).changed();
+            size_changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("dimwin_arrow"), &mut darrow, "3", false, 6).changed();
+        });
         if tool == Some(7) {
             ui.small("Click a circle for its diameter, or two points: horizontal, vertical or aligned follows the points. Then click where it goes.");
         }
@@ -1910,6 +1930,11 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
         }
     });
     app.drawing.note_text = note;
+    if size_changed {
+        app.drawing.dim_text = dtext;
+        app.drawing.dim_arrow = darrow;
+        refresh(app);
+    }
     if decimals != app.drawing.dim_decimals {
         app.drawing.dim_decimals = decimals;
         refresh(app);

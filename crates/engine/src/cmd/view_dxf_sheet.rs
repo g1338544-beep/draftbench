@@ -408,10 +408,13 @@ fn manual(
         }
     }
     // Decimal places of the measured values (0..=4); absent = as many as needed, up to one.
+    // The values' height and the arrows' length, each its own (default: the text height and 3 mm).
+    let dim_th = p.get("dim_text_height").and_then(Value::as_f64).filter(|h| (1.0..=15.0).contains(h)).unwrap_or(th);
+    let arrow = p.get("dim_arrow").and_then(Value::as_f64).filter(|a| (0.5..=12.0).contains(a)).unwrap_or(3.0);
     let decimals = p.get("dim_decimals").and_then(Value::as_u64).filter(|n| *n <= 4).map(|n| n as usize);
     if let Some(list) = p.get("dimension_items").and_then(Value::as_array) {
         for d in list.iter().take(200) {
-            add_dimension(&mut entities, d, &boxes, th, decimals);
+            add_dimension(&mut entities, d, &boxes, dim_th, arrow, decimals);
         }
     }
     let entities = projection::connect(entities);
@@ -1260,7 +1263,7 @@ fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
 /// points and `at` in sheet mm (`at` is the dimension line's y for horizontal, its x for vertical,
 /// its distance from the points' line for aligned). The value is measured on the sheet and divided
 /// by the scale of the view the dimension sits on (the placed box it is in or near).
-fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: f64, decimals: Option<usize>) {
+fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: f64, arrow: f64, decimals: Option<usize>) {
     let pt = |k: &str| -> Option<Vec2> {
         let a = d.get(k)?.as_array()?;
         let (x, y) = (a.first()?.as_f64()?, a.get(1)?.as_f64()?);
@@ -1310,7 +1313,7 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
         let side = Vec2::new(-dir.y, dir.x);
         let mut arrow = |tip: Vec2, sign: f64| {
             for k in [-1.0, 1.0] {
-                let back = Vec2::new(tip.x + dir.x * 3.0 * sign + side.x * 0.9 * k, tip.y + dir.y * 3.0 * sign + side.y * 0.9 * k);
+                let back = Vec2::new(tip.x + dir.x * arrow * sign + side.x * arrow * 0.3 * k, tip.y + dir.y * arrow * sign + side.y * arrow * 0.3 * k);
                 line("DIM", tip, back, entities);
             }
         };
