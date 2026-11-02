@@ -118,6 +118,14 @@ fn manual(
     let mut table: Option<Vec<(Vec2, f64)>> = None;
     let mut scales: std::collections::BTreeMap<usize, f64> = std::collections::BTreeMap::new();
     let mut infos: std::collections::BTreeMap<usize, ViewInfo> = std::collections::BTreeMap::new();
+    // Views a cutting line can be drawn on, and the sections to draw: (angles, x, y, centre, scale, lo, hi) and (axis, position, angles, letter).
+    let mut frames: Vec<((f64, f64), f64, f64, Vec2, f64, Vec2, Vec2)> = Vec::new();
+    let mut cuts: Vec<(usize, f64, (f64, f64), char)> = Vec::new();
+    let mut centre_used = false;
+    let unit = |v: Vec2| {
+        let n = (v.x * v.x + v.y * v.y).sqrt();
+        if n > 1e-9 { Some(Vec2::new(v.x / n, v.y / n)) } else { None }
+    };
     for (index, item) in list.iter().take(12).enumerate() {
         let name = item.get("view").and_then(Value::as_str).ok_or_else(|| bad(CMD, "each placement needs a view"))?;
         let view = StandardView::parse(name).ok_or_else(|| bad(CMD, format!("unknown view `{name}`")))?;
@@ -189,6 +197,12 @@ fn manual(
             }
             any_dashed |= *hidden;
             line(if *hidden { "HIDDEN" } else { "VISIBLE" }, to_sheet(*a), to_sheet(*b), &mut entities);
+        }
+        let angles = custom.unwrap_or_else(|| view.angles());
+        let letter = char::from(b'A' + cuts.len().min(25) as u8);
+        match section {
+            None => frames.push((angles, x, y, c, scale, all.lo, all.hi)),
+            Some((axis, _)) => cuts.push((axis, section_at, angles, letter)),
         }
         if section.is_some() {
             let segments: Vec<(Vec2, Vec2)> = all.lines.iter().map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
@@ -275,13 +289,58 @@ fn manual(
             });
         }
         let caption = match section {
-            Some((axis, _)) => format!("Section {}={}  {}", ["X", "Y", "Z"].get(axis).copied().unwrap_or("?"), trim_mm(section_at), ratio_label(scale)),
+            Some((axis, _)) => format!("Section {letter}-{letter} ({}={})  {}", ["X", "Y", "Z"].get(axis).copied().unwrap_or("?"), trim_mm(section_at), ratio_label(scale)),
             None => format!("{}  {}", if custom.is_some() { "Model view" } else { view_name(view) }, ratio_label(scale)),
         };
         text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, caption, &mut entities);
         scales.insert(index, scale);
         boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));
         names.push(view_name(view).to_string());
+    }
+    // The cutting line of each section on the views it crosses: a chain line with arrows toward the
+    // direction of sight, and the section's letter at both ends.
+    for (axis, at, sec_angles, letter) in &cuts {
+        let sec_cam = Camera { target: Vec3::ZERO, yaw: sec_angles.0, pitch: sec_angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+        let (_, _, back) = sec_cam.basis();
+        let e = match axis {
+            0 => Vec3::new(1.0, 0.0, 0.0),
+            1 => Vec3::new(0.0, 1.0, 0.0),
+            _ => Vec3::new(0.0, 0.0, 1.0),
+        };
+        for (angles, x, y, c, scale, lo, hi) in &frames {
+            let cam = Camera { target: Vec3::ZERO, yaw: angles.0, pitch: angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+            let (right, up, _) = cam.basis();
+            let (sx, sy) = (e.dot(right), e.dot(up));
+            let (vx, vy) = (back.dot(right), back.dot(up));
+            let to_sheet = |q: Vec2| Vec2::new(x + (q.x - c.x) * scale, y + (q.y - c.y) * scale);
+            // `along`: the direction the line runs in the view, `sight`: where the arrows point.
+            let (p1, p2, sight) = if sx.abs() > 0.99 {
+                let u = at * sx;
+                (Vec2::new(u, lo.y), Vec2::new(u, hi.y), Vec2::new(-vx.signum(), 0.0))
+            } else if sy.abs() > 0.99 {
+                let v = at * sy;
+                (Vec2::new(lo.x, v), Vec2::new(hi.x, v), Vec2::new(0.0, -vy.signum()))
+            } else {
+                continue;
+            };
+            if sight.x == 0.0 && sight.y == 0.0 || !(sight.x.is_finite() && sight.y.is_finite()) {
+                continue;
+            }
+            let (a, b) = (to_sheet(p1), to_sheet(p2));
+            let Some(dir) = unit(Vec2::new(b.x - a.x, b.y - a.y)) else { continue };
+            let (a, b) = (Vec2::new(a.x - dir.x * 6.0, a.y - dir.y * 6.0), Vec2::new(b.x + dir.x * 6.0, b.y + dir.y * 6.0));
+            line("CENTER", a, b, &mut entities);
+            centre_used = true;
+            for end in [a, b] {
+                let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
+                line("DIM", end, tip, &mut entities);
+                for k in [-1.0, 1.0] {
+                    let back_pt = Vec2::new(tip.x - sight.x * 3.0 - sight.y * 0.9 * k, tip.y - sight.y * 3.0 + sight.x * 0.9 * k);
+                    line("DIM", tip, back_pt, &mut entities);
+                }
+                text("TEXT", Vec2::new(end.x - dir.x * 0.0 - sight.x * 4.0, end.y - sight.y * 4.0 - th * 0.3), th, letter.to_string(), &mut entities);
+            }
+        }
     }
     if let Some(rows) = &table {
         let row_h = th * 1.9;
@@ -314,7 +373,7 @@ fn manual(
         }
     }
     let entities = projection::connect(entities);
-    finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, any_centre, names, path, boxes)
+    finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, any_centre || centre_used, names, path, boxes)
 }
 
 /// What a placed view offers the views aligned with it.
