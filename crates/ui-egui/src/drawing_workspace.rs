@@ -48,8 +48,8 @@ fn colour_of(index: u8) -> Color32 {
 const VIEWS: [(&str, &str); 7] =
     [("front", "Front"), ("top", "Top"), ("right", "Right"), ("left", "Left"), ("back", "Back"), ("bottom", "Bottom"), ("iso", "Isometric (3D)")];
 
-const DIM_KINDS: [(&str, &str); 6] =
-    [("horizontal", "Horizontal"), ("vertical", "Vertical"), ("aligned", "Aligned"), ("diameter", "Diameter (click a circle)"), ("radius", "Radius (click an arc or circle)"), ("balloon", "Balloon (click a part, then the balloon)")];
+const DIM_KINDS: [(&str, &str); 7] =
+    [("horizontal", "Horizontal"), ("vertical", "Vertical"), ("aligned", "Aligned"), ("diameter", "Diameter (click a circle)"), ("radius", "Radius (click an arc or circle)"), ("balloon", "Balloon (click a part, then the balloon)"), ("note", "Note with arrow (click the spot, then the note)")];
 
 /// A dimension the user placed, in sheet mm.
 #[derive(Clone)]
@@ -389,7 +389,7 @@ impl State {
                 };
                 let (Some(a), Some(b)) = (pt("a"), pt("b")) else { continue };
                 self.dims.push(DimItem {
-                    kind: v.get("kind").and_then(serde_json::Value::as_u64).map_or(0, |n| (n as usize).min(5)),
+                    kind: v.get("kind").and_then(serde_json::Value::as_u64).map_or(0, |n| (n as usize).min(6)),
                     a,
                     b,
                     at: f(v, "at").unwrap_or(0.0) as f32,
@@ -526,7 +526,7 @@ fn params(st: &State) -> Value {
         "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "note": st.notes, "sheet": st.sheet_no, "revision": st.revision},
         "tolerance": 0.15,
         "dimension_items": st.dims.iter().map(|d| json!({
-            "kind": DIM_KINDS[d.kind.min(5)].0,
+            "kind": DIM_KINDS[d.kind.min(6)].0,
             "a": [d.a.x, d.a.y],
             "b": [d.b.x, d.b.y],
             "at": d.at,
@@ -714,14 +714,14 @@ fn scale_picker(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
 
 /// The drawn line of a dimension, in sheet mm.
 fn dim_segment(d: &DimItem) -> (Pos2, Pos2) {
-    match DIM_KINDS[d.kind.min(5)].0 {
+    match DIM_KINDS[d.kind.min(6)].0 {
         "horizontal" => (pos2(d.a.x, d.at), pos2(d.b.x, d.at)),
         "vertical" => (pos2(d.at, d.a.y), pos2(d.at, d.b.y)),
-        "balloon" => (d.a, d.b),
+        "balloon" | "note" => (d.a, d.b),
         "diameter" | "radius" => {
             let (dir, r) = circle_dir(d);
             let out = d.a + dir * d.at.max(r + 3.0);
-            (if DIM_KINDS[d.kind.min(5)].0 == "diameter" { d.a - dir * r } else { d.a }, out)
+            (if DIM_KINDS[d.kind.min(6)].0 == "diameter" { d.a - dir * r } else { d.a }, out)
         }
         _ => {
             let (dx, dy) = (d.b.x - d.a.x, d.b.y - d.a.y);
@@ -842,6 +842,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             });
         }
         "drawing.ribbon.print" => print_sheet(app),
+        "drawing.ribbon.printall" => print_all_sheets(app),
         "drawing.ribbon.close" => leave(app),
         _ => {}
     }
@@ -1088,7 +1089,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     let mut remove_dim: Option<usize> = None;
                     for i in 0..app.drawing.dims.len() {
-                        let kind = DIM_KINDS[app.drawing.dims[i].kind.min(5)].1;
+                        let kind = DIM_KINDS[app.drawing.dims[i].kind.min(6)].1;
                         ui.label(format!("{}. {kind}", i + 1));
                         dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_dim_text", i)), &mut app.drawing.dims[i].text, "measured value", false, 40).changed();
                         if crate::ui_kit::button(ui, "Remove dimension", crate::ui_kit::Button::Small).clicked() {
@@ -1331,11 +1332,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let (Some(i), Some(m)) = (app.drawing.drag_dim, &map) {
         if response.dragged() {
             if let (Some(s), Some(d)) = (response.interact_pointer_pos().and_then(|q| m.to_sheet(q)), app.drawing.dims.get_mut(i)) {
-                d.at = match DIM_KINDS[d.kind.min(5)].0 {
+                d.at = match DIM_KINDS[d.kind.min(6)].0 {
                     "horizontal" => s.y,
                     "vertical" => s.x,
                     "diameter" | "radius" => (s - d.a).length(),
-                    "balloon" => {
+                    "balloon" | "note" => {
                         d.b = s;
                         d.at
                     }
@@ -1651,11 +1652,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             {
                 let hit_pt = snap_point(sheet, c, tol);
-                if kind == 5 {
-                    // Balloon: the part point, then where the balloon goes; numbered in turn.
+                if kind == 5 || kind == 6 {
+                    // Balloon or note: the point on the part, then where it goes; balloons are numbered in turn.
                     if let Some(target) = picks.first().copied() {
                         let number = app.drawing.dims.iter().filter(|d| d.kind == 5).count() + 1;
-                        new_dim = Some(DimItem { kind, a: target, b: c, at: 0.0, text: number.to_string() });
+                        let text = if kind == 5 { number.to_string() } else { "NOTE".to_string() };
+                        new_dim = Some(DimItem { kind, a: target, b: c, at: 0.0, text });
                         app.drawing.dim_tool = Some((kind, Vec::new()));
                     } else {
                         app.drawing.dim_tool = Some((kind, vec![hit_pt.unwrap_or(c)]));
@@ -1676,7 +1678,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.drawing.dim_tool = Some((kind, next));
                 } else {
                     let (a, b) = (picks[0], picks[1]);
-                    let at = match DIM_KINDS[kind.min(5)].0 {
+                    let at = match DIM_KINDS[kind.min(6)].0 {
                         "horizontal" => c.y,
                         "vertical" => c.x,
                         _ => {
@@ -1829,7 +1831,7 @@ fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
 }
 
 /// The sheet as a one-page vector PDF at paper size (mm → points), ready to print.
-fn sheet_pdf(sheet: &Sheet, cols: [u8; 4]) -> Vec<u8> {
+fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4]) -> (String, f32, f32) {
     use std::fmt::Write as _;
     let k = 72.0 / 25.4;
     let rgb = |l: Layer| -> (f32, f32, f32) {
@@ -1896,30 +1898,69 @@ fn sheet_pdf(sheet: &Sheet, cols: [u8; 4]) -> Vec<u8> {
             }
         }
     }
-    let (w, h) = (sheet.width * k, sheet.height * k);
+    (c, sheet.width * k, sheet.height * k)
+}
+
+/// A PDF with one page per `(content, width, height)` (points).
+fn pdf_document(pages: &[(String, f32, f32)]) -> Vec<u8> {
     let mut out: Vec<u8> = b"%PDF-1.4\n".to_vec();
-    let mut offsets = Vec::new();
-    let objects = [
-        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.2} {h:.2}] /Contents 5 0 R /Resources << /Font << /F1 4 0 R >> >> >>"),
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
-    ];
-    for (i, o) in objects.iter().enumerate() {
+    let mut offsets: Vec<usize> = Vec::new();
+    let mut object = |out: &mut Vec<u8>, body: String| {
         offsets.push(out.len());
-        out.extend(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        out.extend(format!("{} 0 obj\n{body}\nendobj\n", offsets.len()).as_bytes());
+    };
+    let kids: String = (0..pages.len()).map(|i| format!("{} 0 R ", 4 + 2 * i)).collect();
+    object(&mut out, "<< /Type /Catalog /Pages 2 0 R >>".to_string());
+    object(&mut out, format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", pages.len()));
+    object(&mut out, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string());
+    for (i, (content, w, h)) in pages.iter().enumerate() {
+        object(&mut out, format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.2} {h:.2}] /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> >> >>", 5 + 2 * i));
+        object(&mut out, format!("<< /Length {} >>\nstream\n{content}endstream", content.len()));
     }
-    offsets.push(out.len());
-    out.extend(format!("5 0 obj\n<< /Length {} >>\nstream\n", c.len()).as_bytes());
-    out.extend(c.as_bytes());
-    out.extend(b"endstream\nendobj\n");
     let xref = out.len();
-    out.extend(b"xref\n0 6\n0000000000 65535 f \n");
+    out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
     for o in &offsets {
         out.extend(format!("{o:010} 00000 n \n").as_bytes());
     }
-    out.extend(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+    out.extend(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", offsets.len() + 1).as_bytes());
     out
+}
+
+fn sheet_pdf(sheet: &Sheet, cols: [u8; 4]) -> Vec<u8> {
+    pdf_document(&[sheet_pdf_content(sheet, cols)])
+}
+
+/// Save every sheet of the drawing as one PDF, a page each.
+fn print_all_sheets(app: &mut SolveApp) {
+    let pages = app.drawing.all_pages();
+    let back = app.drawing.page.min(pages.len().saturating_sub(1));
+    let cols = app.drawing.colours;
+    let mut doc: Vec<(String, f32, f32)> = Vec::new();
+    for page in &pages {
+        app.drawing.load_page(page);
+        refresh(app);
+        if let Some(sheet) = app.drawing.sheet.as_ref() {
+            doc.push(sheet_pdf_content(sheet, cols));
+        }
+    }
+    if let Some(page) = pages.get(back) {
+        app.drawing.load_page(page);
+    }
+    refresh(app);
+    if doc.is_empty() {
+        app.set_status("Add a view first, then print", true);
+        return;
+    }
+    let bytes = pdf_document(&doc);
+    let count = doc.len();
+    let name = format!("{}-all-sheets.pdf", app.session.doc.name);
+    app.pick_save(&name, &["pdf"], move |app, path| {
+        let Some(path) = path else { return };
+        match solidcraft_engine::io::vfs::write(&path, &bytes) {
+            Ok(()) => app.set_status(format!("Saved {path}: {count} sheets — open it and print"), false),
+            Err(e) => app.set_status(format!("Could not save the PDF: {e}"), true),
+        }
+    });
 }
 
 /// Save the sheet on screen as a PDF to print.

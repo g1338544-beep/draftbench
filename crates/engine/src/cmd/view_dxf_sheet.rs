@@ -1055,6 +1055,20 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
         text("DIM", Vec2::new(b.x, b.y - th * 0.35), th, label, entities);
         return;
     }
+    if kind == "note" {
+        // An arrow on the spot at `a`, a leader to the text at `b` (left aligned from there).
+        let Some(dir) = unit(Vec2::new(a.x - b.x, a.y - b.y)) else { return };
+        line("DIM", b, a, entities);
+        let side = Vec2::new(-dir.y, dir.x);
+        for k in [-1.0, 1.0] {
+            let back = Vec2::new(a.x - dir.x * 3.0 + side.x * 0.9 * k, a.y - dir.y * 3.0 + side.y * 0.9 * k);
+            line("DIM", a, back, entities);
+        }
+        let label: String = d.get("text").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map_or("NOTE".into(), |t| t.chars().take(40).collect());
+        let reach = 1.0 + th * 0.3 * label.chars().count() as f64;
+        text("DIM", Vec2::new(b.x + reach, b.y + th * 0.3), th, label, entities);
+        return;
+    }
     if kind == "diameter" || kind == "radius" {
         // A leader through the rim point out to the value; arrowheads on the circle.
         let Some(dir) = unit(Vec2::new(b.x - a.x, b.y - a.y)) else { return };
