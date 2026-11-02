@@ -19,7 +19,7 @@ use crate::viewport::{Proj, projected_polygon};
 /// Where the dialog's geometry is: a base point and, for values that can be dragged, the
 /// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
-    if matches!(d.kind, Kind::Split) {
+    if matches!(d.kind, Kind::Split | Kind::Mirror) {
         return split_anchor(app, d);
     }
     let st = app.session.world_state();
@@ -163,6 +163,13 @@ fn split_anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     }
     match d.inputs.get(1)?.items.first()? {
         Sel::Face { body, index, point } => Some((*point, crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| n))),
+        // Mirror moves a picked plane by Distance too (Split ignores it for a named plane).
+        Sel::Plane { name } if matches!(d.kind, Kind::Mirror) && d.inputs.get(2).is_none_or(|i| i.items.is_empty()) => {
+            let pl = solidcraft_engine::geom::Plane::named(name).or_else(|| {
+                solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl)
+            })?;
+            Some((pl.origin, Some(pl.normal())))
+        }
         _ => None,
     }
 }
@@ -556,8 +563,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
         }
     }
-    // Split Body: an arrow along the cutting plane's normal sets Distance; the plane is shown.
-    if matches!(d.kind, Kind::Split) {
+    // Split Body and Mirror: an arrow along the plane's normal sets Distance; the plane is shown.
+    if matches!(d.kind, Kind::Split | Kind::Mirror) {
         if let Some(n) = dir {
             let text = d.extra.get("distance").and_then(serde_json::Value::as_str).unwrap_or("0 mm").to_string();
             let l = text.trim().trim_end_matches("mm").trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(0.0);
