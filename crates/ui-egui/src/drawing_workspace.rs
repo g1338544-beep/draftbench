@@ -307,6 +307,8 @@ pub struct State {
     dim_tool: Option<(usize, Vec<Pos2>)>,
     /// The Smart dimension tool (tool kind 7) is on: it goes back to it after each dimension.
     dim_back: bool,
+    /// Decimal places of measured values: -1 = as needed (up to one), else 0 to 4.
+    dim_decimals: i32,
     /// The selected dimension, the one being dragged, and the one whose text is being edited.
     sel_dim: Option<usize>,
     /// The view a projected view is being placed from.
@@ -410,6 +412,7 @@ impl Default for State {
             shaded_cache: Vec::new(),
             dim_tool: None,
             dim_back: false,
+            dim_decimals: -1,
             sel_dim: None,
             proj_tool: None,
             drag_dim: None,
@@ -456,6 +459,7 @@ impl State {
             "marks": self.marks,
             "clines": self.clines,
             "centre_cut": self.centre_cut,
+            "dim_decimals": self.dim_decimals,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch, v.ratio, v.bg, v.style, v.zoom])).collect::<Vec<_>>(),
             "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
             "paper": self.paper, "landscape": self.landscape,
@@ -668,6 +672,9 @@ impl State {
                     self.shaded.push(sv);
                 }
             }
+        }
+        if let Some(n) = d.get("dim_decimals").and_then(serde_json::Value::as_i64).filter(|n| (-1..=4).contains(n)) {
+            self.dim_decimals = n as i32;
         }
         if let Some(list) = d.get("centre_cut").and_then(serde_json::Value::as_array) {
             for m in list.iter().take(400) {
@@ -975,6 +982,7 @@ fn params(st: &State) -> Value {
         "marks": st.marks,
         "clines": st.clines,
         "centre_cut": st.centre_cut,
+        "dim_decimals": st.dim_decimals,
         "bom": st.bom.iter().filter(|r| r.iter().any(|c| !c.trim().is_empty())).collect::<Vec<_>>(),
         "bolt_circle": st.bolt,
         "hole_table": st.hole_table,
@@ -1852,6 +1860,7 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let mut note = app.drawing.note_text.clone();
     let mut pick: Option<usize> = None;
+    let mut decimals = app.drawing.dim_decimals;
     let mut changed = false;
     let mut remove = false;
     let mut close = false;
@@ -1866,6 +1875,14 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
             for (i, (_, label)) in DIM_KINDS.iter().enumerate() {
                 if crate::ui_kit::list_picker(ui, label, label, tool == Some(i)).clicked() {
                     pick = Some(i);
+                }
+            }
+        });
+        ui.label("Decimal places");
+        ui.horizontal_wrapped(|ui| {
+            for (n, label) in [(-1, "Auto"), (0, "0"), (1, "1"), (2, "2"), (3, "3"), (4, "4")] {
+                if crate::ui_kit::list_picker(ui, label, label, decimals == n).clicked() {
+                    decimals = n;
                 }
             }
         });
@@ -1893,6 +1910,10 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
         }
     });
     app.drawing.note_text = note;
+    if decimals != app.drawing.dim_decimals {
+        app.drawing.dim_decimals = decimals;
+        refresh(app);
+    }
     if let Some(i) = pick {
         app.drawing.dim_back = i == 7;
         app.drawing.dim_tool = Some((i, Vec::new()));
@@ -3315,7 +3336,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.line_segment([map(u), map(v)], Stroke::new(1.5, accent));
                 }
                 let (l0, l1) = dim_segment(&tmp);
-                painter.text(map(pos2((l0.x + l1.x) / 2.0, (l0.y + l1.y) / 2.0)) + vec2(0.0, -4.0), egui::Align2::CENTER_BOTTOM, format!("{measured:.1}"), egui::FontId::proportional(Tokens::get().font_body + 2.0), accent);
+                painter.text(map(pos2((l0.x + l1.x) / 2.0, (l0.y + l1.y) / 2.0)) + vec2(0.0, -4.0), egui::Align2::CENTER_BOTTOM, if (0..=4).contains(&app.drawing.dim_decimals) { format!("{measured:.*}", app.drawing.dim_decimals as usize) } else { format!("{measured:.1}") }, egui::FontId::proportional(Tokens::get().font_body + 2.0), accent);
             }
             if response.clicked_by(egui::PointerButton::Primary)
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))

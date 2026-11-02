@@ -407,9 +407,11 @@ fn manual(
             }
         }
     }
+    // Decimal places of the measured values (0..=4); absent = as many as needed, up to one.
+    let decimals = p.get("dim_decimals").and_then(Value::as_u64).filter(|n| *n <= 4).map(|n| n as usize);
     if let Some(list) = p.get("dimension_items").and_then(Value::as_array) {
         for d in list.iter().take(200) {
-            add_dimension(&mut entities, d, &boxes, th);
+            add_dimension(&mut entities, d, &boxes, th, decimals);
         }
     }
     let entities = projection::connect(entities);
@@ -1258,7 +1260,7 @@ fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
 /// points and `at` in sheet mm (`at` is the dimension line's y for horizontal, its x for vertical,
 /// its distance from the points' line for aligned). The value is measured on the sheet and divided
 /// by the scale of the view the dimension sits on (the placed box it is in or near).
-fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: f64) {
+fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: f64, decimals: Option<usize>) {
     let pt = |k: &str| -> Option<Vec2> {
         let a = d.get(k)?.as_array()?;
         let (x, y) = (a.first()?.as_f64()?, a.get(1)?.as_f64()?);
@@ -1328,7 +1330,7 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
         let measured = if kind == "diameter" { 2.0 * r / scale } else { r / scale };
         let text_value: String = match d.get("text").and_then(Value::as_str).map(str::trim) {
             Some(t) if !t.is_empty() => t.chars().take(40).collect(),
-            _ => format!("{}{}", if kind == "diameter" { "%%c" } else { "R" }, trim_mm(measured)),
+            _ => format!("{}{}", if kind == "diameter" { "%%c" } else { "R" }, dim_value(measured, decimals)),
         };
         let reach = 1.5 + th * 0.3 * text_value.chars().count() as f64;
         let centre = Vec2::new(out.x + dir.x * reach, out.y + dir.y * reach);
@@ -1364,7 +1366,7 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
     } / scale;
     let text_value = match d.get("text").and_then(Value::as_str).map(str::trim) {
         Some(t) if !t.is_empty() => t.chars().take(40).collect(),
-        _ => trim_mm(measured),
+        _ => dim_value(measured, decimals),
     };
     // Extension lines from each point past the dimension line, with a small gap at the point.
     for (from, to) in [(a, p1), (b, p2)] {
@@ -1406,6 +1408,14 @@ fn view_name(v: StandardView) -> &'static str {
         StandardView::Left => "LEFT",
         StandardView::Right => "RIGHT",
         StandardView::Iso => "ISO",
+    }
+}
+
+/// A measured value: a fixed number of decimal places when one is chosen, else as `trim_mm`.
+fn dim_value(v: f64, decimals: Option<usize>) -> String {
+    match decimals {
+        Some(n) if v.is_finite() => format!("{v:.n$}"),
+        _ => trim_mm(v),
     }
 }
 
