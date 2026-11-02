@@ -485,7 +485,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
         }
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
-            choice_row(ui, "Hole Type", "hole_kind", kind, &HOLE_LABELS);
+            form_row(ui, "Type", |ui| hole_type_buttons(ui, kind));
             form_row(ui, "Hole Tap Type", |ui| {
                 let mut tap = usize::from(opts.tapped);
                 combo(ui, "hole_tap", &["Simple", "Tapped"], &mut tap);
@@ -1250,3 +1250,51 @@ fn iso_clearance(size: &str, fit: &str) -> Option<f64> {
     })
 }
 
+
+/// The hole types as buttons showing the hole in section: simple, counterbore, countersink, tapered.
+fn hole_type_buttons(ui: &mut egui::Ui, kind: &mut usize) {
+    use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
+    let t = Tokens::get();
+    ui.horizontal(|ui| {
+        for (i, label) in HOLE_LABELS.iter().enumerate() {
+            let (rect, response) = ui.allocate_exact_size(vec2(t.control_height * 1.5, t.control_height * 1.25), Sense::click());
+            let on = *kind == i;
+            let bg = if on { t.accent_soft } else if response.hovered() { t.hover } else { Color32::TRANSPARENT };
+            ui.painter().rect(rect, t.control_radius, bg, Stroke::new(if on { 1.5 } else { 1.0 }, if on { t.accent } else { t.control_border }), egui::StrokeKind::Inside);
+            let b = rect.shrink2(vec2(rect.width() * 0.16, rect.height() * 0.16));
+            let (cx, w, h) = (b.center().x, b.width(), b.height());
+            let ink = if on { t.form_ink } else { t.form_dim };
+            // The part in section, then the hole cut out of it.
+            ui.painter().rect_filled(b, 0.0, ink.gamma_multiply(0.30));
+            let bottom = b.top() + h * 0.82;
+            let n = w * 0.14;
+            let cut: Vec<Vec<Pos2>> = match i {
+                1 => vec![
+                    vec![pos2(cx - w * 0.30, b.top()), pos2(cx + w * 0.30, b.top()), pos2(cx + w * 0.30, b.top() + h * 0.34), pos2(cx - w * 0.30, b.top() + h * 0.34)],
+                    vec![pos2(cx - n, b.top() + h * 0.34), pos2(cx + n, b.top() + h * 0.34), pos2(cx + n, bottom), pos2(cx - n, bottom)],
+                ],
+                2 => vec![
+                    vec![pos2(cx - w * 0.30, b.top()), pos2(cx + w * 0.30, b.top()), pos2(cx + n, b.top() + h * 0.30), pos2(cx - n, b.top() + h * 0.30)],
+                    vec![pos2(cx - n, b.top() + h * 0.30), pos2(cx + n, b.top() + h * 0.30), pos2(cx + n, bottom), pos2(cx - n, bottom)],
+                ],
+                3 => vec![vec![pos2(cx - w * 0.22, b.top()), pos2(cx + w * 0.22, b.top()), pos2(cx + n * 0.5, bottom), pos2(cx - n * 0.5, bottom)]],
+                _ => vec![vec![pos2(cx - n, b.top()), pos2(cx + n, b.top()), pos2(cx + n, bottom), pos2(cx - n, bottom)]],
+            };
+            for piece in &cut {
+                ui.painter().add(Shape::convex_polygon(piece.clone(), t.panel, Stroke::NONE));
+            }
+            // Outline of the hole walls (the open top stays open).
+            let outline: Vec<Pos2> = match i {
+                1 => vec![pos2(cx - w * 0.30, b.top()), pos2(cx - w * 0.30, b.top() + h * 0.34), pos2(cx - n, b.top() + h * 0.34), pos2(cx - n, bottom), pos2(cx + n, bottom), pos2(cx + n, b.top() + h * 0.34), pos2(cx + w * 0.30, b.top() + h * 0.34), pos2(cx + w * 0.30, b.top())],
+                2 => vec![pos2(cx - w * 0.30, b.top()), pos2(cx - n, b.top() + h * 0.30), pos2(cx - n, bottom), pos2(cx + n, bottom), pos2(cx + n, b.top() + h * 0.30), pos2(cx + w * 0.30, b.top())],
+                3 => vec![pos2(cx - w * 0.22, b.top()), pos2(cx - n * 0.5, bottom), pos2(cx + n * 0.5, bottom), pos2(cx + w * 0.22, b.top())],
+                _ => vec![pos2(cx - n, b.top()), pos2(cx - n, bottom), pos2(cx + n, bottom), pos2(cx + n, b.top())],
+            };
+            ui.painter().add(Shape::line(outline, Stroke::new(1.5, ink)));
+            ui.painter().rect_stroke(Rect::from_min_max(b.min, b.max), 0.0, Stroke::new(1.0, ink.gamma_multiply(0.6)), egui::StrokeKind::Inside);
+            if response.on_hover_text(crate::i18n::tr_label(label)).clicked() {
+                *kind = i;
+            }
+        }
+    });
+}
