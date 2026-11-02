@@ -746,6 +746,7 @@ impl Dialog {
                         ("diameter", length_default(s, "40")),
                         ("revolutions", "4".into()),
                         ("pitch", length_default(s, "8")),
+                        ("height", String::new()),
                         ("section_size", length_default(s, "3")),
                     ],
                     operation: 0,
@@ -3696,6 +3697,19 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = serde_json::Map::new();
             for (k, v) in fields {
                 p.insert((*k).into(), json!(v));
+            }
+            if *cmd == "solid.coil" {
+                // Any two of revolutions, pitch and height define a coil. A typed height takes
+                // the place of the pitch (height & revolutions); clear the revolutions to give
+                // height & pitch instead.
+                let blank = |p: &serde_json::Map<String, Value>, k: &str| p.get(k).and_then(Value::as_str).is_none_or(|t| t.trim().is_empty());
+                if blank(&p, "height") {
+                    p.remove("height");
+                } else if !blank(&p, "revolutions") {
+                    p.remove("pitch");
+                } else {
+                    p.remove("revolutions");
+                }
             }
             if let Some((point, normal)) = *at {
                 match *cmd {

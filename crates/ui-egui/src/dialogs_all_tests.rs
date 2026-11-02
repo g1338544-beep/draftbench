@@ -239,7 +239,7 @@ form_case!(primitive_box, "solid.box", ["length", "width", "height", "Operation"
 form_case!(cylinder, "solid.cylinder", ["diameter", "height", "Operation"]);
 form_case!(sphere, "solid.sphere", ["diameter", "Operation"]);
 form_case!(torus, "solid.torus", ["major", "minor", "Operation"]);
-form_case!(coil, "solid.coil", ["diameter", "revolutions", "pitch", "section_size", "Operation"]);
+form_case!(coil, "solid.coil", ["diameter", "revolutions", "pitch", "height", "section_size", "Operation"]);
 form_case!(combine, "solid.combine", ["Operation"]);
 form_case!(surface_extrude, "surface.extrude", ["Distance", "Direction"]);
 form_case!(surface_revolve, "surface.revolve", ["Angle", "Direction"]);
