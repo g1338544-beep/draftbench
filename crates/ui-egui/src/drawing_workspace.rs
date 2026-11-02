@@ -2856,7 +2856,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // Mechanical symbols: each is put before the measured value (`<>` stands for it).
                 ui.label("Symbols (<> = measured value)");
                 ui.horizontal_wrapped(|ui| {
-                    for (sym, tip) in [("Ø", "Diameter"), ("R", "Radius"), ("□", "Square"), ("°", "Degree"), ("±", "Plus-minus"), ("⌴", "Counterbore"), ("↧", "Depth"), ("M", "Thread"), ("SR", "Spherical radius"), ("SØ", "Spherical diameter"), ("(<>)", "Reference")] {
+                    for (sym, tip) in [("Ø", "Diameter"), ("R", "Radius"), ("SQ", "Square"), ("°", "Degree"), ("±", "Plus-minus"), ("CB", "Counterbore"), ("DP", "Depth"), ("M", "Thread"), ("SR", "Spherical radius"), ("SØ", "Spherical diameter"), ("(<>)", "Reference")] {
                         if ui.small_button(sym).on_hover_text(tip).clicked() {
                             let t = &mut app.drawing.dims[i].text;
                             if t.chars().count() < 36 {
