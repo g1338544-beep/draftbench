@@ -48,8 +48,8 @@ fn colour_of(index: u8) -> Color32 {
 const VIEWS: [(&str, &str); 7] =
     [("front", "Front"), ("top", "Top"), ("right", "Right"), ("left", "Left"), ("back", "Back"), ("bottom", "Bottom"), ("iso", "Isometric (3D)")];
 
-const DIM_KINDS: [(&str, &str); 5] =
-    [("horizontal", "Horizontal"), ("vertical", "Vertical"), ("aligned", "Aligned"), ("diameter", "Diameter (click a circle)"), ("radius", "Radius (click an arc or circle)")];
+const DIM_KINDS: [(&str, &str); 6] =
+    [("horizontal", "Horizontal"), ("vertical", "Vertical"), ("aligned", "Aligned"), ("diameter", "Diameter (click a circle)"), ("radius", "Radius (click an arc or circle)"), ("balloon", "Balloon (click a part, then the balloon)")];
 
 /// A dimension the user placed, in sheet mm.
 #[derive(Clone)]
@@ -130,6 +130,8 @@ pub struct State {
     cell_edit: Option<usize>,
     placed: Vec<PlacedView>,
     dims: Vec<DimItem>,
+    /// The parts list drawn over the title block: item, description, quantity, material.
+    bom: Vec<[String; 4]>,
     /// The dimension being placed: its kind and the points picked so far.
     dim_tool: Option<(usize, Vec<Pos2>)>,
     /// The selected dimension, the one being dragged, and the one whose text is being edited.
@@ -190,6 +192,7 @@ impl Default for State {
             cell_edit: None,
             placed: Vec::new(),
             dims: Vec::new(),
+            bom: Vec::new(),
             dim_tool: None,
             sel_dim: None,
             proj_tool: None,
@@ -224,7 +227,7 @@ impl State {
         json!({
             "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p]))})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text})).collect::<Vec<_>>(),
-            "title": self.title, "number": self.number, "notes": self.notes,
+            "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
             "paper": self.paper, "landscape": self.landscape,
         })
@@ -349,6 +352,7 @@ impl State {
     fn load_page(&mut self, d: &serde_json::Value) {
         self.placed.clear();
         self.dims.clear();
+        self.bom.clear();
         self.selected = None;
         self.sel_dim = None;
         self.sheet = None;
@@ -385,7 +389,7 @@ impl State {
                 };
                 let (Some(a), Some(b)) = (pt("a"), pt("b")) else { continue };
                 self.dims.push(DimItem {
-                    kind: v.get("kind").and_then(serde_json::Value::as_u64).map_or(0, |n| (n as usize).min(4)),
+                    kind: v.get("kind").and_then(serde_json::Value::as_u64).map_or(0, |n| (n as usize).min(5)),
                     a,
                     b,
                     at: f(v, "at").unwrap_or(0.0) as f32,
@@ -396,6 +400,17 @@ impl State {
         for (k, field) in [("title", &mut self.title), ("number", &mut self.number), ("notes", &mut self.notes)] {
             if let Some(t) = d.get(k).and_then(serde_json::Value::as_str) {
                 *field = t.chars().take(400).collect();
+            }
+        }
+        if let Some(rows) = d.get("bom").and_then(serde_json::Value::as_array) {
+            for row in rows.iter().take(40) {
+                let mut cells: [String; 4] = Default::default();
+                if let Some(a) = row.as_array() {
+                    for (slot, t) in cells.iter_mut().zip(a) {
+                        *slot = t.as_str().unwrap_or("").chars().take(60).collect();
+                    }
+                }
+                self.bom.push(cells);
             }
         }
         for (k, field, max) in [("sheet_no", &mut self.sheet_no, 40), ("sheet_scale", &mut self.sheet_scale, 12)] {
@@ -511,7 +526,7 @@ fn params(st: &State) -> Value {
         "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "note": st.notes, "sheet": st.sheet_no, "revision": st.revision},
         "tolerance": 0.15,
         "dimension_items": st.dims.iter().map(|d| json!({
-            "kind": DIM_KINDS[d.kind.min(4)].0,
+            "kind": DIM_KINDS[d.kind.min(5)].0,
             "a": [d.a.x, d.a.y],
             "b": [d.b.x, d.b.y],
             "at": d.at,
@@ -519,6 +534,7 @@ fn params(st: &State) -> Value {
         })).collect::<Vec<_>>(),
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
         "block_cells": st.cells,
+        "bom": st.bom.iter().filter(|r| r.iter().any(|c| !c.trim().is_empty())).collect::<Vec<_>>(),
         "bolt_circle": st.bolt,
         "hole_table": st.hole_table,
         "hidden_style": if st.hidden_style == 1 { "dashed" } else { "hidden" },
@@ -698,13 +714,14 @@ fn scale_picker(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
 
 /// The drawn line of a dimension, in sheet mm.
 fn dim_segment(d: &DimItem) -> (Pos2, Pos2) {
-    match DIM_KINDS[d.kind.min(4)].0 {
+    match DIM_KINDS[d.kind.min(5)].0 {
         "horizontal" => (pos2(d.a.x, d.at), pos2(d.b.x, d.at)),
         "vertical" => (pos2(d.at, d.a.y), pos2(d.at, d.b.y)),
+        "balloon" => (d.a, d.b),
         "diameter" | "radius" => {
             let (dir, r) = circle_dir(d);
             let out = d.a + dir * d.at.max(r + 3.0);
-            (if DIM_KINDS[d.kind.min(4)].0 == "diameter" { d.a - dir * r } else { d.a }, out)
+            (if DIM_KINDS[d.kind.min(5)].0 == "diameter" { d.a - dir * r } else { d.a }, out)
         }
         _ => {
             let (dx, dy) = (d.b.x - d.a.x, d.b.y - d.a.y);
@@ -1071,7 +1088,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     let mut remove_dim: Option<usize> = None;
                     for i in 0..app.drawing.dims.len() {
-                        let kind = DIM_KINDS[app.drawing.dims[i].kind.min(4)].1;
+                        let kind = DIM_KINDS[app.drawing.dims[i].kind.min(5)].1;
                         ui.label(format!("{}. {kind}", i + 1));
                         dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_dim_text", i)), &mut app.drawing.dims[i].text, "measured value", false, 40).changed();
                         if crate::ui_kit::button(ui, "Remove dimension", crate::ui_kit::Button::Small).clicked() {
@@ -1080,6 +1097,54 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     if let Some(i) = remove_dim {
                         app.drawing.dims.remove(i);
+                        dirty = true;
+                    }
+                    ui.separator();
+                    ui.label("Parts list (BOM)");
+                    ui.small("Drawn over the title block. Number the balloons to match the items.");
+                    ui.horizontal(|ui| {
+                        if crate::ui_kit::button(ui, "Fill from assembly", crate::ui_kit::Button::Small).clicked() {
+                            match app.run("assembly.bom", json!({})) {
+                                Ok(v) => {
+                                    let rows = v.get("rows").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
+                                    app.drawing.bom = rows
+                                        .iter()
+                                        .take(40)
+                                        .map(|r| {
+                                            let text = |k: &str| r.get(k).and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+                                            let description = [text("description"), text("part_number"), text("definition")].into_iter().find(|t| !t.is_empty()).unwrap_or_default();
+                                            let material = r.get("properties").and_then(|p| p.get("material")).and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+                                            let item = r.get("item").map(|i| i.to_string().trim_matches('"').to_string()).unwrap_or_default();
+                                            let count = r.get("count").map(|c| c.to_string()).unwrap_or_default();
+                                            [item, description.chars().take(60).collect(), count, material.chars().take(60).collect()]
+                                        })
+                                        .collect();
+                                    dirty = true;
+                                }
+                                Err(e) => app.set_status(format!("Could not read the parts list: {e}"), true),
+                            }
+                        }
+                        if app.drawing.bom.len() < 40 && crate::ui_kit::button(ui, "Add row", crate::ui_kit::Button::Small).clicked() {
+                            let n = app.drawing.bom.len() + 1;
+                            app.drawing.bom.push([n.to_string(), String::new(), "1".into(), String::new()]);
+                            dirty = true;
+                        }
+                    });
+                    let mut remove_row: Option<usize> = None;
+                    for i in 0..app.drawing.bom.len() {
+                        ui.horizontal(|ui| {
+                            for (c, hint, limit) in [(0, "No.", 4), (1, "Description", 60), (2, "Qty", 4), (3, "Material", 60)] {
+                                if let Some(cell) = app.drawing.bom.get_mut(i).and_then(|r| r.get_mut(c)) {
+                                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_bom", i, c)), cell, hint, false, limit).changed();
+                                }
+                            }
+                            if crate::ui_kit::button(ui, "×", crate::ui_kit::Button::Small).clicked() {
+                                remove_row = Some(i);
+                            }
+                        });
+                    }
+                    if let Some(i) = remove_row {
+                        app.drawing.bom.remove(i);
                         dirty = true;
                     }
                     ui.separator();
@@ -1266,10 +1331,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let (Some(i), Some(m)) = (app.drawing.drag_dim, &map) {
         if response.dragged() {
             if let (Some(s), Some(d)) = (response.interact_pointer_pos().and_then(|q| m.to_sheet(q)), app.drawing.dims.get_mut(i)) {
-                d.at = match DIM_KINDS[d.kind.min(4)].0 {
+                d.at = match DIM_KINDS[d.kind.min(5)].0 {
                     "horizontal" => s.y,
                     "vertical" => s.x,
                     "diameter" | "radius" => (s - d.a).length(),
+                    "balloon" => {
+                        d.b = s;
+                        d.at
+                    }
                     _ => {
                         let (dx, dy) = (d.b.x - d.a.x, d.b.y - d.a.y);
                         let n = dx.hypot(dy).max(1e-6);
@@ -1582,7 +1651,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             {
                 let hit_pt = snap_point(sheet, c, tol);
-                if kind >= 3 {
+                if kind == 5 {
+                    // Balloon: the part point, then where the balloon goes; numbered in turn.
+                    if let Some(target) = picks.first().copied() {
+                        let number = app.drawing.dims.iter().filter(|d| d.kind == 5).count() + 1;
+                        new_dim = Some(DimItem { kind, a: target, b: c, at: 0.0, text: number.to_string() });
+                        app.drawing.dim_tool = Some((kind, Vec::new()));
+                    } else {
+                        app.drawing.dim_tool = Some((kind, vec![hit_pt.unwrap_or(c)]));
+                    }
+                } else if kind >= 3 {
                     // Diameter or radius: click the circle, then where the leader and value go.
                     if let (Some(centre), Some(r)) = (picks.first().copied(), picks.get(1).map(|p| p.x)) {
                         let v = c - centre;
@@ -1598,7 +1676,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.drawing.dim_tool = Some((kind, next));
                 } else {
                     let (a, b) = (picks[0], picks[1]);
-                    let at = match DIM_KINDS[kind.min(4)].0 {
+                    let at = match DIM_KINDS[kind.min(5)].0 {
                         "horizontal" => c.y,
                         "vertical" => c.x,
                         _ => {

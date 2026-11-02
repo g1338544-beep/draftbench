@@ -687,6 +687,37 @@ fn finish(
         cell(6, format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" })),
         &mut entities,
     );
+    // The parts list (BOM) over the title block: header at the bottom, items counted upward.
+    if let Some(rows) = p.get("bom").and_then(Value::as_array).filter(|r| !r.is_empty()) {
+        let edges = [0.0, 0.10, 0.56, 0.68, 1.0];
+        let rh = 7.0;
+        let n = rows.len().min(40);
+        let y0 = by0 + TITLE_H;
+        let top = y0 + rh * (n as f64 + 1.0);
+        rect("SHEET", Vec2::new(bx0, y0), Vec2::new(right, top), &mut entities);
+        for r in 1..=n {
+            line("SHEET", Vec2::new(bx0, y0 + rh * r as f64), Vec2::new(right, y0 + rh * r as f64), &mut entities);
+        }
+        for e in &edges[1..4] {
+            line("SHEET", Vec2::new(bx0 + block_w * e, y0), Vec2::new(bx0 + block_w * e, top), &mut entities);
+        }
+        let mut cell_text = |row: usize, col: usize, t: &str, entities: &mut Vec<DxfEntity>| {
+            let (c0, c1) = (edges[col], edges[col + 1]);
+            let room = ((c1 - c0) * block_w / (th * 0.62)).floor().max(1.0) as usize;
+            let t: String = t.chars().take(room).collect();
+            text("TEXT", Vec2::new(bx0 + block_w * (c0 + c1) / 2.0, y0 + rh * row as f64 + rh * 0.3), th, t, entities);
+        };
+        for (c, h) in ["ITEM", "DESCRIPTION", "QTY", "MATERIAL"].iter().enumerate() {
+            cell_text(0, c, h, &mut entities);
+        }
+        for (i, row) in rows.iter().take(n).enumerate() {
+            let cells = row.as_array();
+            for c in 0..4 {
+                let t = cells.and_then(|a| a.get(c)).and_then(Value::as_str).unwrap_or("");
+                cell_text(i + 1, c, t, &mut entities);
+            }
+        }
+    }
     for n in field("note").split('|').filter(|n| !n.trim().is_empty()).take(3).enumerate() {
         text("TEXT", Vec2::new(bx0 - 2.0 - 40.0, by0 + 4.0 + 5.0 * n.0 as f64), th, n.1.trim().to_string(), &mut entities);
     }
@@ -1013,6 +1044,17 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
         let n = (v.x * v.x + v.y * v.y).sqrt();
         if n > 1e-9 { Some(Vec2::new(v.x / n, v.y / n)) } else { None }
     };
+    if kind == "balloon" {
+        // A numbered circle at `b`, its leader running to the part at `a`.
+        let radius = (th * 1.6).max(4.0);
+        let Some(dir) = unit(Vec2::new(a.x - b.x, a.y - b.y)) else { return };
+        line("DIM", Vec2::new(b.x + dir.x * radius, b.y + dir.y * radius), a, entities);
+        entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Circle { c: b, r: radius } });
+        entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Circle { c: a, r: 0.5 } });
+        let label: String = d.get("text").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map_or("?".into(), |t| t.chars().take(6).collect());
+        text("DIM", Vec2::new(b.x, b.y - th * 0.35), th, label, entities);
+        return;
+    }
     if kind == "diameter" || kind == "radius" {
         // A leader through the rim point out to the value; arrowheads on the circle.
         let Some(dir) = unit(Vec2::new(b.x - a.x, b.y - a.y)) else { return };
