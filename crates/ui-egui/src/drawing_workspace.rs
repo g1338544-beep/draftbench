@@ -2111,7 +2111,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let extent = app.drawing.sheet.as_ref().map(|s| s.width.hypot(s.height)).unwrap_or(500.0);
     let map = sheet_map(app, rect, extent);
 
-    let mut erase_click    // Base View: make the ghost of the chosen view when the view or scale changes.
+    // Base View: make the ghost of the chosen view when the view or scale changes.
     if app.drawing.cline_tool.is_none()
         && let Some((view, scale)) = app.drawing.base.clone()
         && view <= 6
@@ -2122,7 +2122,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.base_preview = Some((key, made));
         }
     }
-: Option<[f32; 4]> = None;
+    let mut erase_click: Option<[f32; 4]> = None;
     // Dragging a placed view moves it; any other drag navigates (pan/zoom) as in the model view.
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).copied();
@@ -2836,6 +2836,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             x = parent.x as f32;
                         }
                     }
+                    if app.drawing.placed.get(b.0).is_some_and(|v| v.align.is_none()) {
+                        // Lines up with another view's centre: snaps there and shows the guide line.
+                        let (sx, sy, gx, gy) = snap_axes(sheet, b.0, x, y, 5.0);
+                        (x, y) = (sx, sy);
+                        let guide = Stroke::new(1.0, Color32::from_rgb(235, 120, 40));
+                        for line in gx.map(|gx| (pos2(gx, -1000.0), pos2(gx, 2000.0))).into_iter().chain(gy.map(|gy| (pos2(-1000.0, gy), pos2(2000.0, gy)))) {
+                            painter.extend(egui::Shape::dashed_line(&[map(line.0), map(line.1)], guide, 6.0, 4.0));
+                        }
+                    }
                     (x, y)
                 }
                 _ => (b.1, b.2),
@@ -2884,6 +2893,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 } else {
                     nx = parent.x;
                 }
+            }
+            if old.2.is_none()
+                && let Some(sh) = app.drawing.sheet.as_ref()
+            {
+                let (sx, sy, _, _) = snap_axes(sh, index, nx as f32, ny as f32, 5.0);
+                (nx, ny) = (f64::from(sx), f64::from(sy));
             }
             let (ddx, ddy) = (nx - old.0, ny - old.1);
             if let Some(v) = app.drawing.placed.get_mut(index) {
@@ -3008,6 +3023,22 @@ fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .filter(|(c, _)| (*c - p).length() < near.max(tol));
     inside.map(|(c, _)| *c).or_else(|| best.map(|(_, q)| q))
+}
+
+/// A view being placed at (x, y) lines up with the centre of another view when it is within `tol` mm:
+/// the snapped position and the guide lines (a vertical x, a horizontal y) to draw.
+fn snap_axes(sheet: &Sheet, index: usize, x: f32, y: f32, tol: f32) -> (f32, f32, Option<f32>, Option<f32>) {
+    let (mut sx, mut sy) = (None::<(f32, f32)>, None::<(f32, f32)>);
+    for b in sheet.boxes.iter().filter(|b| b.0 != index) {
+        let (dx, dy) = ((b.1 - x).abs(), (b.2 - y).abs());
+        if dx <= tol && sx.is_none_or(|(d, _)| dx < d) {
+            sx = Some((dx, b.1));
+        }
+        if dy <= tol && sy.is_none_or(|(d, _)| dy < d) {
+            sy = Some((dy, b.2));
+        }
+    }
+    (sx.map_or(x, |v| v.1), sy.map_or(y, |v| v.1), sx.map(|v| v.1), sy.map(|v| v.1))
 }
 
 fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
