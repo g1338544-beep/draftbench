@@ -1250,6 +1250,10 @@ impl SolveApp {
     }
 
     pub fn open_path(&mut self, path: &str) {
+        if let Some(hint) = native_cad_hint(path) {
+            self.set_status(hint, true);
+            return;
+        }
         self.home.open = false;
         documents::prepare_open(self);
         if let Ok(r) = self.run("doc.open", json!({ "path": path })) {
@@ -1259,9 +1263,17 @@ impl SolveApp {
     }
 
     pub fn open_path_async(&mut self, path: &str) {
+        if let Some(hint) = native_cad_hint(path) {
+            self.set_status(hint, true);
+            return;
+        }
         file_load::begin(self, path, false);
     }
     pub fn insert_path_async(&mut self, path: &str) {
+        if let Some(hint) = native_cad_hint(path) {
+            self.set_status(hint, true);
+            return;
+        }
         file_load::begin(self, path, true);
     }
 
@@ -1952,6 +1964,15 @@ pub fn now_ms() -> f64 {
 mod picker_test_support;
 #[cfg(test)]
 mod test_support;
+
+/// What to tell someone who tries to open another CAD program's own file: those formats are
+/// closed, so the way in is the neutral STEP export the sender can make in one step.
+fn native_cad_hint(path: &str) -> Option<&'static str> {
+    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    matches!(ext.as_str(), "prt" | "sldprt" | "sldasm" | "slddrw" | "ipt" | "iam" | "catpart" | "catproduct" | "par" | "psm" | "f3d" | "x_t" | "x_b" | "jt").then_some(
+        "This CAD program's own file can't be opened here. Ask for a STEP (.step) export of the part or assembly, and open that. A 2D drawing as DXF also works.",
+    )
+}
 
 /// A SolidCraft design file (`.solidcraft`, or a design saved as JSON), as opposed to a STEP or
 /// mesh file.
