@@ -805,21 +805,25 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             // Faces picked now are one set; "Add New Set" keeps them with their own offset so the next
             // faces can take another one. All sets are applied together on OK.
             let picked = d.inputs.first().map_or(0, |i| i.items.len());
+            let mut add_clicked = false;
             ui.horizontal(|ui| {
-                if picked > 0 && ui_kit::button(ui, "Add New Set", ui_kit::Button::Small).clicked() {
-                    let faces: Vec<Value> = sels(d, 0).face_points().into_iter().map(pt3).collect();
-                    let reverse = d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false);
-                    let dist = if reverse { format!("-({distance})") } else { distance.clone() };
-                    let sets = d.extra.entry("sets").or_insert_with(|| json!([]));
-                    if let Some(list) = sets.as_array_mut().filter(|l| l.len() < 20) && !faces.is_empty() {
-                        list.push(json!({"faces": faces, "distance": dist}));
-                        if let Some(i) = d.inputs.first_mut() {
-                            i.items.clear();
-                        }
-                        d.extra.remove("reverse");
-                    }
-                }
+                add_clicked = picked > 0 && ui_kit::button(ui, "Add New Set", ui_kit::Button::Small).clicked();
             });
+            if add_clicked {
+                let faces: Vec<Value> = d.inputs.first().map(|i| i.items.face_points()).unwrap_or_default().into_iter().map(pt3).collect();
+                let reverse = d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false);
+                let dist = if reverse { format!("-({distance})") } else { distance.clone() };
+                let sets = d.extra.entry("sets").or_insert_with(|| json!([]));
+                if let Some(list) = sets.as_array_mut().filter(|l| l.len() < 20)
+                    && !faces.is_empty()
+                {
+                    list.push(json!({"faces": faces, "distance": dist}));
+                    if let Some(i) = d.inputs.first_mut() {
+                        i.items.clear();
+                    }
+                    d.extra.remove("reverse");
+                }
+            }
             let mut remove: Option<usize> = None;
             if let Some(list) = d.extra.get_mut("sets").and_then(Value::as_array_mut) {
                 for (n, set) in list.iter_mut().enumerate() {
