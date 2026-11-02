@@ -13,7 +13,7 @@ use crate::{SolveApp, theme::Tokens};
 const PAPERS: [&str; 5] = ["A0", "A1", "A2", "A3", "A4"];
 const SIZES: [(f32, f32); 5] = [(1189.0, 841.0), (841.0, 594.0), (594.0, 420.0), (420.0, 297.0), (297.0, 210.0)];
 /// AutoCAD colour numbers offered for lines, with how they look on the white sheet.
-const COLOURS: [(u8, &str, Color32); 8] = [
+const COLOURS: [(u8, &str, Color32); 24] = [
     (7, "Black", Color32::from_rgb(20, 20, 24)),
     (8, "Grey", Color32::from_rgb(120, 120, 120)),
     (1, "Red", Color32::from_rgb(200, 40, 40)),
@@ -22,6 +22,23 @@ const COLOURS: [(u8, &str, Color32); 8] = [
     (6, "Magenta", Color32::from_rgb(170, 40, 160)),
     (4, "Cyan", Color32::from_rgb(0, 140, 160)),
     (2, "Yellow", Color32::from_rgb(190, 150, 0)),
+    (250, "Dark grey", Color32::from_rgb(70, 70, 75)),
+    (9, "Light grey", Color32::from_rgb(170, 170, 175)),
+    (12, "Dark red", Color32::from_rgb(130, 20, 20)),
+    (10, "Bright red", Color32::from_rgb(255, 40, 40)),
+    (30, "Orange", Color32::from_rgb(240, 120, 0)),
+    (40, "Gold", Color32::from_rgb(210, 170, 20)),
+    (54, "Brown", Color32::from_rgb(120, 80, 30)),
+    (70, "Lime", Color32::from_rgb(130, 190, 20)),
+    (94, "Olive", Color32::from_rgb(90, 110, 30)),
+    (84, "Forest green", Color32::from_rgb(20, 90, 40)),
+    (110, "Spring green", Color32::from_rgb(20, 190, 110)),
+    (130, "Teal", Color32::from_rgb(0, 120, 120)),
+    (150, "Sky blue", Color32::from_rgb(0, 150, 230)),
+    (170, "Royal blue", Color32::from_rgb(20, 60, 170)),
+    (176, "Navy", Color32::from_rgb(10, 25, 100)),
+    (190, "Violet", Color32::from_rgb(110, 50, 210)),
+    (230, "Pink", Color32::from_rgb(230, 80, 150)),
 ];
 
 fn colour_of(index: u8) -> Color32 {
