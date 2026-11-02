@@ -81,7 +81,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "MODEL",
         panel: "MODIFY",
         promoted: 4,
-        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert"],
+        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert", "solid.remove_parameters"],
     },
     Section {
         tab: "MODEL",
