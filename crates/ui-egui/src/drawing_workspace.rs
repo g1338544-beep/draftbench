@@ -982,8 +982,30 @@ fn scale_picker(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
                 ui.close();
             }
         }
+        ui.separator();
+        ui.label("Custom (1:3, 2:1 or 0.25)");
+        let slot = egui::Id::new(("scale_custom", id));
+        let mut text: String = ui.data_mut(|d| d.get_temp::<String>(slot)).unwrap_or_default();
+        let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).hint_text("1:3"));
+        ui.data_mut(|d| d.insert_temp(slot, text.clone()));
+        let apply = crate::ui_kit::button(ui, "Apply", crate::ui_kit::Button::Small).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+        if apply && let Some(k) = parse_scale(&text) {
+            *value = format!("{k}");
+            changed = true;
+            ui.close();
+        }
     });
     changed
+}
+
+/// A typed scale: "1:3" (drawing : real, so 1:3 shrinks to a third), "2:1", or a plain factor such as 0.25.
+fn parse_scale(text: &str) -> Option<f64> {
+    let t = text.trim().replace(['x', '×'], "");
+    let k = match t.split_once(':') {
+        Some((a, b)) => a.trim().parse::<f64>().ok()? / b.trim().parse::<f64>().ok()?,
+        None => t.trim().parse::<f64>().ok()?,
+    };
+    (k.is_finite() && (0.0005..=1000.0).contains(&k)).then_some(k)
 }
 
 /// The drawn line of a dimension, in sheet mm.
