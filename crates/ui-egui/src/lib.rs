@@ -671,6 +671,7 @@ impl SolveApp {
             "pick_bodies": self.ui.pick_bodies,
             "auto_project": self.session.auto_project,
             "auto_project_default_off": true,
+            "navigator_cube_default": true,
             "visual_style": self.ui.visual_style,
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
@@ -690,7 +691,11 @@ impl SolveApp {
 
     /// Restore preferences saved with [`SolveApp::prefs`].
     pub fn load_prefs(&mut self, prefs: &str) {
-        let Ok(v) = serde_json::from_str::<Value>(prefs) else { return };
+        let Ok(v) = serde_json::from_str::<Value>(prefs) else {
+            // Nothing saved yet: the view cube (TOP, FRONT, RIGHT…) is the navigator.
+            self.preferences.navigator_style = prefs::NavigatorStyle::Cube;
+            return;
+        };
         let flag = |k: &str| v.get(k).and_then(Value::as_bool);
         self.home.opened_at = v.get("recent_opened_at").and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default();
         if let Some(d) = flag("dark") {
@@ -747,6 +752,10 @@ impl SolveApp {
             }
             self.ui.layout = p.layout;
             self.preferences = p;
+        }
+        // Settings saved before the view cube became the navigator take it once; after that the choice is theirs.
+        if flag("navigator_cube_default") != Some(true) {
+            self.preferences.navigator_style = prefs::NavigatorStyle::Cube;
         }
         // Saved before the theme was a preference: the Dark/Light flag says which.
         if v.get("preferences").and_then(|p| p.get("theme")).is_none() {
