@@ -109,8 +109,23 @@ struct ShadedView {
     w: f32,
     yaw: f64,
     pitch: f64,
+    /// Height as a fraction of the width.
+    ratio: f32,
+    /// Background: 0 grey gradient, 1 white, 2 transparent.
+    bg: u8,
+    /// Look: 0 shaded with edges, 1 shaded only, 2 wireframe (all edges, no surfaces).
+    style: u8,
+    /// How close the camera sits: smaller fills the frame more.
+    zoom: f32,
 }
 
+impl ShadedView {
+    fn new(x: f32, y: f32, w: f32, yaw: f64, pitch: f64) -> Self {
+        ShadedView { x, y, w, yaw, pitch, ratio: 0.75, bg: 0, style: 0, zoom: 0.8 }
+    }
+}
+
+/// RGBA pixels, width, height.
 type Picture = std::sync::Arc<(Vec<u8>, usize, usize)>;
 
 struct Sheet {
@@ -403,7 +418,7 @@ impl State {
             "marks": self.marks,
             "clines": self.clines,
             "centre_cut": self.centre_cut,
-            "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch])).collect::<Vec<_>>(),
+            "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch, v.ratio, v.bg, v.style, v.zoom])).collect::<Vec<_>>(),
             "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
             "paper": self.paper, "landscape": self.landscape,
         })
@@ -589,10 +604,19 @@ impl State {
         if let Some(list) = d.get("shaded").and_then(serde_json::Value::as_array) {
             for v in list.iter().take(6) {
                 let n: Vec<f64> = v.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
-                if let [x, y, w, yaw, pitch] = n[..]
+                if let [x, y, w, yaw, pitch, rest @ ..] = &n[..]
                     && [x, y, w, yaw, pitch].iter().all(|t| t.is_finite())
                 {
-                    self.shaded.push(ShadedView { x: x as f32, y: y as f32, w: (w as f32).clamp(20.0, 800.0), yaw, pitch });
+                    let mut sv = ShadedView::new(*x as f32, *y as f32, (*w as f32).clamp(20.0, 800.0), *yaw, *pitch);
+                    if let [ratio, bg, style, zoom] = rest
+                        && [ratio, bg, style, zoom].iter().all(|t| t.is_finite())
+                    {
+                        sv.ratio = (*ratio as f32).clamp(0.2, 3.0);
+                        sv.bg = (*bg as u8).min(2);
+                        sv.style = (*style as u8).min(2);
+                        sv.zoom = (*zoom as f32).clamp(0.2, 3.0);
+                    }
+                    self.shaded.push(sv);
                 }
             }
         }
@@ -657,7 +681,7 @@ impl State {
 
 /// Where the picture of a shaded view is kept: its camera, size and the state of the design.
 fn shaded_key(app: &SolveApp, v: &ShadedView) -> String {
-    format!("{:.4}/{:.4}/{:.0}/{}", v.yaw, v.pitch, v.w, app.session.log.len())
+    format!("{:.4}/{:.4}/{:.0}/{:.3}/{}/{}/{:.3}/{}", v.yaw, v.pitch, v.w, v.ratio, v.bg, v.style, v.zoom, app.session.log.len())
 }
 
 /// The picture of a shaded view, drawn now if it is not in the cache. One CPU render of the whole
@@ -675,13 +699,25 @@ fn shaded_picture(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
     cam.yaw = v.yaw;
     cam.pitch = v.pitch;
     cam.fit(&bounds);
-    cam.distance *= 0.8;
-    let scene = solidcraft_engine::view::scene_with_guides(&app.session, &cam, None, solidcraft_engine::view::Guides { grid: false, axes: false });
+    cam.distance *= f64::from(v.zoom.clamp(0.2, 3.0));
+    let mut scene = solidcraft_engine::view::scene_with_guides(&app.session, &cam, None, solidcraft_engine::view::Guides { grid: false, axes: false });
+    match v.style {
+        1 => scene.lines.clear(),
+        2 => scene.meshes.clear(),
+        _ => {}
+    }
     let pw = ((v.w * 5.0) as usize).clamp(160, 1600);
-    let ph = pw * 3 / 4;
-    let canvas = solidcraft_engine::render::render(&scene, &cam, pw, ph);
-    let rgb: Vec<u8> = canvas.rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
-    let picture: Picture = std::sync::Arc::new((rgb, canvas.w, canvas.h));
+    let ph = ((pw as f32 * v.ratio.clamp(0.2, 3.0)) as usize).clamp(80, 2400);
+    let white = solidcraft_engine::render::Rgb(255, 255, 255);
+    let canvas = match v.bg {
+        2 => solidcraft_engine::render::render_transparent(&mut scene, &cam, pw, ph),
+        1 => {
+            scene.background = Some((white, white));
+            solidcraft_engine::render::render(&scene, &cam, pw, ph)
+        }
+        _ => solidcraft_engine::render::render(&scene, &cam, pw, ph),
+    };
+    let picture: Picture = std::sync::Arc::new((canvas.rgba.clone(), canvas.w, canvas.h));
     app.drawing.shaded_cache.retain(|c| !c.0.ends_with(&format!("/{}", app.session.log.len())) || c.0 != key);
     if app.drawing.shaded_cache.len() >= 10 {
         app.drawing.shaded_cache.remove(0);
@@ -708,7 +744,7 @@ fn ensure_shaded(app: &mut SolveApp, ctx: &egui::Context) {
             && entry.2.is_none()
         {
             let (rgb, w, h) = (&entry.1.0, entry.1.1, entry.1.2);
-            let image = egui::ColorImage::from_rgb([w, h], rgb);
+            let image = egui::ColorImage::from_rgba_unmultiplied([w, h], rgb);
             entry.2 = Some(ctx.load_texture(format!("shaded_{key}"), image, egui::TextureOptions::LINEAR));
         }
     }
@@ -724,7 +760,9 @@ fn add_shaded_view(app: &mut SolveApp) {
     let (yaw, pitch) = app.drawing.design_camera.map_or_else(|| solidcraft_engine::render::StandardView::Iso.angles(), |(c, _)| (c.yaw, c.pitch));
     let (sw, sh) = app.drawing.sheet.as_ref().map_or((420.0, 297.0), |s| (s.width, s.height));
     let n = app.drawing.shaded.len() as f32;
-    app.drawing.shaded.push(ShadedView { x: sw * (0.75 - 0.05 * n), y: sh * (0.7 - 0.1 * n), w: (sw * 0.25).clamp(40.0, 300.0), yaw, pitch });
+    let mut v = ShadedView::new(sw * (0.75 - 0.05 * n), sh * (0.7 - 0.1 * n), (sw * 0.25).clamp(40.0, 300.0), yaw, pitch);
+    v.bg = 1;
+    app.drawing.shaded.push(v);
 }
 
 /// Show another sheet of the drawing.
@@ -2039,6 +2077,59 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 remove_shaded = Some(i);
                             }
                         });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Look");
+                            for (k, label) in ["Shaded + edges", "Shaded", "Wireframe"].iter().enumerate() {
+                                if ui.selectable_label(usize::from(v.style) == k, *label).clicked() {
+                                    v.style = k as u8;
+                                    dirty = true;
+                                }
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Background");
+                            for (k, label) in ["Grey", "White", "Transparent"].iter().enumerate() {
+                                if ui.selectable_label(usize::from(v.bg) == k, *label).clicked() {
+                                    v.bg = k as u8;
+                                    dirty = true;
+                                }
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Direction");
+                            use solidcraft_engine::render::StandardView as Sv;
+                            for (label, sv) in [("Iso", Sv::Iso), ("Front", Sv::Front), ("Back", Sv::Back), ("Top", Sv::Top), ("Bottom", Sv::Bottom), ("Left", Sv::Left), ("Right", Sv::Right)] {
+                                if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small).clicked() {
+                                    (v.yaw, v.pitch) = sv.angles();
+                                    dirty = true;
+                                }
+                            }
+                        });
+                        for (label, value, range) in [("Height", &mut v.ratio, 0.2..=3.0_f32), ("Zoom", &mut v.zoom, 0.2..=3.0_f32)] {
+                            ui.horizontal(|ui| {
+                                ui.label(label);
+                                let mut t = *value;
+                                if crate::ui_kit::slider(ui, &mut t, range, crate::ui_kit::Slider::default()).changed() {
+                                    *value = t;
+                                    dirty = true;
+                                }
+                            });
+                        }
+                        for (label, turn, range) in [("Turn", true, -180.0..=180.0_f32), ("Tilt", false, -90.0..=90.0_f32)] {
+                            ui.horizontal(|ui| {
+                                ui.label(label);
+                                let mut deg = (if turn { v.yaw } else { v.pitch }).to_degrees() as f32;
+                                if crate::ui_kit::slider(ui, &mut deg, range, crate::ui_kit::Slider::default()).changed() {
+                                    if turn {
+                                        v.yaw = f64::from(deg).to_radians();
+                                    } else {
+                                        v.pitch = f64::from(deg).to_radians();
+                                    }
+                                    dirty = true;
+                                }
+                            });
+                        }
+                        ui.separator();
                     }
                     if let Some(i) = remove_shaded {
                         app.drawing.shaded.remove(i);
@@ -2694,7 +2785,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     for v in &app.drawing.shaded {
         let key = shaded_key(app, v);
         if let Some(tex) = app.drawing.shaded_cache.iter().find(|c| c.0 == key).and_then(|c| c.2.as_ref()) {
-            let h = v.w * 0.75;
+            let h = v.w * v.ratio;
             let r = Rect::from_two_pos(map(pos2(v.x - v.w / 2.0, v.y + h / 2.0)), map(pos2(v.x + v.w / 2.0, v.y - h / 2.0)));
             painter.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
@@ -3334,8 +3425,17 @@ fn pdf_images(app: &mut SolveApp) -> Vec<(Picture, [f32; 4])> {
         .iter()
         .filter_map(|v| {
             let pic = shaded_picture(app, v)?;
-            let h = v.w * 0.75;
-            Some((pic, [v.x - v.w / 2.0, v.y - h / 2.0, v.w, h]))
+            // The PDF takes plain RGB: the picture over white paper.
+            let rgb: Vec<u8> = pic
+                .0
+                .chunks_exact(4)
+                .flat_map(|p| {
+                    let a = u32::from(p[3]);
+                    [0, 1, 2].map(|k| ((u32::from(p[k]) * a + 255 * (255 - a)) / 255) as u8)
+                })
+                .collect();
+            let h = v.w * v.ratio;
+            Some((std::sync::Arc::new((rgb, pic.1, pic.2)), [v.x - v.w / 2.0, v.y - h / 2.0, v.w, h]))
         })
         .collect()
 }
