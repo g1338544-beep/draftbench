@@ -1,0 +1,40 @@
+# Builds the Draftbench desktop app for Windows (draftbench-windows.zip artifact and a
+# pre-release on GitHub Releases). Run by hand: Actions -> Draftbench Windows -> Run workflow.
+name: Draftbench Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release -p solidcraft
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path pack | Out-Null
+          Copy-Item target/release/solidcraft.exe pack/Draftbench.exe
+          Compress-Archive -Path pack/* -DestinationPath draftbench-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: draftbench-windows
+          path: draftbench-windows.zip
+      - name: Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="windows-${GITHUB_SHA::7}"
+          gh release create "$tag" draftbench-windows.zip --prerelease --title "Draftbench for Windows ($tag)" --notes "Desktop build of ${GITHUB_SHA::7}. Unzip and run Draftbench.exe." --target "$GITHUB_SHA"
