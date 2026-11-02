@@ -24,7 +24,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             distance: String = "2 mm".into() => distance.to_string(),
             chain: bool = false => *chain,
         } => json!({"distance": distance});
-        Stitch("surface.stitch", "STITCH", [("Surfaces", BODIES, true)],
+        Stitch("surface.stitch", "SEW", [("Surfaces", BODIES, true)],
             FeatureKind::Stitch { tolerance, .. }) {
             tolerance: String = String::new() => if tolerance.trim() == "0" { String::new() } else { tolerance.to_string() },
         } => json!({});
