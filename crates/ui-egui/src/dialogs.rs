@@ -1596,7 +1596,13 @@ thread_local! {
 /// A plane input as a command parameter: an origin/construction plane name or a face plane.
 fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
     match sel? {
-        Sel::Plane { name } => Some(json!(name)),
+        Sel::Plane { name } => match plane_frame(s, sel) {
+            // The origin planes follow a moved WCS: a plane of the same name carried with it.
+            Some((o, n)) if s.wcs.is_some() && !matches!(name.as_str(), "" | "none") && is_origin_name(name) => {
+                Some(json!({"origin": pt(o), "normal": pt(n)}))
+            }
+            _ => Some(json!(name)),
+        },
         Sel::Face { body, index, point } => {
             let (_, n) = planar_face(s, body, *index)?;
             Some(json!({"origin": pt(*point), "normal": pt(n)}))
@@ -1605,15 +1611,24 @@ fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
     }
 }
 
+fn is_origin_name(name: &str) -> bool {
+    matches!(name, "XY" | "XZ" | "YZ")
+}
+
 /// A plane or planar face as a point on it and its unit normal.
 fn plane_frame(s: &Session, sel: Option<&Sel>) -> Option<(Vec3, Vec3)> {
     match sel? {
-        Sel::Plane { name } => match name.as_str() {
-            "XY" => Some((Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0))),
-            "XZ" => Some((Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0))),
-            "YZ" => Some((Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0))),
-            _ => None,
-        },
+        Sel::Plane { name } => {
+            let n = match name.as_str() {
+                "XY" => Vec3::Z,
+                "XZ" => Vec3::Y,
+                "YZ" => Vec3::X,
+                _ => return None,
+            };
+            // Carried with the WCS when it has moved.
+            let w = s.wcs.unwrap_or(solidcraft_engine::cmd::wcs::Wcs::WORLD);
+            Some((w.origin, w.x * n.x + w.y * n.y + w.z() * n.z))
+        }
         Sel::Face { body, index, point } => planar_face(s, body, *index).map(|(_, n)| (*point, n)),
         _ => None,
     }
@@ -2828,11 +2843,12 @@ fn hole_defaults() -> Kind {
 /// Start a sketch on a picked plane or planar face and turn the view to face it.
 pub fn start_sketch(app: &mut SolveApp, sel: &Sel) -> Result<(), String> {
     let mut params = match sel {
-        Sel::Plane { name } => json!({ "plane": name }),
+        Sel::Plane { name } => json!({ "plane": crate::viewport::wcs_plane_value(app, name).unwrap_or_else(|| json!(name)) }),
         Sel::Face { .. } => json!({ "plane": crate::sketch_attachment_ui::face_plane(app, sel).ok_or("Selected face placement no longer exists")? }),
         _ => return Err("Select an origin plane, construction plane or planar body face".into()),
     };
     if let Sel::Plane { name } = sel
+        && crate::viewport::wcs_plane_value(app, name).is_none()
         && let Some(flip) = flip_toward_viewer(app, name)
     {
         params["flip"] = json!(flip);

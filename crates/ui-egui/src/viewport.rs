@@ -1011,8 +1011,14 @@ pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     // While the Origin is hidden, a dialog picking a plane brings the planes back: then every
     // plane; otherwise only those not hidden one by one.
     let creating = !app.ui.show_origin && app.picking_plane();
+    let w = moved_wcs(app);
     origin_quads(origin_size(app.cam.half_height()))
         .into_iter()
+        .map(|(n, normal, q)| match w {
+            // The origin planes follow the WCS: turned and moved with XC, YC and ZC.
+            Some(w) => (n, wcs_dir(&w, normal), q.map(|c| wcs_point(&w, c))),
+            None => (n, normal, q),
+        })
         .filter(|(n, _, _)| creating || !app.session.visibility.hidden_origin.iter().any(|h| h == n))
         .collect()
 }
@@ -1027,12 +1033,61 @@ pub fn origin_plane_target(app: &SolveApp, proj: &Proj, name: &str) -> Option<Ve
     Some(std::iter::once(mid).chain(q.iter().map(|c| (mid + *c) / 2.0)).find(picked).unwrap_or(mid))
 }
 
+/// The WCS when it is not on the world axes.
+fn moved_wcs(app: &SolveApp) -> Option<solidcraft_engine::cmd::wcs::Wcs> {
+    let w = app.session.wcs?;
+    let same = (w.origin - Vec3::ZERO).len() < 1e-9 && (w.x - Vec3::X).len() < 1e-9 && (w.y - Vec3::Y).len() < 1e-9;
+    (!same).then_some(w)
+}
+
+fn wcs_dir(w: &solidcraft_engine::cmd::wcs::Wcs, d: Vec3) -> Vec3 {
+    w.x * d.x + w.y * d.y + w.z() * d.z
+}
+
+fn wcs_point(w: &solidcraft_engine::cmd::wcs::Wcs, p: Vec3) -> Vec3 {
+    w.origin + wcs_dir(w, p)
+}
+
+/// A standard view `c` (set on the world axes) carried with the WCS: the same view of the
+/// WCS's own axes. The camera keeps the world's up direction vertical; looking straight along
+/// ZC turns about it so XC points right.
+pub fn view_with_wcs(app: &SolveApp, c: Camera) -> Camera {
+    let Some(w) = moved_wcs(app) else { return c };
+    let Some(back) = wcs_dir(&w, c.back()).normalized() else { return c };
+    let mut out = c.looking_from(back);
+    // Straight up or down: the yaw follows the WCS's XC direction instead of a quarter turn.
+    let flat = c.to_frame(back);
+    if flat.x.hypot(flat.y) < 1e-6 {
+        let x = c.to_frame(w.x);
+        if x.x.hypot(x.y) > 1e-9 {
+            out.yaw = c.yaw - x.y.atan2(x.x);
+        }
+    }
+    out
+}
+
+/// An origin plane's placement for a command, when the WCS has moved: the plane of the same
+/// name carried with the WCS (`None` on the world axes: the plain name is used).
+pub fn wcs_plane_value(app: &SolveApp, name: &str) -> Option<serde_json::Value> {
+    let w = moved_wcs(app)?;
+    let (a, b) = match name {
+        "XY" => (Vec3::X, Vec3::Y),
+        "XZ" => (Vec3::X, Vec3::Z),
+        "YZ" => (Vec3::Y, Vec3::Z),
+        _ => return None,
+    };
+    let p = |v: Vec3| [v.x, v.y, v.z];
+    Some(json!({"origin": p(w.origin), "x_dir": p(wcs_dir(&w, a)), "y_dir": p(wcs_dir(&w, b))}))
+}
+
 pub fn origin_axes(app: &SolveApp) -> Vec<(&'static str, Vec3)> {
     if !app.origin_visible() {
         return Vec::new();
     }
+    let w = moved_wcs(app);
     [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)]
         .into_iter()
+        .map(|(n, d)| (n, w.map_or(d, |w| wcs_dir(&w, d))))
         .filter(|(n, _)| !app.session.visibility.hidden_origin.iter().any(|h| h == n))
         .collect()
 }

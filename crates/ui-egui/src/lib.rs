@@ -1481,7 +1481,11 @@ impl SolveApp {
                 to = self.fitted(to);
             }
             v => match StandardView::parse(v) {
-                Some(sv) => to.set_view(sv),
+                Some(sv) => {
+                    to.set_view(sv);
+                    // With the WCS moved, Top, Front, Right… look along its XC, YC, ZC.
+                    to = viewport::view_with_wcs(self, to);
+                }
                 None => return,
             },
         }
