@@ -153,6 +153,8 @@ pub struct State {
     /// Centre marks placed by hand (x, y, arm length in mm on the sheet), and the tool that places them.
     marks: Vec<[f32; 3]>,
     mark_tool: bool,
+    /// The Erase Centre tool: a click or a dragged frame removes the centre lines and marks it touches.
+    erase_tool: bool,
     /// Centre lines placed between two picked lines (ends on the sheet), and the tool: the lines picked so far.
     clines: Vec<[f32; 4]>,
     /// Rectangles (x0, y0, x1, y1 on the sheet) where centre lines were erased.
@@ -249,6 +251,7 @@ impl Default for State {
             bom: Vec::new(),
             marks: Vec::new(),
             mark_tool: false,
+            erase_tool: false,
             clines: Vec::new(),
             centre_cut: Vec::new(),
             cl_drag: None,
@@ -1293,7 +1296,14 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             app.drawing.mark_tool = false;
             app.drawing.dim_tool = None;
         }
+        "drawing.ribbon.centreerase" => {
+            app.drawing.erase_tool = !app.drawing.erase_tool;
+            app.drawing.mark_tool = false;
+            app.drawing.cline_tool = None;
+            app.drawing.dim_tool = None;
+        }
         "drawing.ribbon.centremark" => {
+            app.drawing.erase_tool = false;
             app.drawing.mark_tool = !app.drawing.mark_tool;
             app.drawing.dim_tool = None;
         }
@@ -2079,6 +2089,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let extent = app.drawing.sheet.as_ref().map(|s| s.width.hypot(s.height)).unwrap_or(500.0);
     let map = sheet_map(app, rect, extent);
 
+    let mut erase_click: Option<[f32; 4]> = None;
     // Dragging a placed view moves it; any other drag navigates (pan/zoom) as in the model view.
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).copied();
@@ -2103,7 +2114,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         };
         let pointer = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
-        if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
+        if app.drawing.erase_tool {
+            if let Some(s) = pointer {
+                if response.drag_started_by(egui::PointerButton::Primary) {
+                    app.drawing.erase = Some((s, s));
+                } else if response.clicked_by(egui::PointerButton::Primary) {
+                    let g = tol * 0.6;
+                    erase_click = Some([s.x - g, s.y - g, s.x + g, s.y + g]);
+                }
+            }
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
             && let Some(s) = pointer
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(e) = end_hit(s)
@@ -2157,6 +2177,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.selected = if app.drawing.sel_centre.is_some() { None } else { hit(s).map(|b| b.0) };
             app.drawing.sel_dim = None;
         }
+    }
+    if let Some(r) = erase_click {
+        erase_centre(app, r);
+    }
+    if app.drawing.erase_tool && (ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary)) {
+        app.drawing.erase_tool = false;
+        app.drawing.erase = None;
     }
     // Stretching a centre line: the end follows the pointer along the line; letting go keeps it.
     if let (Some((oa, ob, _, _, second)), Some(m)) = (app.drawing.cl_drag, &map) {
@@ -2739,6 +2766,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             painter.circle(map(q), 5.0, Color32::WHITE, Stroke::new(2.0, accent));
             painter.text(map(q) + vec2(7.0, -7.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(Tokens::get().font_body), accent);
         }
+    }
+    if app.drawing.erase_tool {
+        painter.text(
+            rect.left_top() + vec2(12.0, 10.0),
+            egui::Align2::LEFT_TOP,
+            "Erase Centre: click a centre line or mark, or drag a frame over them. Esc or right-click ends.",
+            egui::FontId::proportional(Tokens::get().font_body),
+            Color32::from_rgb(235, 110, 110),
+        );
     }
     if let Some((a, b)) = app.drawing.erase {
         let r = Rect::from_two_pos(map(a), map(b));
