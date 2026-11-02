@@ -264,6 +264,8 @@ pub struct State {
     erase_tool: bool,
     /// Whether a view placed from the Base View window shows its hidden lines (dashed).
     base_dashed: bool,
+    /// Whether the Base View places line views (0) or a shaded colour picture like the 3D window (1).
+    base_shaded: bool,
     /// Centre lines placed between two picked lines (ends on the sheet), and the tool: the lines picked so far.
     clines: Vec<[f32; 4]>,
     /// Rectangles (x0, y0, x1, y1 on the sheet) where centre lines were erased.
@@ -362,6 +364,7 @@ impl Default for State {
             mark_tool: false,
             erase_tool: false,
             base_dashed: true,
+            base_shaded: false,
             clines: Vec::new(),
             centre_cut: Vec::new(),
             cl_drag: None,
@@ -1606,6 +1609,7 @@ fn base_window(app: &mut SolveApp, ctx: &egui::Context) {
     let mut orient = false;
     let mut close = false;
     let mut dashed = app.drawing.base_dashed;
+    let mut shaded = app.drawing.base_shaded;
     let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_base"), "base", "Base View").show_body(ctx, |ui| {
         ui.label("Model view to use");
         view_buttons(ui, &mut view);
@@ -1615,6 +1619,7 @@ fn base_window(app: &mut SolveApp, ctx: &egui::Context) {
         ui.label("Scale");
         scale_picker(ui, "base_scale", &mut scale);
         crate::ui_kit::checkbox(ui, "Show hidden lines (dashed)", &mut dashed);
+        crate::ui_kit::checkbox(ui, "Colour 3D picture (shaded, not in DXF)", &mut shaded);
         ui.small("Click the sheet to place the view. Click again for another; Close ends.");
         close = crate::ui_kit::button(ui, "Close", crate::ui_kit::Button::Small).clicked();
     });
@@ -1622,6 +1627,7 @@ fn base_window(app: &mut SolveApp, ctx: &egui::Context) {
         app.drawing.orient = Some(["1".into(), "-1".into(), "1".into()]);
     }
     app.drawing.base_dashed = dashed;
+    app.drawing.base_shaded = shaded;
     app.drawing.base = if closed || close { None } else { Some((view, scale)) };
 }
 
@@ -2331,6 +2337,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if app.drawing.cline_tool.is_none()
         && let Some((view, scale)) = app.drawing.base.clone()
         && view <= 6
+        && !app.drawing.base_shaded
     {
         let key = format!("{view}|{scale}|{}|{}|{}", app.drawing.paper, app.drawing.first_angle, app.drawing.base_dashed);
         if app.drawing.base_preview.as_ref().is_none_or(|(k, _)| *k != key) {
@@ -2854,6 +2861,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && view <= 6
     {
         if let Some(at) = response.hover_pos().and_then(|q| m.to_sheet(q))
+            && !app.drawing.base_shaded
             && let Some((_, Some(pv))) = &app.drawing.base_preview
         {
             paint_preview(&painter, &m, pv, at);
@@ -2866,6 +2874,27 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let Some(at) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
     {
         let base_dashed = app.drawing.base_dashed;
+        if app.drawing.base_shaded {
+            // A colour picture from the chosen direction, as the 3D window would show it.
+            use solidcraft_engine::render::StandardView as Sv;
+            let (yaw, pitch) = match view {
+                0 => Sv::Front.angles(),
+                1 => Sv::Top.angles(),
+                2 => Sv::Right.angles(),
+                3 => Sv::Left.angles(),
+                4 => Sv::Back.angles(),
+                5 => Sv::Bottom.angles(),
+                6 => Sv::Iso.angles(),
+                _ => app.drawing.design_camera.map_or_else(|| Sv::Iso.angles(), |(c, _)| (c.yaw, c.pitch)),
+            };
+            if app.drawing.shaded.len() < 6 {
+                let sw = app.drawing.sheet.as_ref().map_or(420.0, |sh| sh.width);
+                let mut v = ShadedView::new(at.x, at.y, (sw * 0.3).clamp(40.0, 300.0), yaw, pitch);
+                v.bg = 1;
+                app.drawing.shaded.push(v);
+            }
+            return;
+        }
         if view == 7 {
             add_model_view(app);
         } else {
