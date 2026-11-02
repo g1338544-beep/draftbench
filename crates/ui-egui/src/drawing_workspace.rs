@@ -266,6 +266,10 @@ pub struct State {
     mark_tool: bool,
     /// The Erase Centre tool: a click or a dragged frame removes the centre lines and marks it touches.
     erase_tool: bool,
+    /// The view whose caption is selected on the sheet, and the one being edited with its text.
+    caption_sel: Option<usize>,
+    caption_edit: Option<usize>,
+    caption_buf: String,
     /// Whether a view placed from the Base View window shows its hidden lines (dashed).
     base_dashed: bool,
     /// Whether the Base View places line views (0) or a shaded colour picture like the 3D window (1).
@@ -370,6 +374,9 @@ impl Default for State {
             marks: Vec::new(),
             mark_tool: false,
             erase_tool: false,
+            caption_sel: None,
+            caption_edit: None,
+            caption_buf: String::new(),
             base_dashed: true,
             base_shaded: false,
             clines: Vec::new(),
@@ -2427,7 +2434,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).copied();
         let tol = 12.0 / m.px_per_mm();
         let dims = &app.drawing.dims;
-        let dim_hit = |s: Pos2| dims.iter().enumerate().rev().find(|(_, d)| dim_parts(d).into_iter().any(|seg| dist_to_segment(s, seg) <= tol)).map(|(i, _)| i);
+        // A dimension is easy to catch: a generous reach around its lines.
+        let dtol = 18.0 / m.px_per_mm();
+        let dim_hit = |s: Pos2| dims.iter().enumerate().rev().find(|(_, d)| dim_parts(d).into_iter().any(|seg| dist_to_segment(s, seg) <= dtol)).map(|(i, _)| i);
+        // The caption under a view: the strip below its frame.
+        let cap_hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= 30.0 && s.y <= b.2 - b.4 / 2.0 - 1.0 && s.y >= b.2 - b.4 / 2.0 - 24.0).map(|b| b.0);
         let centre_hit = |s: Pos2| {
             sheet.items.iter().find_map(|(l, sh)| match (l, sh) {
                 (Layer::Center, Shape::Line(a, b)) if dist_to_segment(s, (*a, *b)) <= tol => Some((*a, *b)),
@@ -2446,6 +2457,34 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         };
         let pointer = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
+        // A view's caption: click selects it, double-click edits it, Delete hides it.
+        if app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.base.is_none() && app.drawing.text_edit.is_none() && app.drawing.cell_edit.is_none() {
+            if let Some(s) = pointer
+                && (response.clicked() || response.double_clicked())
+            {
+                let hit_view = cap_hit(s).filter(|v| app.drawing.placed.get(*v).is_some_and(|p| p.label.as_deref() != Some("")));
+                app.drawing.caption_sel = hit_view;
+                if let Some(v) = hit_view {
+                    app.drawing.selected = Some(v);
+                    app.drawing.sel_dim = None;
+                    app.drawing.sel_centre = None;
+                    if response.double_clicked() {
+                        // The caption as drawn now: the automatic one or the user's own.
+                        let b = sheet.boxes.iter().find(|b| b.0 == v).copied();
+                        let text = b
+                            .and_then(|b| {
+                                sheet.items.iter().find_map(|(l, sh)| match (l, sh) {
+                                    (Layer::Text, Shape::Text(p, _, t)) if (p.x - b.1).abs() < 2.0 && p.y <= b.2 - b.4 / 2.0 - 1.0 && p.y >= b.2 - b.4 / 2.0 - 24.0 => Some(t.clone()),
+                                    _ => None,
+                                })
+                            })
+                            .unwrap_or_default();
+                        app.drawing.caption_buf = text;
+                        app.drawing.caption_edit = Some(v);
+                    }
+                }
+            }
+        }
         if app.drawing.erase_tool {
             if let Some(s) = pointer {
                 if response.drag_started_by(egui::PointerButton::Primary) {
@@ -2461,9 +2500,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(e) = end_hit(s)
         {
             app.drawing.drag_end = Some(e);
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
+        } else if app.drawing.proj_tool.is_none()
             && let Some(s) = pointer
-            && (response.drag_started_by(egui::PointerButton::Primary) || response.clicked() || response.double_clicked())
+            // While measuring, only a drag takes hold of a dimension (a click places points).
+            && (if app.drawing.dim_tool.is_none() { response.drag_started_by(egui::PointerButton::Primary) || response.clicked() || response.double_clicked() } else { response.drag_started_by(egui::PointerButton::Primary) })
             && let Some(i) = dim_hit(s)
         {
             app.drawing.sel_dim = Some(i);
@@ -2768,6 +2808,50 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         remove_view(app, i);
         refresh(app);
+    }
+    if let Some(i) = app.drawing.caption_sel
+        && !ui.ctx().egui_wants_keyboard_input()
+        && ui.input(|inp| inp.key_pressed(egui::Key::Delete) || inp.key_pressed(egui::Key::Backspace))
+    {
+        if let Some(v) = app.drawing.placed.get_mut(i) {
+            v.label = Some(String::new());
+        }
+        app.drawing.caption_sel = None;
+        refresh(app);
+    }
+    if let Some(i) = app.drawing.caption_edit {
+        if i >= app.drawing.placed.len() {
+            app.drawing.caption_edit = None;
+        } else {
+            let mut changed = false;
+            let (mut hide, mut auto) = (false, false);
+            let mut text = app.drawing.caption_buf.clone();
+            let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_caption"), "caption", "Caption").show_body(ui.ctx(), |ui| {
+                changed = ui.add(egui::TextEdit::singleline(&mut text).desired_width(220.0)).changed();
+                ui.horizontal(|ui| {
+                    hide = crate::ui_kit::button(ui, "Delete caption", crate::ui_kit::Button::Small).clicked();
+                    auto = crate::ui_kit::button(ui, "Automatic", crate::ui_kit::Button::Small).clicked();
+                });
+            });
+            if changed {
+                text = text.chars().take(80).collect();
+                app.drawing.caption_buf = text.clone();
+                if let Some(v) = app.drawing.placed.get_mut(i) {
+                    v.label = Some(text);
+                }
+                refresh(app);
+            }
+            if hide || auto {
+                if let Some(v) = app.drawing.placed.get_mut(i) {
+                    v.label = if hide { Some(String::new()) } else { None };
+                }
+                refresh(app);
+            }
+            if closed || hide || auto {
+                app.drawing.caption_edit = None;
+                app.drawing.caption_sel = None;
+            }
+        }
     }
     if let Some(i) = app.drawing.scale_edit {
         if i >= app.drawing.placed.len() {
@@ -3203,6 +3287,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else {
             (b.1, b.2)
         };
+        if app.drawing.caption_sel == Some(b.0) {
+            let (top, bottom) = if app.drawing.placed.get(b.0).is_some_and(|v| v.dims) { (13.0, 23.0) } else { (3.0, 13.0) };
+            let r = Rect::from_two_pos(map(pos2(cx - 28.0, cy - b.4 / 2.0 - top)), map(pos2(cx + 28.0, cy - b.4 / 2.0 - bottom)));
+            painter.rect_stroke(r, 2.0, Stroke::new(1.5, accent), egui::StrokeKind::Outside);
+        }
         if selected || dragging {
             let r = Rect::from_two_pos(map(pos2(cx - b.3 / 2.0 - 3.0, cy - b.4 / 2.0 - 3.0)), map(pos2(cx + b.3 / 2.0 + 3.0, cy + b.4 / 2.0 + 3.0)));
             painter.rect_stroke(r, 0.0, Stroke::new(1.5, accent), egui::StrokeKind::Outside);
