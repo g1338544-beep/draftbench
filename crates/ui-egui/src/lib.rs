@@ -246,6 +246,7 @@ mod ui_kit_guard_tests;
 pub mod update;
 pub mod viewport;
 mod viewport_layout;
+mod wcs_triad;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;

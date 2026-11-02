@@ -90,6 +90,7 @@ mod surface_boundary;
 mod surface_match;
 mod view_dxf;
 mod view_navigation;
+pub mod wcs;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -292,6 +293,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(edit::COMMANDS.iter());
     v.extend(clipboard::COMMANDS.iter());
     v.extend(sketch_clipboard::COMMANDS.iter());
+    v.extend(wcs::COMMANDS.iter());
     v.extend(script::COMMANDS.iter());
     v.extend(parameters::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
