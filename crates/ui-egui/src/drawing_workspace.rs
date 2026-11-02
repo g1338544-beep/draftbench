@@ -98,6 +98,7 @@ pub struct State {
     /// AutoCAD colour numbers: visible, hidden, centre, dimension.
     colours: [u8; 4],
     centre: bool,
+    hole_table: bool,
     text_height: String,
     placed: Vec<PlacedView>,
     dims: Vec<DimItem>,
@@ -144,6 +145,7 @@ impl Default for State {
             hidden_style: 0,
             colours: [7, 8, 1, 3],
             centre: true,
+            hole_table: false,
             text_height: "3.5".into(),
             placed: Vec::new(),
             dims: Vec::new(),
@@ -193,7 +195,7 @@ impl State {
             "custom_w": self.custom_w, "custom_h": self.custom_h, "sheet_scale": self.sheet_scale,
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
-            "centre": self.centre, "text_height": self.text_height, "author": self.author,
+            "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "author": self.author,
             "company": self.company, "designs": designs,
         })
     }
@@ -215,6 +217,9 @@ impl State {
         }
         if let Some(b) = flag("centre") {
             self.centre = b;
+        }
+        if let Some(b) = flag("hole_table") {
+            self.hole_table = b;
         }
         if let Some(n) = index("centre_mode", 8) {
             self.centre_mode = n;
@@ -350,6 +355,7 @@ fn params(st: &State) -> Value {
         })).collect::<Vec<_>>(),
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
         "bolt_circle": st.bolt,
+        "hole_table": st.hole_table,
         "hidden_style": if st.hidden_style == 1 { "dashed" } else { "hidden" },
         "colors": {"visible": st.colours[0], "hidden": st.colours[1], "center": st.colours[2], "dim": st.colours[3]},
     });
@@ -618,6 +624,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.separator();
                     ui.label("Lines");
                     dirty |= crate::ui_kit::checkbox(ui, "Centre lines on circles", &mut app.drawing.centre).changed();
+                    dirty |= crate::ui_kit::checkbox(ui, "Hole table (tags + X, Y, diameter)", &mut app.drawing.hole_table).changed();
                     if app.drawing.centre {
                         let mode = ["Centre lines (full cross)", "Centre marks (small cross)"][app.drawing.centre_mode.min(1)];
                         crate::ui_kit::dropdown_menu(ui, "drawing_centre_mode", mode, |ui| {

@@ -114,6 +114,8 @@ fn manual(
     let mut boxes = Vec::new();
     let mut names = Vec::new();
     let mut any_dashed = false;
+    let want_table = p.get("hole_table").and_then(Value::as_bool).unwrap_or(false);
+    let mut table: Option<Vec<(Vec2, f64)>> = None;
     for (index, item) in list.iter().take(12).enumerate() {
         let name = item.get("view").and_then(Value::as_str).ok_or_else(|| bad(CMD, "each placement needs a view"))?;
         let view = StandardView::parse(name).ok_or_else(|| bad(CMD, format!("unknown view `{name}`")))?;
@@ -203,6 +205,21 @@ fn manual(
                 }
             }
         }
+        // The first plain orthographic view with holes gets tags and a coordinate table; the
+        // origin is the view's lower-left corner.
+        if want_table && table.is_none() && section.is_none() && view != StandardView::Iso {
+            let mut found = circles(&all.lines, false);
+            found.retain(|(_, r)| r.is_finite() && *r > 1e-6);
+            if !found.is_empty() {
+                found.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.y.total_cmp(&b.0.y)).then(a.0.x.total_cmp(&b.0.x)));
+                found.truncate(40);
+                for (i, (c, r)) in found.iter().enumerate() {
+                    let at = to_sheet(*c);
+                    text("TEXT", Vec2::new(at.x + r * scale + 1.0, at.y + r * scale + 1.0), th * 0.8, format!("H{}", i + 1), &mut entities);
+                }
+                table = Some(found.into_iter().map(|(c, r)| (Vec2::new(c.x - all.lo.x, c.y - all.lo.y), r)).collect());
+            }
+        }
         let dims = item.get("dims").and_then(Value::as_bool).unwrap_or(default_dims) && view != StandardView::Iso;
         let (lo, hi) = (to_sheet(all.lo), to_sheet(all.hi));
         if dims {
@@ -228,6 +245,31 @@ fn manual(
         text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, caption, &mut entities);
         boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));
         names.push(view_name(view).to_string());
+    }
+    if let Some(rows) = &table {
+        let row_h = th * 1.9;
+        let cols = [14.0, 20.0, 20.0, 20.0];
+        let width: f64 = cols.iter().sum();
+        let x0 = sheet_w - MARGIN - width - 2.0;
+        let top = sheet_h - MARGIN - 4.0;
+        let bottom = top - row_h * (rows.len() as f64 + 1.0);
+        rect("DIM", Vec2::new(x0, bottom), Vec2::new(x0 + width, top), &mut entities);
+        let mut x = x0;
+        for w in &cols[..3] {
+            x += w;
+            line("DIM", Vec2::new(x, bottom), Vec2::new(x, top), &mut entities);
+        }
+        let mut cells = vec![["HOLE".to_string(), "X".into(), "Y".into(), "DIA".into()]];
+        cells.extend(rows.iter().enumerate().map(|(i, (c, r))| [format!("H{}", i + 1), trim_mm(c.x), trim_mm(c.y), trim_mm(2.0 * r)]));
+        for (k, row) in cells.iter().enumerate() {
+            let y = top - row_h * (k as f64 + 1.0);
+            line("DIM", Vec2::new(x0, y), Vec2::new(x0 + width, y), &mut entities);
+            let mut x = x0;
+            for (w, t) in cols.iter().zip(row) {
+                text("TEXT", Vec2::new(x + 1.5, y + row_h * 0.3), th * 0.8, t.clone(), &mut entities);
+                x += w;
+            }
+        }
     }
     if let Some(list) = p.get("dimension_items").and_then(Value::as_array) {
         for d in list.iter().take(200) {
