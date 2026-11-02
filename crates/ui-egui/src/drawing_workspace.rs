@@ -2319,6 +2319,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let parent_view = app.drawing.placed.get(parent).map_or(0, |v| v.view);
                 found = match (parent_view, horizontal) {
                     (1 | 5, true) => Some(if dx >= 0.0 { 2 } else { 3 }),
+                    // Beyond the front view, the other way from a top or bottom view: the back view.
+                    (1 | 5, false) => Some(4),
                     (2 | 3 | 4, false) => Some(if dy >= 0.0 { 1 } else { 5 }),
                     _ => None,
                 };
@@ -2343,7 +2345,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     section: None,
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
-                    rot: if free && matches!(view, 2 | 3) && app.drawing.placed.get(parent).is_some_and(|v| matches!(v.view, 1 | 5)) { if dx >= 0.0 { 1 } else { 3 } } else { 0 },
+                    rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
+                        (true, 2 | 3, 1 | 5) => if dx >= 0.0 { 1 } else { 3 },
+                        (true, 1 | 5, 2 | 3) => if dy >= 0.0 { 1 } else { 3 },
+                        _ => 0,
+                    },
                 });
                 app.drawing.selected = Some(n);
                 app.drawing.proj_tool = None;
