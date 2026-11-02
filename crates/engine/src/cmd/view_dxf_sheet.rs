@@ -117,6 +117,7 @@ fn manual(
     let want_table = p.get("hole_table").and_then(Value::as_bool).unwrap_or(false);
     let mut table: Option<Vec<(Vec2, f64)>> = None;
     let mut scales: std::collections::BTreeMap<usize, f64> = std::collections::BTreeMap::new();
+    let mut infos: std::collections::BTreeMap<usize, ViewInfo> = std::collections::BTreeMap::new();
     for (index, item) in list.iter().take(12).enumerate() {
         let name = item.get("view").and_then(Value::as_str).ok_or_else(|| bad(CMD, "each placement needs a view"))?;
         let view = StandardView::parse(name).ok_or_else(|| bad(CMD, format!("unknown view `{name}`")))?;
@@ -187,6 +188,31 @@ fn manual(
         if section.is_some() {
             let segments: Vec<(Vec2, Vec2)> = all.lines.iter().map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
             hatch(&segments, 3.0, &mut entities);
+        }
+        let centres_on = section.is_none() && item.get("center").and_then(Value::as_bool).unwrap_or(true);
+        if centres_on && view != StandardView::Iso {
+            let here = circles(&all.lines, true);
+            // Hole axes carry over to the view projected from this one (and back): a circle in one
+            // view is a pair of parallel lines in the aligned view, with the centre line between.
+            let link = item.get("align").and_then(Value::as_array).and_then(|a| Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?)));
+            if let Some((pi, horizontal)) = link
+                && let Some(par) = infos.get(&pi)
+            {
+                for (c, r) in &par.circles {
+                    if let Some((lo, hi)) = axis_span(&all.lines, *c, *r, horizontal) {
+                        axis_line(Vec2::new(lo, c.y), Vec2::new(hi, c.y), Vec2::new(c.x, lo), Vec2::new(c.x, hi), horizontal, &to_sheet, &mut entities);
+                        any_centre = true;
+                    }
+                }
+                let parent_sheet = |q: Vec2| Vec2::new(par.x + (q.x - par.c.x) * par.scale, par.y + (q.y - par.c.y) * par.scale);
+                for (c, r) in &here {
+                    if let Some((lo, hi)) = axis_span(&par.lines.lines, *c, *r, horizontal) {
+                        axis_line(Vec2::new(lo, c.y), Vec2::new(hi, c.y), Vec2::new(c.x, lo), Vec2::new(c.x, hi), horizontal, &parent_sheet, &mut entities);
+                        any_centre = true;
+                    }
+                }
+            }
+            infos.insert(index, ViewInfo { lines: all.clone(), circles: here, x, y, c, scale });
         }
         if section.is_none() && item.get("center").and_then(Value::as_bool).unwrap_or(true) {
             let mode = str_(p, "centre_mode").unwrap_or("lines");
@@ -283,6 +309,49 @@ fn manual(
     }
     let entities = projection::connect(entities);
     finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, any_centre, names, path, boxes)
+}
+
+/// What a placed view offers the views aligned with it.
+struct ViewInfo {
+    lines: std::rc::Rc<Projected>,
+    circles: Vec<(Vec2, f64)>,
+    x: f64,
+    y: f64,
+    c: Vec2,
+    scale: f64,
+}
+
+/// Where a hole of centre `c` and radius `r` seen end-on in an aligned view shows in `lines` as two
+/// parallel lines `r` either side of its axis: the extent of those lines along the axis.
+fn axis_span(lines: &[(Vec2, Vec2, bool)], c: Vec2, r: f64, horizontal: bool) -> Option<(f64, f64)> {
+    let tol = (0.02 * r).max(0.05);
+    let shared = if horizontal { c.y } else { c.x };
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    let (mut near, mut far) = (false, false);
+    for (a, b, _) in lines {
+        let (pa, pb, sa, sb) = if horizontal { (a.x, b.x, a.y, b.y) } else { (a.y, b.y, a.x, b.x) };
+        if (sa - sb).abs() > 1e-6 + 1e-3 * (pa - pb).abs() {
+            continue;
+        }
+        let off = sa - shared;
+        if (off + r).abs() <= tol {
+            near = true;
+        } else if (off - r).abs() <= tol {
+            far = true;
+        } else {
+            continue;
+        }
+        lo = lo.min(pa.min(pb));
+        hi = hi.max(pa.max(pb));
+    }
+    (near && far && hi > lo).then_some((lo, hi))
+}
+
+/// A centre line through an axis, a little longer than the hole at both ends.
+fn axis_line(h1: Vec2, h2: Vec2, v1: Vec2, v2: Vec2, horizontal: bool, to_sheet: &dyn Fn(Vec2) -> Vec2, entities: &mut Vec<DxfEntity>) {
+    let (a, b) = if horizontal { (to_sheet(h1), to_sheet(h2)) } else { (to_sheet(v1), to_sheet(v2)) };
+    let (a, b) = if horizontal { (Vec2::new(a.x - 3.0, a.y), Vec2::new(b.x + 3.0, b.y)) } else { (Vec2::new(a.x, a.y - 3.0), Vec2::new(b.x, b.y + 3.0)) };
+    line("CENTER", a, b, entities);
 }
 
 /// The middle of the visible bodies along a world axis.

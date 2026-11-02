@@ -350,10 +350,11 @@ fn params(st: &State) -> Value {
                 "dims": v.dims,
                 "center": st.centre,
             });
-            if let Some((parent, _)) = v.align
-                && v.scale.trim().is_empty()
-            {
-                o["scale_from"] = json!(parent);
+            if let Some((parent, horizontal)) = v.align {
+                o["align"] = json!([parent, horizontal]);
+                if v.scale.trim().is_empty() {
+                    o["scale_from"] = json!(parent);
+                }
             }
             if let Some((axis, at)) = &v.section {
                 let name = ["x", "y", "z"][(*axis).min(2)];
