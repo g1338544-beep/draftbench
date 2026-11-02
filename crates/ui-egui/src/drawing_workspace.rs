@@ -13,7 +13,7 @@ use crate::{SolveApp, theme::Tokens};
 const PAPERS: [&str; 5] = ["A0", "A1", "A2", "A3", "A4"];
 const SIZES: [(f32, f32); 5] = [(1189.0, 841.0), (841.0, 594.0), (594.0, 420.0), (420.0, 297.0), (297.0, 210.0)];
 /// AutoCAD colour numbers offered for lines, with how they look on the white sheet.
-const COLOURS: [(u8, &str, Color32); 24] = [
+const COLOURS: [(u8, &str, Color32); 25] = [
     (7, "Black", Color32::from_rgb(20, 20, 24)),
     (8, "Grey", Color32::from_rgb(120, 120, 120)),
     (1, "Red", Color32::from_rgb(200, 40, 40)),
