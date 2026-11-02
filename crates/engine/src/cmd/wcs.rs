@@ -27,18 +27,18 @@ impl Wcs {
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("wcs.origin", "WCS Origin", origin)
         .at("SOLID", "INSPECT")
-        .icon("measure")
+        .icon("origin")
         .noundo()
         .params("point?: [x,y,z] (default: the picked vertex, edge or face point). Moves the WCS origin there, keeping its orientation"),
-    CommandSpec::new("wcs.rotate_x", "Rotate WCS about XC", rotate_x).at("SOLID", "INSPECT").icon("measure").noundo().params("angle?: degrees (default 90)"),
-    CommandSpec::new("wcs.rotate_y", "Rotate WCS about YC", rotate_y).at("SOLID", "INSPECT").icon("measure").noundo().params("angle?: degrees (default 90)"),
-    CommandSpec::new("wcs.rotate_z", "Rotate WCS about ZC", rotate_z).at("SOLID", "INSPECT").icon("measure").noundo().params("angle?: degrees (default 90)"),
+    CommandSpec::new("wcs.rotate_x", "Rotate WCS about XC", rotate_x).at("SOLID", "INSPECT").icon("axis").noundo().params("angle?: degrees (default 90)"),
+    CommandSpec::new("wcs.rotate_y", "Rotate WCS about YC", rotate_y).at("SOLID", "INSPECT").icon("joint_origin").noundo().params("angle?: degrees (default 90)"),
+    CommandSpec::new("wcs.rotate_z", "Rotate WCS about ZC", rotate_z).at("SOLID", "INSPECT").icon("pattern_circ").noundo().params("angle?: degrees (default 90)"),
     CommandSpec::new("wcs.set", "Set WCS", set)
         .at("SOLID", "INSPECT")
-        .icon("measure")
+        .icon("move")
         .noundo()
         .params("origin?: [x,y,z]; x_dir?: [x,y,z]; z_dir?: [x,y,z] (turns the WCS so ZC points this way, XC kept as close as it can); reset?: bool"),
-    CommandSpec::new("wcs.reset", "Reset WCS", reset).at("SOLID", "INSPECT").icon("measure").noundo().params("No parameters. Puts the WCS back on the world axes"),
+    CommandSpec::new("wcs.reset", "Reset WCS", reset).at("SOLID", "INSPECT").icon("revert").noundo().params("No parameters. Puts the WCS back on the world axes"),
 ];
 
 fn current(s: &Session) -> Wcs {
