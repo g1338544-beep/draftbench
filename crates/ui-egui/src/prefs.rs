@@ -384,6 +384,14 @@ preference_settings! {
     edge_colour: String = String::new(), 1;
     /// Colour of sketch lines as `#rrggbb`; empty keeps the theme's own.
     sketch_colour: String = String::new(), 1;
+    /// Colour of new and uncoloured parts as `#rrggbb`; empty keeps the theme's own.
+    part_colour: String = String::new(), 1;
+    /// Colour of selected parts as `#rrggbb`; empty keeps the theme's own.
+    selection_colour: String = String::new(), 1;
+    /// Tone of the whole theme: hue turn in degrees, saturation factor, lightness shift.
+    tone_hue: f32 = 0.0, 1, accept(-180.0..=180.0);
+    tone_saturation: f32 = 1.0, 1, accept(0.0..=1.6);
+    tone_light: f32 = 0.0, 1, accept(-0.3..=0.3);
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = true, 1 => check_tr("nav.free_orbit.label");
@@ -1503,6 +1511,30 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                 });
+            }
+            for (label, which) in [("Part colour", 0), ("Selection colour", 1)] {
+                ui_kit::row(ui, app.tr_label(label), |ui| {
+                    let slot = if which == 0 { &mut app.preferences.part_colour } else { &mut app.preferences.selection_colour };
+                    let mut rgb = crate::viewport::parse_hex_colour(slot).unwrap_or(if which == 0 { [150, 160, 175] } else { [230, 150, 40] });
+                    if ui_kit::color_field(ui, &mut rgb).changed() {
+                        *slot = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+                    }
+                    if !slot.is_empty() && ui_kit::button(ui, app.tr_label("Theme"), ui_kit::Button::Small).clicked() {
+                        slot.clear();
+                    }
+                });
+            }
+            ui_kit::row(ui, app.tr_label("Theme tone: hue"), |ui| {
+                ui_kit::slider(ui, &mut app.preferences.tone_hue, -180.0..=180.0, ui_kit::Slider { step: Some(5.0), format: |v| format!("{v:.0}°"), ..Default::default() })
+            });
+            ui_kit::row(ui, app.tr_label("Theme tone: saturation"), |ui| {
+                ui_kit::slider(ui, &mut app.preferences.tone_saturation, 0.0..=1.6, ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() })
+            });
+            ui_kit::row(ui, app.tr_label("Theme tone: lightness"), |ui| {
+                ui_kit::slider(ui, &mut app.preferences.tone_light, -0.3..=0.3, ui_kit::Slider { step: Some(0.02), format: |v| format!("{:+.0} %", v * 100.0), ..Default::default() })
+            });
+            if ui_kit::button(ui, app.tr_label("Reset tone"), ui_kit::Button::Small).clicked() {
+                (app.preferences.tone_hue, app.preferences.tone_saturation, app.preferences.tone_light) = (0.0, 1.0, 0.0);
             }
             ui.add_enabled_ui(app.ui.show_grid, |ui| {
                 setting::grid_follows_view(app, ui);

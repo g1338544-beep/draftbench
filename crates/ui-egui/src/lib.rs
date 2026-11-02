@@ -1517,7 +1517,10 @@ impl SolveApp {
         prefs::apply(self, ctx);
         viewport::set_viewport_bg(&self.preferences.viewport_bg);
         viewport::set_line_colours(&self.preferences.edge_colour, &self.preferences.sketch_colour);
-        if !self.styled || theme::is_dark() != self.ui.dark || theme::vision() != self.preferences.color_vision {
+        viewport::set_part_colours(&self.preferences.part_colour, &self.preferences.selection_colour);
+        let tone = [self.preferences.tone_hue, self.preferences.tone_saturation, self.preferences.tone_light];
+        if !self.styled || theme::is_dark() != self.ui.dark || theme::vision() != self.preferences.color_vision || theme::tone() != tone {
+            theme::set_tone(tone);
             theme::set_dark(self.ui.dark);
             theme::set_vision(self.preferences.color_vision);
             theme::apply(ctx);

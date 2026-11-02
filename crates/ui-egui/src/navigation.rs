@@ -183,7 +183,7 @@ pub(crate) fn modifier_motion(
 /// A tap (press and release) shorter than this is one animated step; held longer, the arrow
 /// turns the view continuously.
 const TAP_SECONDS: f64 = 0.15;
-/// How fast a held arrow turns the view (Shift: twice as fast).
+/// How fast a held arrow turns the view (Shift+arrow does not turn continuously: a quarter turn per press).
 const HOLD_DEGREES_PER_SECOND: f64 = 90.0;
 
 /// An arrow key turning the view that is still down (`ViewportState::key_hold`).
@@ -235,7 +235,8 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
         }
     } else if !repeat {
         let degrees = if mods.shift { 90.0 } else { 15.0 };
-        app.viewport.key_hold = Some(KeyHold { key, action, shift: mods.shift, since: app.now });
+        // Shift+arrow is a quarter turn per press, never a continuous turn when held.
+        app.viewport.key_hold = (!mods.shift).then_some(KeyHold { key, action, shift: false, since: app.now });
         // Turn from where a step in flight is going, so taps add up and the one animation is
         // retargeted rather than a second started.
         let from = app.cam_anim.map_or(app.cam, |a| a.to);

@@ -3686,6 +3686,15 @@ pub(crate) fn set_line_colours(edge: &str, sketch: &str) {
     SKETCH_COLOUR.store(pack_colour(sketch), std::sync::atomic::Ordering::Relaxed);
 }
 
+static PART_COLOUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static SELECTION_COLOUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Use `part` and `selection` (`#rrggbb`) for parts and selected parts; empty goes back to the theme's.
+pub(crate) fn set_part_colours(part: &str, selection: &str) {
+    PART_COLOUR.store(pack_colour(part), std::sync::atomic::Ordering::Relaxed);
+    SELECTION_COLOUR.store(pack_colour(selection), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The picked colour in `slot`, as RGBA, if any.
 fn picked_line(slot: &std::sync::atomic::AtomicU32) -> Option<[u8; 4]> {
     let v = slot.load(std::sync::atomic::Ordering::Relaxed);
@@ -3707,8 +3716,8 @@ pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> soli
         grid: rgb(t.grid),
         grid_major: rgb(t.grid_major),
         edge: picked_line(&EDGE_COLOUR).map_or_else(|| rgb(t.body_edge), |c| Rgb(c[0], c[1], c[2])),
-        body: rgb(t.body),
-        body_selected: rgb(t.body_selected),
+        body: picked_line(&PART_COLOUR).map_or_else(|| rgb(t.body), |c| Rgb(c[0], c[1], c[2])),
+        body_selected: picked_line(&SELECTION_COLOUR).map_or_else(|| rgb(t.body_selected), |c| Rgb(c[0], c[1], c[2])),
         sketch: picked_line(&SKETCH_COLOUR).map_or_else(|| rgb(t.sketch), |c| Rgb(c[0], c[1], c[2])),
         sketch_fixed: rgb(t.sketch_fixed),
         sketch_done: rgb(t.sketch_fixed),

@@ -21,6 +21,8 @@ thread_local! {
     /// (`hover_stays_off_during_spin_and_animated_views` failed that way). No worker thread reads
     /// it: the preview thread is handed its colours (`preview::Colors`) and thumbnails are drawn by
     /// the engine in the model's colours, so a new thread starts Off and stays Off.
+    /// Hue turn (degrees), saturation factor and lightness shift the user set for the theme.
+    static TONE: Cell<[f32; 3]> = const { Cell::new([0.0, 1.0, 0.0]) };
     static VISION: Cell<ColorVision> = const { Cell::new(ColorVision::Off) };
     /// The palette of a theme file (`theme_files`) in place of the built-in one of its base
     /// (dark or light), per thread like the rest. `None`: the built-in palettes.
@@ -201,6 +203,44 @@ pub fn vision() -> ColorVision {
 }
 
 /// Switch the colour vision mode (the visuals follow on the next [`apply`]).
+pub fn set_tone(tone: [f32; 3]) {
+    TONE.with(|t| t.set(tone));
+}
+
+pub fn tone() -> [f32; 3] {
+    TONE.with(Cell::get)
+}
+
+/// One colour with the tone applied (its transparency kept).
+fn tone_colour(c: Color32, tone: [f32; 3]) -> Color32 {
+    let [r, g, b, a] = c.to_srgba_unmultiplied();
+    let (r, g, b) = (f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0);
+    let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (mx + mn) / 2.0;
+    let d = mx - mn;
+    let (mut h, mut s) = (0.0_f32, 0.0_f32);
+    if d > 1e-6 {
+        s = d / (1.0 - (2.0 * l - 1.0).abs()).max(1e-6);
+        h = if mx == r { ((g - b) / d).rem_euclid(6.0) } else if mx == g { (b - r) / d + 2.0 } else { (r - g) / d + 4.0 } * 60.0;
+    }
+    let h = (h + tone[0]).rem_euclid(360.0);
+    let s = (s * tone[1]).clamp(0.0, 1.0);
+    let l = (l + tone[2]).clamp(0.0, 1.0);
+    let k = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = k * (1.0 - ((h / 60.0).rem_euclid(2.0) - 1.0).abs());
+    let m = l - k / 2.0;
+    let (r, g, b) = match (h / 60.0) as u32 {
+        0 => (k, x, 0.0),
+        1 => (x, k, 0.0),
+        2 => (0.0, k, x),
+        3 => (0.0, x, k),
+        4 => (x, 0.0, k),
+        _ => (k, 0.0, x),
+    };
+    let byte = |v: f32| ((v + m).clamp(0.0, 1.0) * 255.0).round() as u8;
+    Color32::from_rgba_unmultiplied(byte(r), byte(g), byte(b), a)
+}
+
 pub fn set_vision(mode: ColorVision) {
     VISION.with(|v| v.set(mode));
 }
@@ -514,7 +554,7 @@ impl Tokens {
     /// that base ([`set_custom`]), else the built-in one; the colour vision mode on top.
     pub fn themed(dark: bool, mode: ColorVision) -> Tokens {
         let custom = CUSTOM.get().filter(|c| c.dark == dark).map(|c| c.tokens);
-        custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() }).with_vision(dark, mode)
+        custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() }).with_vision(dark, mode).with_tone(tone())
     }
 
     /// These tokens with a colour vision mode's values on top (the tables in `palettes.rs`); Off
@@ -525,6 +565,151 @@ impl Tokens {
             ColorVision::Protan | ColorVision::Deutan => self.red_green(dark),
             ColorVision::Tritan => self.blue_yellow(dark),
         }
+    }
+
+    /// These tokens with every colour passed through `f` (the tone setting).
+    fn map_colours(mut self, f: impl Fn(Color32) -> Color32) -> Tokens {
+        self.form_ink = f(self.form_ink);
+        self.form_dim = f(self.form_dim);
+        self.form_primary = f(self.form_primary);
+        self.form_error = f(self.form_error);
+        self.form_error_fill = f(self.form_error_fill);
+        self.form_success = f(self.form_success);
+        self.form_success_fill = f(self.form_success_fill);
+        self.app_bar = f(self.app_bar);
+        self.app_bar_separator = f(self.app_bar_separator);
+        self.toolbar = f(self.toolbar);
+        self.panel = f(self.panel);
+        self.panel_header = f(self.panel_header);
+        self.border = f(self.border);
+        self.text = f(self.text);
+        self.text_dim = f(self.text_dim);
+        self.accent = f(self.accent);
+        self.accent_soft = f(self.accent_soft);
+        self.sketch_accent = f(self.sketch_accent);
+        self.surface_accent = f(self.surface_accent);
+        self.mesh_accent = f(self.mesh_accent);
+        self.form_accent = f(self.form_accent);
+        self.render_accent = f(self.render_accent);
+        self.sketch_ink = f(self.sketch_ink);
+        self.sketch_soft = f(self.sketch_soft);
+        self.surface_fill = f(self.surface_fill);
+        self.surface_ink = f(self.surface_ink);
+        self.surface_soft = f(self.surface_soft);
+        self.mesh_fill = f(self.mesh_fill);
+        self.mesh_ink = f(self.mesh_ink);
+        self.mesh_soft = f(self.mesh_soft);
+        self.form_fill = f(self.form_fill);
+        self.form_tab_ink = f(self.form_tab_ink);
+        self.form_soft = f(self.form_soft);
+        self.sheet_fill = f(self.sheet_fill);
+        self.sheet_ink = f(self.sheet_ink);
+        self.sheet_soft = f(self.sheet_soft);
+        self.render_fill = f(self.render_fill);
+        self.render_ink = f(self.render_ink);
+        self.render_soft = f(self.render_soft);
+        self.tab_on_fill_dark = f(self.tab_on_fill_dark);
+        self.on_accent = f(self.on_accent);
+        self.agent_ok = f(self.agent_ok);
+        self.agent_busy = f(self.agent_busy);
+        self.error = f(self.error);
+        self.warning = f(self.warning);
+        self.icon = f(self.icon);
+        self.timeline = f(self.timeline);
+        self.hover = f(self.hover);
+        self.sel_face = f(self.sel_face);
+        self.sel_edge = f(self.sel_edge);
+        self.sel_edge_rim = f(self.sel_edge_rim);
+        self.hover_edge = f(self.hover_edge);
+        self.hover_edge_halo = f(self.hover_edge_halo);
+        self.sel_profile = f(self.sel_profile);
+        self.sel_profile_edge = f(self.sel_profile_edge);
+        self.hover_profile = f(self.hover_profile);
+        self.hover_profile_edge = f(self.hover_profile_edge);
+        self.sel_vertex = f(self.sel_vertex);
+        self.origin_plane = f(self.origin_plane);
+        self.origin_plane_edge = f(self.origin_plane_edge);
+        self.origin_plane_hover = f(self.origin_plane_hover);
+        self.origin_point = f(self.origin_point);
+        self.axis_x = f(self.axis_x);
+        self.axis_y = f(self.axis_y);
+        self.axis_z = f(self.axis_z);
+        self.construction_plane = f(self.construction_plane);
+        self.construction_geom = f(self.construction_geom);
+        self.body = f(self.body);
+        self.body_edge = f(self.body_edge);
+        self.manipulator = f(self.manipulator);
+        self.preview_add = f(self.preview_add);
+        self.preview_new = f(self.preview_new);
+        self.preview_sketch = f(self.preview_sketch);
+        self.preview_cut = f(self.preview_cut);
+        self.cube_face = f(self.cube_face);
+        self.cube_border = f(self.cube_border);
+        self.cube_text = f(self.cube_text);
+        self.cube_hover = f(self.cube_hover);
+        self.viewport_top = f(self.viewport_top);
+        self.viewport_bottom = f(self.viewport_bottom);
+        self.grid = f(self.grid);
+        self.grid_major = f(self.grid_major);
+        self.body_selected = f(self.body_selected);
+        self.sketch = f(self.sketch);
+        self.sketch_fixed = f(self.sketch_fixed);
+        self.sketch_locked = f(self.sketch_locked);
+        self.dimension = f(self.dimension);
+        self.dimension_driven = f(self.dimension_driven);
+        self.sketch_point = f(self.sketch_point);
+        self.sketch_point_free = f(self.sketch_point_free);
+        self.dialog_bg = f(self.dialog_bg);
+        self.dialog_border = f(self.dialog_border);
+        self.chip = f(self.chip);
+        self.section_cap = f(self.section_cap);
+        self.profile_fill = f(self.profile_fill);
+        self.glyph_bg = f(self.glyph_bg);
+        self.glyph_edge = f(self.glyph_edge);
+        self.glyph_text = f(self.glyph_text);
+        self.overlay = f(self.overlay);
+        self.rubber_band = f(self.rubber_band);
+        self.app_bar_text = f(self.app_bar_text);
+        self.app_bar_hover = f(self.app_bar_hover);
+        self.app_bar_hover_subtle = f(self.app_bar_hover_subtle);
+        self.app_bar_hover_button = f(self.app_bar_hover_button);
+        self.app_bar_hover_strong = f(self.app_bar_hover_strong);
+        self.app_bar_tab_active = f(self.app_bar_tab_active);
+        self.dialog_body = f(self.dialog_body);
+        self.dialog_footer = f(self.dialog_footer);
+        self.dialog_rule = f(self.dialog_rule);
+        self.control_fill = f(self.control_fill);
+        self.control_border = f(self.control_border);
+        self.dialog_label = f(self.dialog_label);
+        self.selected_ink = f(self.selected_ink);
+        self.selected_bg = f(self.selected_bg);
+        self.timeline_item = f(self.timeline_item);
+        self.timeline_item_error = f(self.timeline_item_error);
+        self.timeline_marker = f(self.timeline_marker);
+        self.field = f(self.field);
+        self.box_window = f(self.box_window);
+        self.box_crossing = f(self.box_crossing);
+        self.sketch_projected = f(self.sketch_projected);
+        self.sketch_lost = f(self.sketch_lost);
+        self.sketch_construction = f(self.sketch_construction);
+        self.sketch_centerline = f(self.sketch_centerline);
+        self.triad = self.triad.map(&f);
+        self.gizmo = self.gizmo.map(&f);
+        self.bend_up = f(self.bend_up);
+        self.bend_down = f(self.bend_down);
+        self.interference = f(self.interference);
+        self.continuity = self.continuity.map(&f);
+        self.logo = self.logo.map(&f);
+        self
+    }
+
+    /// The tone the user set on top of the theme: hue turned by `hue` degrees, saturation times
+    /// `sat`, lightness moved by `light` (−0.3…0.3). The neutral setting gives the tokens back.
+    pub fn with_tone(self, tone: [f32; 3]) -> Tokens {
+        if tone[0] == 0.0 && (tone[1] - 1.0).abs() < 1e-3 && tone[2] == 0.0 {
+            return self;
+        }
+        self.map_colours(|c| tone_colour(c, tone))
     }
 
     /// Fade idle cube colours into the viewport while retaining opaque facets.
