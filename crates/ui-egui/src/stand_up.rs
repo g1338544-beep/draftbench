@@ -9,6 +9,30 @@ use serde_json::json;
 use crate::SolveApp;
 use crate::ui_kit;
 
+thread_local! {
+    /// The turn about X, Y and Z (degrees) the offer will apply: a quarter turn about X to start.
+    static TURN: std::cell::RefCell<[String; 3]> = std::cell::RefCell::new(["90".into(), "0".into(), "0".into()]);
+}
+
+/// The turn as typed, each angle a finite number of degrees (blank = 0).
+fn turn_degrees() -> Result<[f64; 3], String> {
+    TURN.with(|t| {
+        let t = t.borrow();
+        let mut out = [0.0; 3];
+        for (k, text) in t.iter().enumerate() {
+            let v = text.trim().trim_end_matches("deg").trim();
+            let a = if v.is_empty() { 0.0 } else { v.parse::<f64>().map_err(|_| "Angles must be numbers in degrees".to_string())? };
+            if !a.is_finite() || a.abs() > 3600.0 {
+                return Err("Angles must be finite, within 3600 degrees".into());
+            }
+            if let Some(o) = out.get_mut(k) {
+                *o = a;
+            }
+        }
+        Ok(out)
+    })
+}
+
 /// The bodies a just-opened file brought (`before`: body names before it opened, none for a
 /// new design), and the import's component placement from the command's `result`: offer to
 /// stand them up.
@@ -27,12 +51,18 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
 /// Turn the offered bodies a quarter turn about X (Y up becomes Z up).
 pub fn stand_up(app: &mut SolveApp) -> Result<(), String> {
     let Some(bodies) = app.stand_up.take() else { return Err("no file is waiting to be stood up".into()) };
-    match app.stand_up_occurrence.take() {
-        // The import's component turns about its parent's origin, contents and all.
-        Some(occurrence) => app.run("occurrence.move", json!({ "occurrence": occurrence, "axis": [1, 0, 0], "angle": "90 deg" })),
-        None => app.run("solid.move", json!({ "bodies": bodies, "axis": [1, 0, 0], "angle": "90 deg" })),
+    let angles = turn_degrees()?;
+    let occurrence = app.stand_up_occurrence.take();
+    for (k, a) in angles.iter().enumerate().filter(|(_, a)| a.abs() > 1e-9) {
+        let axis = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].get(k).copied().unwrap_or([1, 0, 0]);
+        let angle = format!("{a} deg");
+        match occurrence {
+            // The import's component turns about its parent's origin, contents and all.
+            Some(occurrence) => app.run("occurrence.move", json!({ "occurrence": occurrence, "axis": axis, "angle": angle })),
+            None => app.run("solid.move", json!({ "bodies": bodies, "axis": axis, "angle": angle })),
+        }
+        .map_err(|e| e.to_string())?;
     }
-    .map_err(|e| e.to_string())?;
     app.animate_view("home");
     Ok(())
 }
@@ -62,6 +92,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 crate::i18n::tr_label("Stand it up: a quarter turn about X, as one Move feature you can undo."),
                 ui_kit::Text::Report("how", false),
             );
+            // The turn can be set: degrees about X, Y and Z, applied in that order.
+            for (k, name) in ["Turn about X (deg)", "Turn about Y (deg)", "Turn about Z (deg)"].iter().enumerate() {
+                ui_kit::row(ui, name, |ui| {
+                    TURN.with(|t| {
+                        if let Some(text) = t.borrow_mut().get_mut(k) {
+                            ui_kit::field(ui, text);
+                        }
+                    });
+                });
+            }
             ui_kit::text(ui, crate::i18n::tr_label("Preferences › Design turns the offer back on"), ui_kit::Text::Note("never"));
         });
     for (handle, key) in [("stand_up:stand", "dialog:ok"), ("stand_up:never", "dialog:apply"), ("stand_up:leave", "dialog:cancel")] {
