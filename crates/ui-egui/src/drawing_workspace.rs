@@ -212,6 +212,8 @@ pub struct State {
     note_text: String,
     /// The Base View window: the view to use (7 = as the 3D window shows it) and its scale; the next click on the sheet places it.
     base: Option<(usize, String)>,
+    /// The ghost of the Base View's chosen view (keyed by view and scale), drawn under the pointer; `None` inside = it could not be made.
+    base_preview: Option<(String, Option<Sheet>)>,
     /// Per-design views and dimensions kept between runs, by design name.
     saved_designs: serde_json::Map<String, serde_json::Value>,
     /// Every sheet of the drawing as saved JSON (the current one is refreshed when switching).
@@ -278,6 +280,7 @@ impl Default for State {
             steps: Vec::new(),
             total: 0,
             painted: false,
+            base_preview: None,
             drag: None,
             menu_at: None,
             scale_edit: None,
@@ -877,6 +880,71 @@ fn add_view(app: &mut SolveApp, view: usize) {
     });
     app.drawing.selected = Some(n);
     begin(app);
+}
+
+/// The chosen view alone on a blank sheet, for the ghost that follows the pointer while the Base View is open.
+fn make_preview(app: &mut SolveApp, view: usize, scale: &str) -> Option<Sheet> {
+    let name = VIEWS.get(view)?.0;
+    app.drawing.placed.push(PlacedView {
+        view,
+        x: 150.0,
+        y: 150.0,
+        scale: scale.to_string(),
+        dashed: true,
+        dims: false,
+        section: None,
+        align: None,
+        custom: None,
+        rot: 0,
+    });
+    let mut p = params(&app.drawing);
+    app.drawing.placed.pop();
+    let own = p.get("placements").and_then(Value::as_array).and_then(|a| a.last()).cloned()?;
+    p["placements"] = json!([own]);
+    for key in ["dimension_items", "clines", "marks", "centre_cut", "bom"] {
+        p[key] = json!([]);
+    }
+    p["hole_table"] = json!(false);
+    p["bolt_circle"] = json!(false);
+    let mut warm = p.clone();
+    warm["warm"] = json!(name);
+    app.run("drawing.sheet", warm).ok()?;
+    parse(&app.run("drawing.sheet", p).ok()?)
+}
+
+/// Draw the Base View ghost with its centre at `at` (sheet mm).
+fn paint_preview(painter: &egui::Painter, m: &Map, sheet: &Sheet, at: Pos2) {
+    let d = at - pos2(150.0, 150.0);
+    let to = |p: Pos2| m.to_screen(p + d);
+    let vis = Stroke::new(1.4, Color32::from_rgba_unmultiplied(40, 190, 120, 215));
+    let hid = Stroke::new(1.0, Color32::from_rgba_unmultiplied(40, 190, 120, 110));
+    if let Some(b) = sheet.boxes.first() {
+        let r = Rect::from_min_max(to(pos2(b.1 - b.3 / 2.0, b.2 - b.4 / 2.0)), to(pos2(b.1 + b.3 / 2.0, b.2 + b.4 / 2.0)));
+        painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(40, 190, 120, 22));
+        painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(40, 190, 120, 120)), egui::StrokeKind::Outside);
+    }
+    for (layer, shape) in &sheet.items {
+        let stroke = match layer {
+            Layer::Visible => vis,
+            Layer::Hidden => hid,
+            _ => continue,
+        };
+        match shape {
+            Shape::Line(a, b) => {
+                painter.line_segment([to(*a), to(*b)], stroke);
+            }
+            Shape::Poly(pts) => {
+                painter.add(egui::Shape::line(pts.iter().map(|p| to(*p)).collect(), stroke));
+            }
+            Shape::Circle(c, r) => {
+                painter.add(egui::Shape::line(arc_points(*c, *r, 0.0, 360.0).into_iter().map(to).collect(), stroke));
+            }
+            Shape::Arc(c, r, a0, a1) => {
+                painter.add(egui::Shape::line(arc_points(*c, *r, *a0, *a1).into_iter().map(to).collect(), stroke));
+            }
+            Shape::Text(..) => {}
+        }
+    }
 }
 
 const SCALES: [(&str, &str); 10] = [
@@ -2494,6 +2562,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.drawing.proj_tool = None;
                 proj_placed = true;
             }
+        }
+    }
+    // Base View: a ghost of the chosen view follows the pointer over the sheet.
+    if app.drawing.cline_tool.is_none()
+        && let Some((view, scale)) = app.drawing.base.clone()
+        && view <= 6
+    {
+        let key = format!("{view}|{scale}|{}|{}", app.drawing.paper, app.drawing.first_angle);
+        if app.drawing.base_preview.as_ref().is_none_or(|(k, _)| *k != key) {
+            let made = make_preview(app, view, &scale);
+            app.drawing.base_preview = Some((key, made));
+        }
+        if let Some(at) = response.hover_pos().and_then(|q| m.to_sheet(q))
+            && let Some((_, Some(pv))) = &app.drawing.base_preview
+        {
+            paint_preview(&painter, &m, pv, at);
         }
     }
     // Base View: a click on the sheet places the chosen view there.
