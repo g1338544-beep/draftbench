@@ -97,6 +97,18 @@ enum Shape {
     Text(Pos2, f32, String),
 }
 
+/// A colour picture of the model, from a camera, placed on the sheet (centre and width in mm).
+#[derive(Clone, Copy)]
+struct ShadedView {
+    x: f32,
+    y: f32,
+    w: f32,
+    yaw: f64,
+    pitch: f64,
+}
+
+type Picture = std::sync::Arc<(Vec<u8>, usize, usize)>;
+
 struct Sheet {
     width: f32,
     height: f32,
@@ -123,6 +135,8 @@ pub struct State {
     centre: bool,
     hole_table: bool,
     text_height: String,
+    /// How far a centre line runs past its circle, in mm.
+    centre_extra: String,
     /// Frame margin and title block width in mm, and the title block cells typed over.
     margin: String,
     block_w: String,
@@ -132,6 +146,9 @@ pub struct State {
     dims: Vec<DimItem>,
     /// The parts list drawn over the title block: item, description, quantity, material.
     bom: Vec<[String; 4]>,
+    /// Colour pictures of the model on the sheet, and the pictures drawn so far (key, RGB, texture).
+    shaded: Vec<ShadedView>,
+    shaded_cache: Vec<(String, Picture, Option<egui::TextureHandle>)>,
     /// The dimension being placed: its kind and the points picked so far.
     dim_tool: Option<(usize, Vec<Pos2>)>,
     /// The selected dimension, the one being dragged, and the one whose text is being edited.
@@ -139,6 +156,10 @@ pub struct State {
     /// The view a projected view is being placed from.
     proj_tool: Option<usize>,
     drag_dim: Option<usize>,
+    /// A dimension point being dragged to another spot: the dimension and whether it is the second point.
+    drag_end: Option<(usize, bool)>,
+    /// The centre line last clicked, as its two ends on the sheet.
+    sel_centre: Option<(Pos2, Pos2)>,
     text_edit: Option<usize>,
     selected: Option<usize>,
     title: String,
@@ -186,6 +207,7 @@ impl Default for State {
             centre: true,
             hole_table: false,
             text_height: "3.5".into(),
+            centre_extra: "3".into(),
             margin: "10".into(),
             block_w: "190".into(),
             cells: Default::default(),
@@ -193,10 +215,14 @@ impl Default for State {
             placed: Vec::new(),
             dims: Vec::new(),
             bom: Vec::new(),
+            shaded: Vec::new(),
+            shaded_cache: Vec::new(),
             dim_tool: None,
             sel_dim: None,
             proj_tool: None,
             drag_dim: None,
+            drag_end: None,
+            sel_centre: None,
             text_edit: None,
             selected: None,
             title: String::new(),
@@ -228,6 +254,7 @@ impl State {
             "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p]))})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
+            "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch])).collect::<Vec<_>>(),
             "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
             "paper": self.paper, "landscape": self.landscape,
         })
@@ -261,7 +288,7 @@ impl State {
             "custom_w": self.custom_w, "custom_h": self.custom_h, "sheet_scale": self.sheet_scale,
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
-            "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "author": self.author,
+            "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
             "company": self.company, "margin": self.margin, "block_w": self.block_w, "cells": self.cells, "designs": designs,
         })
     }
@@ -300,6 +327,7 @@ impl State {
             ("sheet_no", &mut self.sheet_no, 40),
             ("revision", &mut self.revision, 40),
             ("text_height", &mut self.text_height, 6),
+            ("centre_extra", &mut self.centre_extra, 6),
             ("margin", &mut self.margin, 6),
             ("block_w", &mut self.block_w, 6),
             ("author", &mut self.author, 80),
@@ -353,6 +381,7 @@ impl State {
         self.placed.clear();
         self.dims.clear();
         self.bom.clear();
+        self.shaded.clear();
         self.selected = None;
         self.sel_dim = None;
         self.sheet = None;
@@ -402,6 +431,16 @@ impl State {
                 *field = t.chars().take(400).collect();
             }
         }
+        if let Some(list) = d.get("shaded").and_then(serde_json::Value::as_array) {
+            for v in list.iter().take(6) {
+                let n: Vec<f64> = v.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
+                if let [x, y, w, yaw, pitch] = n[..]
+                    && [x, y, w, yaw, pitch].iter().all(|t| t.is_finite())
+                {
+                    self.shaded.push(ShadedView { x: x as f32, y: y as f32, w: (w as f32).clamp(20.0, 800.0), yaw, pitch });
+                }
+            }
+        }
         if let Some(rows) = d.get("bom").and_then(serde_json::Value::as_array) {
             for row in rows.iter().take(40) {
                 let mut cells: [String; 4] = Default::default();
@@ -430,6 +469,78 @@ impl State {
             self.landscape = b;
         }
     }
+}
+
+/// Where the picture of a shaded view is kept: its camera, size and the state of the design.
+fn shaded_key(app: &SolveApp, v: &ShadedView) -> String {
+    format!("{:.4}/{:.4}/{:.0}/{}", v.yaw, v.pitch, v.w, app.session.log.len())
+}
+
+/// The picture of a shaded view, drawn now if it is not in the cache. One CPU render of the whole
+/// model: it takes a moment on a large design.
+fn shaded_picture(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
+    let key = shaded_key(app, v);
+    if let Some(hit) = app.drawing.shaded_cache.iter().find(|c| c.0 == key) {
+        return Some(hit.1.clone());
+    }
+    let bounds = solidcraft_engine::view::bounds(&app.session);
+    if bounds.is_empty() {
+        return None;
+    }
+    let mut cam = Camera { up: app.cam.up, ..Camera::default() };
+    cam.yaw = v.yaw;
+    cam.pitch = v.pitch;
+    cam.fit(&bounds);
+    cam.distance *= 0.8;
+    let scene = solidcraft_engine::view::scene_with_guides(&app.session, &cam, None, solidcraft_engine::view::Guides { grid: false, axes: false });
+    let pw = ((v.w * 5.0) as usize).clamp(160, 1600);
+    let ph = pw * 3 / 4;
+    let canvas = solidcraft_engine::render::render(&scene, &cam, pw, ph);
+    let rgb: Vec<u8> = canvas.rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let picture: Picture = std::sync::Arc::new((rgb, canvas.w, canvas.h));
+    app.drawing.shaded_cache.retain(|c| !c.0.ends_with(&format!("/{}", app.session.log.len())) || c.0 != key);
+    if app.drawing.shaded_cache.len() >= 10 {
+        app.drawing.shaded_cache.remove(0);
+    }
+    app.drawing.shaded_cache.push((key, picture.clone(), None));
+    Some(picture)
+}
+
+/// Draw one missing picture per frame and give each its texture.
+fn ensure_shaded(app: &mut SolveApp, ctx: &egui::Context) {
+    let views = app.drawing.shaded.clone();
+    let mut pending = false;
+    for v in &views {
+        let key = shaded_key(app, v);
+        let cached = app.drawing.shaded_cache.iter().any(|c| c.0 == key);
+        if !cached {
+            if pending {
+                continue;
+            }
+            pending = true;
+            shaded_picture(app, v);
+        }
+        if let Some(entry) = app.drawing.shaded_cache.iter_mut().find(|c| c.0 == key)
+            && entry.2.is_none()
+        {
+            let (rgb, w, h) = (&entry.1.0, entry.1.1, entry.1.2);
+            let image = egui::ColorImage::from_rgb([w, h], rgb);
+            entry.2 = Some(ctx.load_texture(format!("shaded_{key}"), image, egui::TextureOptions::LINEAR));
+        }
+    }
+    if views.iter().any(|v| !app.drawing.shaded_cache.iter().any(|c| c.0 == shaded_key(app, v))) {
+        ctx.request_repaint();
+    }
+}
+
+fn add_shaded_view(app: &mut SolveApp) {
+    if app.drawing.shaded.len() >= 6 {
+        return;
+    }
+    let (yaw, pitch) = app.drawing.design_camera.map_or_else(|| solidcraft_engine::render::StandardView::Iso.angles(), |(c, _)| (c.yaw, c.pitch));
+    let (sw, sh) = app.drawing.sheet.as_ref().map_or((420.0, 297.0), |s| (s.width, s.height));
+    let n = app.drawing.shaded.len() as f32;
+    app.drawing.shaded.push(ShadedView { x: sw * (0.75 - 0.05 * n), y: sh * (0.7 - 0.1 * n), w: (sw * 0.25).clamp(40.0, 300.0), yaw, pitch });
 }
 
 /// Show another sheet of the drawing.
@@ -532,6 +643,7 @@ fn params(st: &State) -> Value {
             "at": d.at,
             "text": d.text,
         })).collect::<Vec<_>>(),
+        "centre_extra": st.centre_extra.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..=50.0).contains(h)).unwrap_or(3.0),
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
         "block_cells": st.cells,
         "bom": st.bom.iter().filter(|r| r.iter().any(|c| !c.trim().is_empty())).collect::<Vec<_>>(),
@@ -732,6 +844,17 @@ fn dim_segment(d: &DimItem) -> (Pos2, Pos2) {
     }
 }
 
+/// Every segment of a dimension you can grab: its line and, for linear ones, both extension lines.
+fn dim_parts(d: &DimItem) -> Vec<(Pos2, Pos2)> {
+    let main = dim_segment(d);
+    let mut parts = vec![main];
+    if !matches!(DIM_KINDS[d.kind.min(6)].0, "diameter" | "radius" | "balloon" | "note") {
+        parts.push((d.a, main.0));
+        parts.push((d.b, main.1));
+    }
+    parts
+}
+
 /// The unit direction from a circle dimension's centre to its rim point, and the radius.
 fn circle_dir(d: &DimItem) -> (egui::Vec2, f32) {
     let v = d.b - d.a;
@@ -841,6 +964,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                 }
             });
         }
+        "drawing.ribbon.shaded" => add_shaded_view(app),
         "drawing.ribbon.print" => print_sheet(app),
         "drawing.ribbon.printall" => print_all_sheets(app),
         "drawing.ribbon.close" => leave(app),
@@ -992,6 +1116,8 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         });
                         dirty |= crate::ui_kit::checkbox(ui, "Bolt circle centreline", &mut app.drawing.bolt).changed();
+                        ui.label("Centre line length past the circle (mm, 0–50)");
+                        dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_centre_extra"), &mut app.drawing.centre_extra, "3", false, 6).changed();
                     }
                     ui.label("Hidden line style");
                     let style = ["Short dashes", "Long dashes"][app.drawing.hidden_style.min(1)];
@@ -1098,6 +1224,27 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     if let Some(i) = remove_dim {
                         app.drawing.dims.remove(i);
+                        dirty = true;
+                    }
+                    ui.separator();
+                    ui.label("Colour pictures (shaded 3D)");
+                    ui.small("Add Shaded View in the ribbon places a colour picture of the model from the 3D camera. Drag it on the sheet; it is not in DXF.");
+                    let mut remove_shaded = None;
+                    for (i, v) in app.drawing.shaded.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Picture {}", i + 1));
+                            let mut w = v.w;
+                            if crate::ui_kit::slider(ui, &mut w, 20.0..=600.0, crate::ui_kit::Slider::default()).changed() {
+                                v.w = w;
+                                dirty = true;
+                            }
+                            if crate::ui_kit::button(ui, "Remove", crate::ui_kit::Button::Small).clicked() {
+                                remove_shaded = Some(i);
+                            }
+                        });
+                    }
+                    if let Some(i) = remove_shaded {
+                        app.drawing.shaded.remove(i);
                         dirty = true;
                     }
                     ui.separator();
@@ -1297,15 +1444,39 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).copied();
         let tol = 8.0 / m.px_per_mm();
         let dims = &app.drawing.dims;
-        let dim_hit = |s: Pos2| dims.iter().enumerate().rev().find(|(_, d)| dist_to_segment(s, dim_segment(d)) <= tol).map(|(i, _)| i);
+        let dim_hit = |s: Pos2| dims.iter().enumerate().rev().find(|(_, d)| dim_parts(d).into_iter().any(|seg| dist_to_segment(s, seg) <= tol)).map(|(i, _)| i);
+        let centre_hit = |s: Pos2| {
+            sheet.items.iter().find_map(|(l, sh)| match (l, sh) {
+                (Layer::Center, Shape::Line(a, b)) if dist_to_segment(s, (*a, *b)) <= tol => Some((*a, *b)),
+                _ => None,
+            })
+        };
+        // A dimension's end point is a handle once the dimension is selected: drag it to another spot.
+        let end_hit = |s: Pos2| {
+            let d = app.drawing.sel_dim.and_then(|i| dims.get(i).map(|d| (i, d)))?;
+            if (s - d.1.a).length() <= tol * 1.3 {
+                Some((d.0, false))
+            } else if (s - d.1.b).length() <= tol * 1.3 && !matches!(DIM_KINDS[d.1.kind.min(6)].0, "diameter" | "radius") {
+                Some((d.0, true))
+            } else {
+                None
+            }
+        };
         let pointer = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
         if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
+            && let Some(s) = pointer
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(e) = end_hit(s)
+        {
+            app.drawing.drag_end = Some(e);
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
             && let Some(s) = pointer
             && (response.drag_started_by(egui::PointerButton::Primary) || response.clicked() || response.double_clicked())
             && let Some(i) = dim_hit(s)
         {
             app.drawing.sel_dim = Some(i);
             app.drawing.selected = None;
+            app.drawing.sel_centre = None;
             if response.drag_started_by(egui::PointerButton::Primary) {
                 app.drawing.drag_dim = Some(i);
             }
@@ -1324,8 +1495,27 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && response.clicked()
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
         {
-            app.drawing.selected = hit(s).map(|b| b.0);
+            app.drawing.sel_centre = centre_hit(s);
+            app.drawing.selected = if app.drawing.sel_centre.is_some() { None } else { hit(s).map(|b| b.0) };
             app.drawing.sel_dim = None;
+        }
+    }
+    // Dragging a dimension point: it jumps to the nearest corner, end, centre or centre-line point.
+    if let (Some((i, second)), Some(m)) = (app.drawing.drag_end, &map) {
+        if response.dragged() {
+            if let (Some(s), Some(sheet)) = (response.interact_pointer_pos().and_then(|q| m.to_sheet(q)), app.drawing.sheet.as_ref()) {
+                let target = snap_point(sheet, s, 4.0 / m.px_per_mm().max(1e-3) * 3.0).unwrap_or(s);
+                if let Some(d) = app.drawing.dims.get_mut(i) {
+                    if second {
+                        d.b = target;
+                    } else {
+                        d.a = target;
+                    }
+                }
+            }
+        } else {
+            app.drawing.drag_end = None;
+            refresh(app);
         }
     }
     // Moving a dimension: its line follows the pointer; Delete removes it.
@@ -1529,10 +1719,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
+    ensure_shaded(app, ui.ctx());
     let Some(sheet) = app.drawing.sheet.as_ref() else {
         let msg = match (&app.drawing.error, app.drawing.placed.is_empty()) {
             (Some(e), _) => e.clone(),
@@ -1591,6 +1782,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.text(map(*p), egui::Align2::CENTER_BOTTOM, text, egui::FontId::proportional(size), Color32::BLACK);
                 }
             }
+        }
+    }
+    for v in &app.drawing.shaded {
+        let key = shaded_key(app, v);
+        if let Some(tex) = app.drawing.shaded_cache.iter().find(|c| c.0 == key).and_then(|c| c.2.as_ref()) {
+            let h = v.w * 0.75;
+            let r = Rect::from_two_pos(map(pos2(v.x - v.w / 2.0, v.y + h / 2.0)), map(pos2(v.x + v.w / 2.0, v.y - h / 2.0)));
+            painter.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
     }
     let mut proj_placed = false;
@@ -1694,8 +1893,25 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     if let Some(d) = app.drawing.sel_dim.and_then(|i| app.drawing.dims.get(i)) {
-        let (a, b) = dim_segment(d);
-        painter.line_segment([map(a), map(b)], Stroke::new(3.0, Tokens::get().accent));
+        let accent = Tokens::get().accent;
+        for (a, b) in dim_parts(d) {
+            painter.line_segment([map(a), map(b)], Stroke::new(2.5, accent));
+        }
+        // The two points the dimension measures between, as handles (drag one to move it).
+        let second = !matches!(DIM_KINDS[d.kind.min(6)].0, "diameter" | "radius");
+        for (q, label) in [(d.a, "1"), (d.b, "2")].into_iter().take(if second { 2 } else { 1 }) {
+            painter.circle(map(q), 5.0, Color32::WHITE, Stroke::new(2.0, accent));
+            painter.text(map(q) + vec2(7.0, -7.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(Tokens::get().font_body), accent);
+        }
+    }
+    if let Some((a, b)) = app.drawing.sel_centre {
+        let accent = Tokens::get().accent;
+        painter.line_segment([map(a), map(b)], Stroke::new(3.0, accent));
+        for q in [a, b] {
+            painter.circle(map(q), 4.0, Color32::WHITE, Stroke::new(2.0, accent));
+        }
+        let mid = pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+        painter.text(map(mid) + vec2(6.0, -6.0), egui::Align2::LEFT_BOTTOM, format!("centre line {:.1} mm on sheet", (b - a).length()), egui::FontId::proportional(Tokens::get().font_body), accent);
     }
     // Frames of the placed views: the selected one stands out; a dragged one follows the pointer.
     let accent = Tokens::get().accent;
@@ -1794,13 +2010,16 @@ fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
         }
     };
     for (layer, shape) in &sheet.items {
-        if matches!(layer, Layer::Text | Layer::Dim | Layer::Center) {
+        if matches!(layer, Layer::Text | Layer::Dim) {
             continue;
         }
         match shape {
             Shape::Line(a, b) => {
                 offer(*a);
                 offer(*b);
+                if *layer == Layer::Center {
+                    offer(pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0));
+                }
             }
             Shape::Poly(points) => points.iter().for_each(|q| offer(*q)),
             Shape::Circle(c, r) => {

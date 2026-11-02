@@ -12,6 +12,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.ribbon.right", "Right View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds a right view to the sheet."),
     CommandSpec::new("drawing.ribbon.iso", "Isometric View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds an isometric (3D) view to the sheet."),
     CommandSpec::new("drawing.ribbon.model", "Model View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("camera").params("No parameters. UI only: adds a view taken from the 3D window's camera."),
+    CommandSpec::new("drawing.ribbon.shaded", "Shaded View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("camera").params("No parameters. UI only: places a colour (shaded) picture of the model from the 3D camera on the sheet."),
     CommandSpec::new("drawing.ribbon.projected", "Projected View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("lookat").params("No parameters. UI only: places a view projected from the selected view."),
     CommandSpec::new("drawing.ribbon.dimension", "Dimension", ui_only).noundo().doc_only().at("DRAWING", "ANNOTATE").icon("dimension").params("No parameters. UI only: starts the dimension tool on the sheet."),
     CommandSpec::new("drawing.ribbon.centre", "Centre Lines", ui_only).noundo().doc_only().at("DRAWING", "ANNOTATE").icon("centerline").params("No parameters. UI only: switches centre lines on circles on or off."),

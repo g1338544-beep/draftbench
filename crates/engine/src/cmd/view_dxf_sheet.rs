@@ -228,7 +228,8 @@ fn manual(
                     continue;
                 }
                 // lines: a full cross through the circle; marks: a small cross at its centre.
-                let reach = if mode == "marks" { (rs * 0.5).clamp(1.5, 4.0) } else { rs + 3.0 };
+                let extra = p.get("centre_extra").and_then(Value::as_f64).filter(|v| v.is_finite()).unwrap_or(3.0).clamp(0.0, 50.0);
+                let reach = if mode == "marks" { (rs * 0.5).clamp(1.5, 4.0) } else { rs + extra };
                 line("CENTER", Vec2::new(cs.x - reach, cs.y), Vec2::new(cs.x + reach, cs.y), &mut entities);
                 line("CENTER", Vec2::new(cs.x, cs.y - reach), Vec2::new(cs.x, cs.y + reach), &mut entities);
                 any_centre = true;
