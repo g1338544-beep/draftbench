@@ -190,6 +190,8 @@ pub struct State {
     scale_edit: Option<usize>,
     /// The Orient View window: the direction (X, Y, Z) the new view looks back along.
     orient: Option<[String; 3]>,
+    /// The Sheet window shown when Drawing opens on a design with no views yet.
+    setup: bool,
     /// Per-design views and dimensions kept between runs, by design name.
     saved_designs: serde_json::Map<String, serde_json::Value>,
     /// Every sheet of the drawing as saved JSON (the current one is refreshed when switching).
@@ -252,6 +254,7 @@ impl Default for State {
             menu_at: None,
             scale_edit: None,
             orient: None,
+            setup: false,
             saved_designs: serde_json::Map::new(),
             pages: Vec::new(),
             page: 0,
@@ -1032,6 +1035,77 @@ fn normal_angles(n: [f64; 3]) -> Option<(f64, f64)> {
     Some((yaw, z.clamp(-1.0, 1.0).asin()))
 }
 
+/// The Sheet window: size, scale, name and projection, shown when Drawing opens on a new design.
+fn setup_window(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.drawing.setup {
+        return;
+    }
+    let mut changed = false;
+    let mut ok = false;
+    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_setup"), "sheet", "Sheet").show_body(ctx, |ui| {
+        let d = &mut app.drawing;
+        ui.label("Size");
+        let custom = d.paper >= 5;
+        ui.horizontal(|ui| {
+            if crate::ui_kit::list_picker(ui, "Standard size", "Standard size", !custom).clicked() && custom {
+                d.paper = 2;
+                changed = true;
+            }
+            if crate::ui_kit::list_picker(ui, "Custom size", "Custom size", custom).clicked() && !custom {
+                d.paper = 5;
+                changed = true;
+            }
+        });
+        if d.paper >= 5 {
+            ui.label("Height (mm) · Length (mm)");
+            changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("setup_h"), &mut d.custom_h, "841", false, 8).changed();
+            changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("setup_l"), &mut d.custom_w, "1189", false, 8).changed();
+        } else {
+            let current = PAPERS[d.paper.min(4)];
+            crate::ui_kit::dropdown_menu(ui, "setup_paper", current, |ui| {
+                for (i, name) in PAPERS.iter().enumerate() {
+                    if crate::ui_kit::list_picker(ui, name, name, i == d.paper).clicked() {
+                        d.paper = i;
+                        changed = true;
+                        ui.close();
+                    }
+                }
+            });
+            changed |= crate::ui_kit::checkbox(ui, "Landscape", &mut d.landscape).changed();
+        }
+        ui.label("Scale");
+        changed |= scale_picker(ui, "setup_scale", &mut d.sheet_scale);
+        ui.separator();
+        ui.label("Name");
+        changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("setup_title"), &mut d.title, "Drawing title", false, 80).changed();
+        ui.label("Sheet number · Revision");
+        changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("setup_no"), &mut d.sheet_no, "1", false, 8).changed();
+        changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("setup_rev"), &mut d.revision, "A", false, 8).changed();
+        ui.separator();
+        ui.label("Projection");
+        ui.horizontal(|ui| {
+            if crate::ui_kit::list_picker(ui, "First angle (ISO)", "First angle (ISO)", d.first_angle).clicked() && !d.first_angle {
+                d.first_angle = true;
+                changed = true;
+            }
+            if crate::ui_kit::list_picker(ui, "Third angle", "Third angle", !d.first_angle).clicked() && d.first_angle {
+                d.first_angle = false;
+                changed = true;
+            }
+        });
+        ui.small("Millimetres. Everything here can be changed later in the panel.");
+        if crate::ui_kit::button(ui, "OK", crate::ui_kit::Button::Small).clicked() {
+            ok = true;
+        }
+    });
+    if changed {
+        refresh(app);
+    }
+    if closed || ok {
+        app.drawing.setup = false;
+    }
+}
+
 /// The dimension window: the kinds to pick from while the tool is on, and the selected dimension's text.
 fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     let tool = app.drawing.dim_tool.as_ref().map(|t| t.0);
@@ -1170,6 +1244,7 @@ pub fn enter(app: &mut SolveApp) -> Result<(), String> {
     if app.drawing.title.is_empty() {
         app.drawing.title = app.session.doc.name.clone();
     }
+    app.drawing.setup = app.drawing.placed.is_empty() && app.drawing.pages.len() <= 1;
     // The page opens at once; the sheet is computed stage by stage over the next frames.
     begin(app);
     fit(app);
@@ -1898,6 +1973,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
     ensure_shaded(app, ui.ctx());
     orient_window(app, ui.ctx());
+    setup_window(app, ui.ctx());
     dimension_window(app, ui.ctx());
     let Some(sheet) = app.drawing.sheet.as_ref() else {
         let msg = match (&app.drawing.error, app.drawing.placed.is_empty()) {
