@@ -81,6 +81,8 @@ struct PlacedView {
     custom: Option<(f64, f64)>,
     /// Quarter turns (counter-clockwise) the view is turned on the sheet: a side view beside the top view.
     rot: u8,
+    /// The caption under the view: `None` = the automatic one (name and scale), an empty text hides it.
+    label: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -415,7 +417,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -579,6 +581,7 @@ impl State {
                         Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?))
                     }),
                     rot: v.get("rot").and_then(serde_json::Value::as_u64).map_or(0, |n| (n % 4) as u8),
+                    label: v.get("label").and_then(serde_json::Value::as_str).map(|t| t.chars().take(80).collect()),
                 });
             }
         }
@@ -825,6 +828,9 @@ fn params(st: &State) -> Value {
             if v.rot % 4 != 0 {
                 o["rot"] = json!(v.rot % 4);
             }
+            if let Some(t) = &v.label {
+                o["label"] = json!(t);
+            }
             if let Some((yaw, pitch)) = v.custom {
                 o["yaw"] = json!(yaw);
                 o["pitch"] = json!(pitch);
@@ -1016,6 +1022,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         align: None,
         custom: None,
         rot: 0,
+        label: None,
     });
     app.drawing.selected = Some(n);
     begin(app);
@@ -1035,6 +1042,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str) -> Option<Sheet> {
         align: None,
         custom: None,
         rot: 0,
+        label: None,
     });
     let mut p = params(&app.drawing);
     app.drawing.placed.pop();
@@ -2000,6 +2008,24 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             dirty |= scale_picker(ui, &format!("drawing_scale_{i}"), &mut v.scale);
                             dirty |= crate::ui_kit::checkbox(ui, "Hidden lines (dashed)", &mut v.dashed).changed();
                             dirty |= crate::ui_kit::checkbox(ui, "Overall dimensions", &mut v.dims).changed();
+                            // The caption under the view: edit it, hide it, or go back to the automatic one.
+                            let mut shown = v.label.clone().unwrap_or_default();
+                            ui.horizontal(|ui| {
+                                ui.label("Caption");
+                                let hint = if v.label.is_none() { "automatic" } else { "hidden" };
+                                if ui.add(egui::TextEdit::singleline(&mut shown).desired_width(110.0).hint_text(hint)).changed() {
+                                    v.label = Some(shown.chars().take(80).collect());
+                                    dirty = true;
+                                }
+                                if crate::ui_kit::button(ui, "Hide", crate::ui_kit::Button::Small).clicked() {
+                                    v.label = Some(String::new());
+                                    dirty = true;
+                                }
+                                if crate::ui_kit::button(ui, "Auto", crate::ui_kit::Button::Small).clicked() {
+                                    v.label = None;
+                                    dirty = true;
+                                }
+                            });
                             let mut cut = v.section.is_some();
                             if crate::ui_kit::checkbox(ui, "Section cut (hatched)", &mut cut).changed() {
                                 v.section = cut.then(|| (0, String::new()));
@@ -2843,6 +2869,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     section: None,
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
+                    label: None,
                     rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
                         (true, 2 | 3, 1 | 5) => if dx >= 0.0 { 1 } else { 3 },
                         (true, 1 | 5, 2 | 3) => if dy >= 0.0 { 1 } else { 3 },

@@ -325,7 +325,14 @@ fn manual(
             Some((axis, _)) => format!("Section {letter}-{letter} ({}={})  {}", ["X", "Y", "Z"].get(axis).copied().unwrap_or("?"), trim_mm(section_at), ratio_label(scale)),
             None => format!("{}  {}", if custom.is_some() { "Model view" } else { view_name(view) }, ratio_label(scale)),
         };
-        text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, caption, &mut entities);
+        // The user's own caption replaces it; an empty one hides it.
+        let caption = match item.get("label").and_then(Value::as_str) {
+            Some(t) => t.chars().take(80).collect::<String>(),
+            None => caption,
+        };
+        if !caption.trim().is_empty() {
+            text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, caption, &mut entities);
+        }
         scales.insert(index, scale);
         boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));
         names.push(view_name(view).to_string());
