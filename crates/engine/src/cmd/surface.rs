@@ -24,6 +24,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SURFACE", "MODIFY")
         .icon("surface_stitch")
         .params("bodies: [names] (surfaces sewn into the first; a solid when they close); tolerance?: expr (default: tight)"),
+    CommandSpec::new("surface.sew_auto", "Auto Sew", sew_auto)
+        .at("SURFACE", "MODIFY")
+        .icon("surface_stitch")
+        .params("tolerance?: expr (default 0.05 mm: gaps this small are closed). Sews every surface (open) body of the design that touches another into one, a solid when they close; needs at least two surface bodies"),
     CommandSpec::new("surface.thicken", "Thicken", thicken)
         .at("SURFACE", "CREATE")
         .icon("surface_thicken")
@@ -533,6 +537,18 @@ fn stitch(s: &mut Session, p: &Value) -> Result<Value> {
     let tolerance = expr(p, "tolerance").unwrap_or_else(|| "0".into());
     check_expr(s, &tolerance, Kind::Length, cmd, "tolerance")?;
     add_feature(s, p, FeatureKind::Stitch { bodies: bodies.into_iter().map(BodyName).collect(), tolerance })
+}
+
+/// Sews all the surface bodies of the design in one go, no picking.
+fn sew_auto(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "surface.sew_auto";
+    let names: Vec<String> = s.model.state().bodies.iter().filter(|b| b.body.is_surface()).map(|b| b.name.clone()).collect();
+    if names.len() < 2 {
+        return Err(bad(cmd, "needs at least two surface bodies to sew"));
+    }
+    let tolerance = expr(p, "tolerance").unwrap_or_else(|| "0.05".into());
+    check_expr(s, &tolerance, Kind::Length, cmd, "tolerance")?;
+    add_feature(s, p, FeatureKind::Stitch { bodies: names.into_iter().map(BodyName).collect(), tolerance })
 }
 
 fn thicken(s: &mut Session, p: &Value) -> Result<Value> {

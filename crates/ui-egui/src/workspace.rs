@@ -94,7 +94,7 @@ pub const SECTIONS: &[Section] = &[
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
     Section { tab: "SURFACE", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] },
-    Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
+    Section { tab: "SURFACE", panel: "EDIT", promoted: 5, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch", "surface.sew_auto"] },
     Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert"] },
     Section {
         tab: "ASSEMBLE",
