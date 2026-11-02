@@ -63,6 +63,7 @@ pub(crate) use measure_sel::measure_items;
 mod kernel_heal_tests;
 mod parameters;
 mod plastic;
+mod drawing_ribbon;
 mod render;
 #[cfg(test)]
 mod script_tests;
@@ -305,6 +306,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
+    v.extend(drawing_ribbon::COMMANDS.iter());
     v
 }
 

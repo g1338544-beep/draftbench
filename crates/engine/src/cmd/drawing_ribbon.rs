@@ -1,0 +1,26 @@
+//! The Drawing workspace ribbon. The sheet lives in the desktop UI, so these commands only
+//! name the buttons; the UI performs them. A programmatic call changes nothing.
+
+use serde_json::{Value, json};
+
+use super::CommandSpec;
+use crate::{Result, Session};
+
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("drawing.ribbon.front", "Front View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds a front view to the sheet."),
+    CommandSpec::new("drawing.ribbon.top", "Top View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds a top view to the sheet."),
+    CommandSpec::new("drawing.ribbon.right", "Right View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds a right view to the sheet."),
+    CommandSpec::new("drawing.ribbon.iso", "Isometric View", ui_only).noundo().doc_only().at("DRAWING", "VIEWS").icon("box").params("No parameters. UI only: adds an isometric (3D) view to the sheet."),
+    CommandSpec::new("drawing.ribbon.dimension", "Dimension", ui_only).noundo().doc_only().at("DRAWING", "ANNOTATE").icon("dimension").params("No parameters. UI only: starts the dimension tool on the sheet."),
+    CommandSpec::new("drawing.ribbon.centre", "Centre Lines", ui_only).noundo().doc_only().at("DRAWING", "ANNOTATE").icon("centerline").params("No parameters. UI only: switches centre lines on circles on or off."),
+    CommandSpec::new("drawing.ribbon.hidden", "Hidden Lines", ui_only).noundo().doc_only().at("DRAWING", "EDIT").icon("eye").params("No parameters. UI only: switches dashed hidden lines on or off for all views."),
+    CommandSpec::new("drawing.ribbon.scale", "View Scale", ui_only).noundo().doc_only().at("DRAWING", "EDIT").icon("scale").params("No parameters. UI only: edits the scale of the selected view."),
+    CommandSpec::new("drawing.ribbon.delete", "Delete View", ui_only).noundo().doc_only().at("DRAWING", "EDIT").icon("delete").params("No parameters. UI only: removes the selected view."),
+    CommandSpec::new("drawing.ribbon.fit", "Fit Sheet", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("fit").params("No parameters. UI only: frames the whole sheet."),
+    CommandSpec::new("drawing.ribbon.export", "Export DXF", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("export").params("No parameters. UI only: exports the sheet as DXF."),
+    CommandSpec::new("drawing.ribbon.close", "Back to Design", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("home").params("No parameters. UI only: leaves the Drawing workspace."),
+];
+
+fn ui_only(_: &mut Session, _: &Value) -> Result<Value> {
+    Ok(json!({"ui_only": true}))
+}

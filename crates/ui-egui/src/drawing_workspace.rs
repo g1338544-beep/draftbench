@@ -335,6 +335,50 @@ fn add_view(app: &mut SolveApp, view: usize) {
     begin(app);
 }
 
+/// A Drawing ribbon button was pressed.
+pub fn ribbon(app: &mut SolveApp, id: &str) {
+    match id {
+        "drawing.ribbon.front" => add_view(app, 0),
+        "drawing.ribbon.top" => add_view(app, 1),
+        "drawing.ribbon.right" => add_view(app, 2),
+        "drawing.ribbon.iso" => add_view(app, 6),
+        "drawing.ribbon.dimension" => app.drawing.dim_tool = Some((0, Vec::new())),
+        "drawing.ribbon.centre" => {
+            app.drawing.centre = !app.drawing.centre;
+            refresh(app);
+        }
+        "drawing.ribbon.hidden" => {
+            let on = !app.drawing.placed.is_empty() && app.drawing.placed.iter().all(|v| v.dashed);
+            app.drawing.placed.iter_mut().for_each(|v| v.dashed = !on);
+            refresh(app);
+        }
+        "drawing.ribbon.scale" => app.drawing.scale_edit = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()),
+        "drawing.ribbon.delete" => {
+            if let Some(i) = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()) {
+                app.drawing.placed.remove(i);
+                app.drawing.selected = None;
+                app.drawing.scale_edit = None;
+                refresh(app);
+            }
+        }
+        "drawing.ribbon.fit" => fit(app),
+        "drawing.ribbon.export" => {
+            let name = format!("{}-drawing.dxf", app.session.doc.name);
+            let mut p = params(&app.drawing);
+            p["tolerance"] = json!(0.15);
+            app.pick_save(&name, &["dxf"], move |app, path| {
+                let Some(path) = path else { return };
+                p["path"] = json!(path);
+                if app.run("file.export_drawing_dxf", p).is_ok() {
+                    app.set_status(format!("Exported drawing sheet {path}"), false);
+                }
+            });
+        }
+        "drawing.ribbon.close" => leave(app),
+        _ => {}
+    }
+}
+
 /// A flat top-down orthographic camera on the sheet: pan and zoom only.
 pub fn fit(app: &mut SolveApp) {
     let (w, h) = app.drawing.sheet.as_ref().map(|s| (s.width, s.height)).unwrap_or((420.0, 297.0));

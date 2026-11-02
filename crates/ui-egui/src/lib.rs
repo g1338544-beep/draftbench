@@ -887,6 +887,10 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() {
             return;
         }
+        if id.starts_with("drawing.ribbon.") {
+            drawing_workspace::ribbon(self, id);
+            return;
+        }
         if id == "view.normal_to" {
             if self.run(id, json!({"camera": self.cam})).is_ok() {
                 self.follow_view_request(true);
