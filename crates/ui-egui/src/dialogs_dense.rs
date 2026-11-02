@@ -513,88 +513,31 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if opts.tapped {
                 enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread);
             }
-            // Where the hole goes on its face: distances from the face's edges, or the position
-            // itself as numbers or expressions (editing either moves the hole).
-            if !opts.multiple
-                && let Some(Sel::Face { point, body, index, .. }) = d.inputs.first().and_then(|i| i.items.first()).cloned()
-            {
-                let tag = pt(point);
-                let shown = |v: f64| format!("{} mm", (v * 1000.0).round() / 1000.0);
-                let number = |t: &str| t.trim().trim_end_matches("mm").trim().parse::<f64>().ok().filter(|v| v.is_finite());
-                let defaults = vec![shown(point.x), shown(point.y), shown(point.z)];
-                let mut at: Vec<String> = d
-                    .extra
-                    .get("position_exprs")
-                    .filter(|k| k["point"] == tag)
-                    .and_then(|k| k["at"].as_array())
-                    .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
-                    .filter(|a: &Vec<String>| a.len() == 3)
-                    .unwrap_or_else(|| defaults.clone());
-                // The face's extent, looked up once per face.
-                let key = format!("{body}#{index}");
-                if d.extra.get("face_bounds").and_then(|b| b["key"].as_str()) != Some(key.as_str()) {
-                    let found = face_extent(&app.session, &body, index);
-                    d.extra.insert("face_bounds".into(), json!({"key": key, "box": found}));
-                }
-                let bounds = d.extra.get("face_bounds").and_then(|b| b["box"].as_array()).filter(|a| a.len() == 7).map(|a| a.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect::<Vec<f64>>());
-                let names = ["X", "Y", "Z"];
-                let axes = bounds.as_ref().map(|b| {
-                    let n = [b[3], b[4], b[5]];
-                    let dominant = (0..3).fold(0, |best, i| if n[i].abs() > n[best].abs() { i } else { best });
-                    let others: Vec<usize> = (0..3).filter(|i| *i != dominant).collect();
-                    (others[0], others[1])
-                });
-                let lo = bounds.as_ref().map(|b| [b[0], b[1], b[2]]);
-                let derive = |at: &[String]| -> Vec<String> {
-                    match (axes, lo) {
-                        (Some((u, v)), Some(lo)) => [u, v]
-                            .iter()
-                            .map(|a| at.get(*a).and_then(|t| number(t)).map(|x| shown(x - lo[*a])).unwrap_or_default())
-                            .collect(),
-                        _ => Vec::new(),
+            // Where the hole goes: pick edges of the part and give the distance from each; the
+            // dimensions show on the model.
+            if !opts.multiple {
+                for label in crate::hole_position::LABELS {
+                    if !d.inputs.iter().any(|i| i.label == label) {
+                        d.inputs.push(SelInput::new(label, selection::EDGES, false));
                     }
-                };
-                let mut edge: Vec<String> = d
-                    .extra
-                    .get("edge_text")
-                    .filter(|k| k["tag"] == tag)
-                    .and_then(|k| k["text"].as_array())
-                    .map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect())
-                    .filter(|e: &Vec<String>| e.len() == 2)
-                    .unwrap_or_else(|| derive(&at));
-                let (at0, edge0) = (at.clone(), edge.clone());
-                if let (Some((u, v)), true) = (axes, edge.len() == 2) {
-                    for (slot, axis) in [u, v].into_iter().enumerate() {
-                        let label = format!("Distance from {}-min edge", names[axis]);
-                        if let Some(text) = edge.get_mut(slot) {
-                            enter |= expr_row(ui, &label, text);
+                }
+                match crate::hole_position::setup(app, &d.inputs) {
+                    Some(st) if !st.references.is_empty() => {
+                        let before = crate::hole_position::texts(&mut d.extra, &d.inputs, &st);
+                        let mut text = before.clone();
+                        for r in &st.references {
+                            if let Some(t) = text.get_mut(r.slot) {
+                                enter |= expr_row(ui, &format!("Distance from Edge {}", r.slot + 1), t);
+                            }
+                        }
+                        if text != before {
+                            crate::hole_position::store(&mut d.extra, &d.inputs, &st, &text);
                         }
                     }
-                }
-                for (i, name) in ["Position X", "Position Y", "Position Z"].iter().enumerate() {
-                    if let Some(text) = at.get_mut(i) {
-                        enter |= expr_row(ui, name, text);
+                    _ => {
+                        ui.small("Pick edges (Edge 1, Edge 2) of the part to set the hole's distance from them");
                     }
                 }
-                if at != at0 {
-                    edge = derive(&at);
-                } else if edge != edge0
-                    && let (Some((u, v)), Some(lo)) = (axes, lo)
-                {
-                    for (slot, axis) in [u, v].into_iter().enumerate() {
-                        if let (Some(t), Some(dist)) = (edge.get(slot), edge.get(slot).and_then(|t| number(t)))
-                            && edge0.get(slot) != Some(t)
-                        {
-                            at[axis] = shown(lo[axis] + dist);
-                        }
-                    }
-                }
-                if at == defaults {
-                    d.extra.remove("position_exprs");
-                } else {
-                    d.extra.insert("position_exprs".into(), json!({"at": at, "point": tag}));
-                }
-                d.extra.insert("edge_text".into(), json!({"tag": tag, "text": edge}));
             }
             if *kind == 0 {
                 form_row(ui, "Drill Point", |ui| {
@@ -1305,26 +1248,3 @@ fn iso_clearance(size: &str, fit: &str) -> Option<f64> {
     })
 }
 
-/// The extent of a planar face: its lowest and highest corner and its unit normal (seven numbers:
-/// lo x y z, then hi... stored as lo x y z, normal x y z, and the highest corner is not needed), or
-/// nothing when the face is not planar.
-fn face_extent(s: &Session, body: &str, face: usize) -> Value {
-    let Some((_, normal)) = planar_face(s, body, face) else { return Value::Null };
-    let st = s.world_state();
-    let Some(b) = st.body(body) else { return Value::Null };
-    let m = b.mesh();
-    let mut lo = [f64::MAX; 3];
-    let mut any = false;
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        if *f as usize != face {
-            continue;
-        }
-        if let Some(tri) = m.tri(t) {
-            for v in tri {
-                lo = [lo[0].min(v.x), lo[1].min(v.y), lo[2].min(v.z)];
-                any = true;
-            }
-        }
-    }
-    if any { json!([lo[0], lo[1], lo[2], normal.x, normal.y, normal.z, 0.0]) } else { Value::Null }
-}

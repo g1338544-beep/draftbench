@@ -332,6 +332,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    crate::hole_position::paint(app, ui, painter, proj, &mut d);
     if let Some((base, dir)) = anchor(app, &d)
         && let Some(bs) = proj.to_screen(base)
     {
