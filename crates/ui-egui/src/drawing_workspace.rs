@@ -319,7 +319,8 @@ fn params(st: &State) -> Value {
                 "center": st.centre,
             });
             if let Some((axis, at)) = &v.section {
-                let mut sec = json!({"axis": ["x", "y", "z"][(*axis).min(2)]});
+                let name = ["x", "y", "z"][(*axis).min(2)];
+                let mut sec = json!({ "axis": name });
                 if let Ok(k) = at.trim().parse::<f64>()
                     && k.is_finite()
                 {
