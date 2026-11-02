@@ -333,6 +333,18 @@ fn thread_on(st: &ModelState, feature: u64, p: Vec3, designation: Option<&str>, 
     let (body, cyl) = st
         .bodies
         .iter()
+        // Only bodies the point is near: the face finder meshes and classifies a whole body, which
+        // across hundreds of parts froze the Thread dialog on every pick.
+        .filter(|b| {
+            let bb = b.mesh().bounds();
+            let margin = (bb.max - bb.min).len() * 0.06 + 0.01;
+            p.x >= bb.min.x - margin
+                && p.x <= bb.max.x + margin
+                && p.y >= bb.min.y - margin
+                && p.y <= bb.max.y + margin
+                && p.z >= bb.min.z - margin
+                && p.z <= bb.max.z + margin
+        })
         .filter_map(|b| kernel::cylinder_face_at(&b.body, p).map(|c| (b.name.clone(), c)))
         .min_by(|a, b| {
             let dist = |c: &kernel::CylinderFace| ((p - c.axis_point - c.axis * (p - c.axis_point).dot(c.axis)).len() - c.radius).abs();
