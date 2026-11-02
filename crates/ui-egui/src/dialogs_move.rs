@@ -242,6 +242,22 @@ pub fn point_markers(app: &SolveApp, d: &Dialog) -> Vec<(Vec3, &'static str)> {
     names.iter().enumerate().filter_map(|(k, n)| sel_point(app, items(d, k + 1).first()).map(|p| (p, *n))).collect()
 }
 
+/// Where a click under the pointer would put the From / To point: the centre of a circle edge,
+/// the middle of a face, a vertex. Shown as a ring before the click.
+pub fn hover_point(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
+    let Kind::Move { mode, .. } = &d.kind else { return None };
+    if !matches!(*mode, POINT_TO_POINT | POINT_TO_POSITION | FREE) || d.active == 0 {
+        return None;
+    }
+    let sel = match app.viewport.hover.as_ref()? {
+        crate::viewport::Hit::Edge { body, index, mid } => Sel::Edge { body: body.clone(), index: *index, point: *mid },
+        crate::viewport::Hit::Face { body, index, point } => Sel::Face { body: body.clone(), index: *index, point: *point },
+        crate::viewport::Hit::Vertex { body, point } if !body.is_empty() => Sel::Vertex { body: body.clone(), point: *point },
+        _ => return None,
+    };
+    sel_point(app, Some(&sel))
+}
+
 /// An axis line: origin axes and sketch lines, or a straight body edge.
 fn axis_line(app: &SolveApp, s: &Sel) -> Option<(Vec3, Vec3)> {
     if let Some(a) = crate::dialogs::axis_of(app, s) {

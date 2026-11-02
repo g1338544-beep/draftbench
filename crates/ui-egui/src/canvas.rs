@@ -325,6 +325,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
                 painter.text(s + vec2(9.0, -9.0), egui::Align2::LEFT_BOTTOM, *name, egui::FontId::proportional(Tokens::get().font_body), accent);
             }
         }
+        if let Some(s) = crate::dialogs_move::hover_point(app, &d).and_then(|p| proj.to_screen(p)) {
+            painter.circle_stroke(s, 6.0, egui::Stroke::new(2.0, accent));
+            painter.circle_filled(s, 2.0, accent);
+        }
         if let [(a, _), (b, _)] = markers.as_slice()
             && let (Some(sa), Some(sb)) = (proj.to_screen(*a), proj.to_screen(*b))
         {
