@@ -2609,20 +2609,54 @@ fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4]) -> (String, f32, f32) {
 }
 
 /// A PDF with one page per `(content, width, height)` (points).
-fn pdf_document(pages: &[(String, f32, f32)]) -> Vec<u8> {
+/// One PDF page: its drawing commands (in mm), its size in points and the colour pictures on it
+/// (RGB, with the x, y, width and height of each in mm).
+struct PdfPage {
+    content: String,
+    w: f32,
+    h: f32,
+    images: Vec<(Picture, [f32; 4])>,
+}
+
+fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
     let mut out: Vec<u8> = b"%PDF-1.4\n".to_vec();
     let mut offsets: Vec<usize> = Vec::new();
-    let mut object = |out: &mut Vec<u8>, body: String| {
+    // Object numbers: 1 catalog, 2 pages, 3 font, then per page its page, contents and pictures.
+    let mut ids: Vec<usize> = Vec::new();
+    let mut next = 4;
+    for p in pages {
+        ids.push(next);
+        next += 2 + p.images.len();
+    }
+    let mut object = |out: &mut Vec<u8>, body: &[u8]| {
         offsets.push(out.len());
-        out.extend(format!("{} 0 obj\n{body}\nendobj\n", offsets.len()).as_bytes());
+        out.extend(format!("{} 0 obj\n", offsets.len()).as_bytes());
+        out.extend(body);
+        out.extend(b"\nendobj\n");
     };
-    let kids: String = (0..pages.len()).map(|i| format!("{} 0 R ", 4 + 2 * i)).collect();
-    object(&mut out, "<< /Type /Catalog /Pages 2 0 R >>".to_string());
-    object(&mut out, format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", pages.len()));
-    object(&mut out, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string());
-    for (i, (content, w, h)) in pages.iter().enumerate() {
-        object(&mut out, format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.2} {h:.2}] /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> >> >>", 5 + 2 * i));
-        object(&mut out, format!("<< /Length {} >>\nstream\n{content}endstream", content.len()));
+    let kids: String = ids.iter().map(|id| format!("{id} 0 R ")).collect();
+    object(&mut out, b"<< /Type /Catalog /Pages 2 0 R >>");
+    object(&mut out, format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", pages.len()).as_bytes());
+    object(&mut out, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    for (p, id) in pages.iter().zip(&ids) {
+        let pictures: String = (0..p.images.len()).map(|k| format!("/Im{k} {} 0 R ", id + 2 + k)).collect();
+        let mut content = p.content.clone();
+        // The content is in mm; the pictures go over it in the same units.
+        for (k, (_, [x, y, w, h])) in p.images.iter().enumerate() {
+            content.push_str(&format!("q {w:.3} 0 0 {h:.3} {x:.3} {y:.3} cm /Im{k} Do Q\n"));
+        }
+        object(
+            &mut out,
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> /XObject << {pictures}>> >> >>", p.w, p.h, id + 1).as_bytes(),
+        );
+        object(&mut out, format!("<< /Length {} >>\nstream\n{content}endstream", content.len()).as_bytes());
+        for (pic, _) in &p.images {
+            let (rgb, w, h) = (&pic.0, pic.1, pic.2);
+            let mut body = format!("<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length {} >>\nstream\n", rgb.len()).into_bytes();
+            body.extend(rgb);
+            body.extend(b"\nendstream");
+            object(&mut out, &body);
+        }
     }
     let xref = out.len();
     out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
@@ -2633,8 +2667,22 @@ fn pdf_document(pages: &[(String, f32, f32)]) -> Vec<u8> {
     out
 }
 
-fn sheet_pdf(sheet: &Sheet, cols: [u8; 4]) -> Vec<u8> {
-    pdf_document(&[sheet_pdf_content(sheet, cols)])
+fn sheet_page(sheet: &Sheet, cols: [u8; 4], images: Vec<(Picture, [f32; 4])>) -> PdfPage {
+    let (content, w, h) = sheet_pdf_content(sheet, cols);
+    PdfPage { content, w, h, images }
+}
+
+/// The colour pictures on the sheet on screen, drawn if need be, with where each sits on the paper.
+fn pdf_images(app: &mut SolveApp) -> Vec<(Picture, [f32; 4])> {
+    let views = app.drawing.shaded.clone();
+    views
+        .iter()
+        .filter_map(|v| {
+            let pic = shaded_picture(app, v)?;
+            let h = v.w * 0.75;
+            Some((pic, [v.x - v.w / 2.0, v.y - h / 2.0, v.w, h]))
+        })
+        .collect()
 }
 
 /// Save every sheet of the drawing as one PDF, a page each.
@@ -2642,12 +2690,13 @@ fn print_all_sheets(app: &mut SolveApp) {
     let pages = app.drawing.all_pages();
     let back = app.drawing.page.min(pages.len().saturating_sub(1));
     let cols = app.drawing.colours;
-    let mut doc: Vec<(String, f32, f32)> = Vec::new();
+    let mut doc: Vec<PdfPage> = Vec::new();
     for page in &pages {
         app.drawing.load_page(page);
         refresh(app);
+        let images = pdf_images(app);
         if let Some(sheet) = app.drawing.sheet.as_ref() {
-            doc.push(sheet_pdf_content(sheet, cols));
+            doc.push(sheet_page(sheet, cols, images));
         }
     }
     if let Some(page) = pages.get(back) {
@@ -2672,11 +2721,13 @@ fn print_all_sheets(app: &mut SolveApp) {
 
 /// Save the sheet on screen as a PDF to print.
 fn print_sheet(app: &mut SolveApp) {
-    let Some(sheet) = app.drawing.sheet.as_ref() else {
+    if app.drawing.sheet.is_none() {
         app.set_status("Add a view first, then print", true);
         return;
-    };
-    let bytes = sheet_pdf(sheet, app.drawing.colours);
+    }
+    let images = pdf_images(app);
+    let Some(sheet) = app.drawing.sheet.as_ref() else { return };
+    let bytes = pdf_document(&[sheet_page(sheet, app.drawing.colours, images)]);
     let name = format!("{}-sheet{}.pdf", app.session.doc.name, app.drawing.page + 1);
     app.pick_save(&name, &["pdf"], move |app, path| {
         let Some(path) = path else { return };
