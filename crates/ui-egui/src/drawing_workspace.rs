@@ -182,6 +182,8 @@ pub struct State {
     menu_at: Option<(Option<usize>, Pos2)>,
     /// The view whose scale is being edited after a double-click.
     scale_edit: Option<usize>,
+    /// The Orient View window: the direction (X, Y, Z) the new view looks back along.
+    orient: Option<[String; 3]>,
     /// Per-design views and dimensions kept between runs, by design name.
     saved_designs: serde_json::Map<String, serde_json::Value>,
     /// Every sheet of the drawing as saved JSON (the current one is refreshed when switching).
@@ -240,6 +242,7 @@ impl Default for State {
             drag: None,
             menu_at: None,
             scale_edit: None,
+            orient: None,
             saved_designs: serde_json::Map::new(),
             pages: Vec::new(),
             page: 0,
@@ -964,6 +967,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                 }
             });
         }
+        "drawing.ribbon.orient" => app.drawing.orient = Some(["1".into(), "-1".into(), "1".into()]),
         "drawing.ribbon.shaded" => add_shaded_view(app),
         "drawing.ribbon.print" => print_sheet(app),
         "drawing.ribbon.printall" => print_all_sheets(app),
@@ -980,6 +984,58 @@ fn add_model_view(app: &mut SolveApp) {
         v.custom = Some((cam.yaw, cam.pitch));
     }
     begin(app);
+}
+
+/// The camera angles of a view whose normal (the direction toward the viewer) is `n`.
+fn normal_angles(n: [f64; 3]) -> Option<(f64, f64)> {
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    if !len.is_finite() || len < 1e-9 {
+        return None;
+    }
+    let (x, y, z) = (n[0] / len, n[1] / len, n[2] / len);
+    let yaw = if x.abs() < 1e-9 && y.abs() < 1e-9 { 0.0 } else { (-x).atan2(-y) };
+    Some((yaw, z.clamp(-1.0, 1.0).asin()))
+}
+
+/// The Orient View window: pick the direction the view is taken from, then add the view.
+fn orient_window(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(mut v) = app.drawing.orient.clone() else { return };
+    let mut add = false;
+    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_orient"), "orient", "Orient View").show_body(ctx, |ui| {
+        ui.label("View direction (the side you look at the part from)");
+        ui.horizontal_wrapped(|ui| {
+            for (label, d) in [("+X right", ["1", "0", "0"]), ("-X left", ["-1", "0", "0"]), ("-Y front", ["0", "-1", "0"]), ("+Y back", ["0", "1", "0"]), ("+Z top", ["0", "0", "1"]), ("-Z bottom", ["0", "0", "-1"]), ("Iso", ["1", "-1", "1"])] {
+                if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small).clicked() {
+                    v = d.map(String::from);
+                }
+            }
+        });
+        ui.label("Specify vector (X, Y, Z)");
+        ui.horizontal(|ui| {
+            for (i, t) in v.iter_mut().enumerate() {
+                crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("orient", i)), t, "0", false, 8);
+            }
+        });
+        let n: Vec<f64> = v.iter().map(|t| t.trim().parse::<f64>().unwrap_or(0.0)).collect();
+        let ok = normal_angles([n[0], n[1], n[2]]).is_some();
+        if !ok {
+            ui.small("Enter a direction that is not all zero.");
+        }
+        if ok && crate::ui_kit::button(ui, "Add view", crate::ui_kit::Button::Small).clicked() {
+            add = true;
+        }
+    });
+    if add {
+        let n: Vec<f64> = v.iter().map(|t| t.trim().parse::<f64>().unwrap_or(0.0)).collect();
+        if let Some(a) = normal_angles([n[0], n[1], n[2]]) {
+            add_view(app, 6);
+            if let Some(p) = app.drawing.placed.last_mut() {
+                p.custom = Some(a);
+            }
+            begin(app);
+        }
+    }
+    app.drawing.orient = if closed { None } else { Some(v) };
 }
 
 /// A flat top-down orthographic camera on the sheet: pan and zoom only.
@@ -1724,6 +1780,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 
     ensure_shaded(app, ui.ctx());
+    orient_window(app, ui.ctx());
     let Some(sheet) = app.drawing.sheet.as_ref() else {
         let msg = match (&app.drawing.error, app.drawing.placed.is_empty()) {
             (Some(e), _) => e.clone(),
