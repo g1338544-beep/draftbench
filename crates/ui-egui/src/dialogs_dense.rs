@@ -40,6 +40,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Construct { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
         Kind::Split => Some("solid.split_body"),
+        Kind::ResizeFace { .. } => Some("face.resize"),
         Kind::DeleteFaces => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
         Kind::Thread { .. } => Some("solid.thread"),
@@ -801,6 +802,35 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Stock { margin } => {
             enter |= expr_row(ui, "Margin", margin);
+        }
+        Kind::ResizeFace { diameter } => {
+            // How many round faces of the picked size there are, measured when the picks change.
+            let points: Vec<Value> = d.inputs.first().map(|i| i.items.iter().filter_map(|x| if let Sel::Face { point, .. } = x { Some(json!([point.x, point.y, point.z])) } else { None }).collect()).unwrap_or_default();
+            let key = json!(points).to_string();
+            if d.extra.get("rz_key").and_then(Value::as_str) != Some(key.as_str()) {
+                d.extra.insert("rz_key".into(), json!(key));
+                d.extra.remove("rz_count");
+                if let Some(first) = points.first()
+                    && let Ok(r) = app.session.execute("face.same_size", &json!({"face": first}))
+                {
+                    let count = r.get("count").and_then(Value::as_u64).unwrap_or(0);
+                    let dia = r.get("diameter").and_then(Value::as_f64).unwrap_or(0.0);
+                    d.extra.insert("rz_count".into(), json!(count));
+                    d.extra.insert("rz_internal".into(), json!(r.get("internal").and_then(Value::as_bool).unwrap_or(true)));
+                    d.extra.insert("rz_diameter".into(), json!(dia));
+                    let shown = format!("{:.3}", dia);
+                    *diameter = format!("{} mm", shown.trim_end_matches('0').trim_end_matches('.'));
+                }
+            }
+            enter |= expr_row(ui, "Diameter", diameter);
+            if let Some(count) = d.extra.get("rz_count").and_then(Value::as_u64) {
+                let kind = if d.extra.get("rz_internal").and_then(Value::as_bool).unwrap_or(true) { "holes" } else { "bosses" };
+                let dia = d.extra.get("rz_diameter").and_then(Value::as_f64).unwrap_or(0.0);
+                let only = d.extra.get("only_picked").and_then(Value::as_bool).unwrap_or(false);
+                let changed = if only { 1 } else { count };
+                ui.label(format!("{count} {kind} of Ø{dia:.3} mm on this body: {changed} will change"));
+            }
+            extra_options(ui, "resize_face_options", &mut d.extra, &[("Only the picked faces", "only_picked")]);
         }
         Kind::Scale { factor } => {
             enter |= expr_row(ui, "Scale factor", factor);

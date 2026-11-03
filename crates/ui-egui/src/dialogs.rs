@@ -231,6 +231,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Split a body by a plane.
             Split,
+            /// Change the diameter of round faces (holes, bosses); equal ones follow.
+            ResizeFace {
+                diameter: String,
+            },
             /// A cosmetic thread on a cylindrical face.
             Thread {
                 designation: String,
@@ -626,6 +630,7 @@ impl Dialog {
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
             ),
             "face.delete" => Dialog::new(Kind::DeleteFaces, vec![SelInput::new("Faces", FACES, true)]),
+            "face.resize" => Dialog::new(Kind::ResizeFace { diameter: String::new() }, vec![SelInput::new("Round faces", FACES, true)]),
             "solid.boundary_fill" => {
                 Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", BODIES, true)])
             }
@@ -997,6 +1002,7 @@ impl Dialog {
             Kind::PathPattern { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
             Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
+            Kind::ResizeFace { diameter } => ("Diameter", ValueKind::Length, diameter),
             Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { factor } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
@@ -1685,6 +1691,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Remove => "REMOVE",
         Kind::PathPattern { .. } => "PATTERN ON PATH",
         Kind::Split => "SPLIT BODY",
+        Kind::ResizeFace { .. } => "RESIZE FACE",
         Kind::Thread { .. } => "THREAD",
         Kind::Section { .. } => "SECTION ANALYSIS",
         Kind::PatternRect { .. } => "RECTANGULAR PATTERN",
@@ -3586,6 +3593,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
             }
             ("solid.align", p)
+        }
+        Kind::ResizeFace { diameter } => {
+            need(0, "round faces")?;
+            if diameter.trim().is_empty() {
+                return Err("type the new diameter".into());
+            }
+            let only = d.extra.get("only_picked").and_then(Value::as_bool).unwrap_or(false);
+            ("face.resize", json!({"faces": face_points(0), "diameter": diameter.trim(), "same_size": !only}))
         }
         Kind::Remove => {
             need(0, "bodies")?;
