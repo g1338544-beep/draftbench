@@ -2825,12 +2825,13 @@ pub fn leave(app: &mut SolveApp) {
 pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     Container::new(ui.ctx(), Surface::Panel)
         .edge("sc_drawing_settings", Edge::Right)
-        .exact_size(285.0)
-        .resizable(false)
+        .default_size(285.0)
+        .size_range(240.0..=560.0)
+        .resizable(true)
         .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(Tokens::get().panel).inner_margin(10))
         .show(ui, |ui| {
             crate::ui_kit::scope(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     let mut dirty = false;
                     let mut add: Option<usize> = None;
                     let mut remove: Option<usize> = None;
