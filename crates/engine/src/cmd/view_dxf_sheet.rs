@@ -264,6 +264,29 @@ fn manual(
                     }
                 }
             }
+            // Top and Right views share the vertical hole axes: a hole seen as a circle from above is two vertical
+            // lines in the Right view (its horizontal axis is the Top view's vertical one), with the centre line between.
+            if matches!(view, StandardView::Top | StandardView::Right) {
+                let want = if view == StandardView::Right { StandardView::Top } else { StandardView::Right };
+                if let Some(par) = infos.values().find(|i| i.view == want) {
+                    if view == StandardView::Right {
+                        for (c, r) in &par.circles {
+                            if let Some((u, lo, hi)) = vertical_span(&all.lines, c.y, *r).map(|(l, h)| (c.y, l, h)).or_else(|| vertical_span(&all.lines, -c.y, *r).map(|(l, h)| (-c.y, l, h))) {
+                                axis_line(Vec2::new(lo, u), Vec2::new(hi, u), Vec2::new(u, lo), Vec2::new(u, hi), false, &to_sheet, &mut entities);
+                                any_centre = true;
+                            }
+                        }
+                    } else {
+                        let parent_sheet = |q: Vec2| Vec2::new(par.x + (q.x - par.c.x) * par.scale, par.y + (q.y - par.c.y) * par.scale);
+                        for (c, r) in &here {
+                            if let Some((u, lo, hi)) = vertical_span(&par.lines.lines, c.y, *r).map(|(l, h)| (c.y, l, h)).or_else(|| vertical_span(&par.lines.lines, -c.y, *r).map(|(l, h)| (-c.y, l, h))) {
+                                axis_line(Vec2::new(lo, u), Vec2::new(hi, u), Vec2::new(u, lo), Vec2::new(u, hi), false, &parent_sheet, &mut entities);
+                                any_centre = true;
+                            }
+                        }
+                    }
+                }
+            }
             infos.insert(index, ViewInfo { lines: all.clone(), circles: here, x, y, c, scale, view });
         }
         if section.is_none() && item.get("center").and_then(Value::as_bool).unwrap_or(true) {
@@ -470,6 +493,29 @@ fn axis_span(lines: &[(Vec2, Vec2, bool)], c: Vec2, r: f64, horizontal: bool) ->
         }
         lo = lo.min(pa.min(pb));
         hi = hi.max(pa.max(pb));
+    }
+    (near && far && hi > lo).then_some((lo, hi))
+}
+
+/// Vertical lines at `u - r` and `u + r` (a hole's two sides seen from the side): their extent along the vertical.
+fn vertical_span(lines: &[(Vec2, Vec2, bool)], u: f64, r: f64) -> Option<(f64, f64)> {
+    let tol = (0.02 * r).max(0.05);
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    let (mut near, mut far) = (false, false);
+    for (a, b, _) in lines {
+        if (a.x - b.x).abs() > 1e-6 + 1e-3 * (a.y - b.y).abs() {
+            continue;
+        }
+        let off = a.x - u;
+        if (off + r).abs() <= tol {
+            near = true;
+        } else if (off - r).abs() <= tol {
+            far = true;
+        } else {
+            continue;
+        }
+        lo = lo.min(a.y.min(b.y));
+        hi = hi.max(a.y.max(b.y));
     }
     (near && far && hi > lo).then_some((lo, hi))
 }
