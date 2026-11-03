@@ -2104,7 +2104,7 @@ fn setup_window(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// The dimension window: the kinds to pick from while the tool is on, and the selected dimension's text.
 fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
-    let tool = app.drawing.dim_tool.as_ref().map(|t| t.0);
+    let tool = app.drawing.dim_tool.as_ref().map(|t| if t.0 == 8 { 7 } else { t.0 });
     let sel = app.drawing.sel_dim.filter(|i| *i < app.drawing.dims.len());
     if tool.is_none() && sel.is_none() {
         return;
@@ -3800,8 +3800,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let hit_pt = snap_point(sheet, c, tol);
                 // Smart: a circle is a diameter; two points pick horizontal, vertical or aligned by their direction.
                 let mut kind = kind;
+                // Smart on a circle waits for the next pick: another circle or point measures between them,
+                // empty space makes it a diameter.
+                let first_circle = if kind == 7 && picks.is_empty() { snap_circle(sheet, c, tol * 2.5) } else { None };
                 if kind == 7 {
-                    kind = if picks.is_empty() && snap_circle(sheet, c, tol * 2.5).is_some() {
+                    kind = if first_circle.is_some() {
                         3
                     } else if let [a, b] = picks[..] {
                         smart_kind(a, b, c)
@@ -3809,11 +3812,27 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         0
                     };
                 }
-                let again = if app.drawing.dim_back { 7 } else { kind };
+                let again = if app.drawing.dim_back || kind == 8 { 7 } else { kind };
                 // A click on a line (away from its ends and corners) takes both its ends, for Smart, Horizontal, Vertical and Aligned.
                 let tool_kind = app.drawing.dim_tool.as_ref().filter(|(k, p)| matches!(*k, 0 | 1 | 2 | 7) && p.is_empty()).map(|(k, _)| *k);
                 let seg_pick = if tool_kind.is_some() && hit_pt.is_none() && snap_circle(sheet, c, tol * 2.5).is_none() { nearest_segment(sheet, c, tol) } else { None };
-                if let (Some((a, b)), Some(k)) = (seg_pick, tool_kind) {
+                if let Some((centre, r)) = first_circle {
+                    app.drawing.dim_tool = Some((8, vec![centre, pos2(r, 0.0)]));
+                } else if kind == 8 {
+                    let (centre, r) = (picks.first().copied().unwrap_or(c), picks.get(1).map_or(0.0, |p| p.x));
+                    let other_circle = snap_circle(sheet, c, tol * 2.5).filter(|(c2, _)| (*c2 - centre).length() > 1e-3);
+                    let other_point = hit_pt.filter(|q| ((*q - centre).length() - r).abs() > tol && (*q - centre).length() > 1e-3);
+                    if let Some((c2, _)) = other_circle {
+                        app.drawing.dim_tool = Some((7, vec![centre, c2]));
+                    } else if let Some(q) = other_point {
+                        app.drawing.dim_tool = Some((7, vec![centre, q]));
+                    } else {
+                        let v = c - centre;
+                        let len = v.length().max(1e-6);
+                        new_dim = Some(DimItem { kind: 3, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0 });
+                        app.drawing.dim_tool = Some((7, Vec::new()));
+                    }
+                } else if let (Some((a, b)), Some(k)) = (seg_pick, tool_kind) {
                     app.drawing.dim_tool = Some((k, vec![a, b]));
                 } else if kind == 5 || kind == 6 {
                     // Balloon or note: the point on the part, then where it goes; balloons are numbered in turn.
