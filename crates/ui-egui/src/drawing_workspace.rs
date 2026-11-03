@@ -3701,6 +3701,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
             && !ui.input(|i| i.modifiers.command || i.modifiers.alt)
+            && !app.drawing.phone
         {
             // A frame dragged over empty sheet selects the centre lines and marks it touches.
             app.drawing.box_sel = Some((s, s));
