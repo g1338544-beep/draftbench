@@ -227,7 +227,7 @@ fn manual(
         };
         let on_loop = |set: &[(Vec2, f64)], a: Vec2, b: Vec2| {
             set.iter().any(|(c, r)| {
-                let tol = 1e-3 * r + 1e-9;
+                let tol = 1e-2 * r + 1e-9;
                 (a.dist(*c) - r).abs() <= tol && (b.dist(*c) - r).abs() <= tol && a.dist(b) <= 0.8 * r
             })
         };
@@ -1382,7 +1382,9 @@ fn bolt_circles(found: &[(Vec2, f64)]) -> Vec<(Vec2, f64)> {
 fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
     use std::collections::{BTreeMap, BTreeSet};
     let extent = edges.iter().flat_map(|(a, b)| [a, b]).fold(1.0_f64, |s, p| s.max(p.x.abs()).max(p.y.abs()));
-    let eps = extent * 1e-7;
+    // Corners shared by neighbouring chords (and by a rim seen twice, top and bottom) differ by
+    // rounding noise: merge anything closer than about a hundred-thousandth of the view.
+    let eps = extent * 1e-5;
     let key = |p: Vec2| [(p.x / eps).round() as i64, (p.y / eps).round() as i64];
     let mut ids: BTreeMap<[i64; 2], usize> = BTreeMap::new();
     let mut pts: Vec<Vec2> = Vec::new();
@@ -1438,14 +1440,32 @@ fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
         }
         let points: Vec<Vec2> = members.iter().filter_map(|v| pts.get(*v).copied()).collect();
         let nf = points.len() as f64;
-        let c = Vec2::new(points.iter().map(|p| p.x).sum::<f64>() / nf, points.iter().map(|p| p.y).sum::<f64>() / nf);
+        let m = Vec2::new(points.iter().map(|p| p.x).sum::<f64>() / nf, points.iter().map(|p| p.y).sum::<f64>() / nf);
+        // Least-squares circle (corners need not be evenly spaced): solve in coordinates about the mean.
+        let (mut suu, mut svv, mut suv, mut suuu, mut svvv, mut suvv, mut svuu) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        for p in &points {
+            let (u, v) = (p.x - m.x, p.y - m.y);
+            suu += u * u;
+            svv += v * v;
+            suv += u * v;
+            suuu += u * u * u;
+            svvv += v * v * v;
+            suvv += u * v * v;
+            svuu += v * u * u;
+        }
+        let det = suu * svv - suv * suv;
+        if det.abs() < 1e-18 {
+            continue;
+        }
+        let (b1, b2) = (0.5 * (suuu + suvv), 0.5 * (svvv + svuu));
+        let c = Vec2::new(m.x + (b1 * svv - b2 * suv) / det, m.y + (suu * b2 - suv * b1) / det);
         let r = points.iter().map(|p| p.dist(c)).sum::<f64>() / nf;
-        if !(r > 1e-6) || points.iter().any(|p| (p.dist(c) - r).abs() > 0.01 * r) {
+        if !(r > 1e-6) || !r.is_finite() || points.iter().any(|p| (p.dist(c) - r).abs() > 0.02 * r) {
             continue;
         }
         let lens: Vec<f64> = unique.iter().filter(|(a, _)| members.contains(a)).filter_map(|(a, b)| Some(pts.get(*a)?.dist(*pts.get(*b)?))).collect();
         let mean = lens.iter().sum::<f64>() / lens.len().max(1) as f64;
-        if lens.iter().any(|l| (l - mean).abs() > 0.05 * mean) {
+        if lens.iter().any(|l| (l - mean).abs() > 0.5 * mean) {
             continue;
         }
         out.push((c, r));

@@ -2975,7 +2975,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dirty |= crate::ui_kit::checkbox(ui, "First-angle projection (ISO)", &mut app.drawing.first_angle).changed();
                     ui.separator();
                     ui.label("Lines");
-                    dirty |= crate::ui_kit::checkbox(ui, "Centre lines on circles", &mut app.drawing.centre).changed();
+                    dirty |= crate::ui_kit::checkbox(ui, "Automatic centre lines (every view)", &mut app.drawing.centre).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "Hole table (tags + X, Y, diameter)", &mut app.drawing.hole_table).changed();
                     if app.drawing.centre {
                         let mode = ["Centre lines (full cross)", "Centre marks (small cross)"][app.drawing.centre_mode.min(1)];
