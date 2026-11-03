@@ -836,7 +836,9 @@ pub fn write_dxf_r12(layers: &[DxfLayer], entities: &[DxfEntity]) -> String {
                 o.code(8, &layer);
                 o.point(10, *at);
                 o.num(40, *height);
-                o.code(1, text_value(text));
+                // Release 12 knows %%c, %%d and %%p for the diameter, degree and plus-minus signs.
+                let marked = text.replace(['\u{d8}', '\u{2300}'], "%%c").replace('\u{b0}', "%%d").replace('\u{b1}', "%%p");
+                o.code(1, text_value(&marked));
                 o.num(50, *angle_deg);
                 o.code(72, 1);
                 o.point(11, *at);
@@ -886,6 +888,21 @@ mod tests {
     fn ellipse_point(e: &DxfShape, t: f64) -> Vec2 {
         let DxfShape::Ellipse { c, major, ratio, .. } = e else { panic!("{e:?}") };
         *c + *major * t.cos() + major.perp() * (*ratio * t.sin())
+    }
+
+    #[test]
+    fn release_12_drawing_is_plain_and_framed() {
+        let ents = vec![
+            DxfEntity { layer: "A B".into(), shape: DxfShape::Line(Vec2::new(0.0, 0.0), Vec2::new(841.0, 594.0)) },
+            DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: Vec2::new(5.0, 5.0), height: 3.5, angle_deg: 0.0, text: "\u{d8}12 \u{b1}0.1".into() } },
+            DxfEntity { layer: "DIM".into(), shape: DxfShape::Ellipse { c: Vec2::new(50.0, 40.0), major: Vec2::new(25.0, 0.0), ratio: 0.5, t0: 0.0, t1: TAU } },
+        ];
+        let text = write_dxf_r12(&[], &ents);
+        let p = pairs(&text);
+        assert!(p.contains(&(1, "AC1009".to_string())) && p.contains(&(1, "%%c12 %%p0.1".to_string())));
+        assert!(!text.contains("AcDb") && !text.contains("ELLIPSE") && text.contains("POLYLINE") && text.contains("SEQEND"));
+        assert!(p.contains(&(2, "A B".to_string())) && p.contains(&(12, "420.5".to_string())));
+        assert_eq!(p.last(), Some(&(0, "EOF".to_string())));
     }
 
     #[test]
