@@ -304,6 +304,9 @@ pub struct State {
     /// Centre marks placed by hand (x, y, arm length in mm on the sheet), and the tool that places them.
     marks: Vec<[f32; 3]>,
     mark_tool: bool,
+    /// What the Centre Mark tool places: 0 a cross, 1 a centre line along two clicked points (any tilt), 2 a circular centre line (centre, then a point on it).
+    mark_mode: u8,
+    mark_pts: Vec<Pos2>,
     /// The Erase Centre tool: a click or a dragged frame removes the centre lines and marks it touches.
     erase_tool: bool,
     /// The view whose caption is selected on the sheet, and the one being edited with its text.
@@ -451,6 +454,8 @@ impl Default for State {
             bom: Vec::new(),
             marks: Vec::new(),
             mark_tool: false,
+            mark_mode: 0,
+            mark_pts: Vec::new(),
             erase_tool: false,
             caption_sel: None,
             caption_edit: None,
@@ -1851,6 +1856,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
         "drawing.ribbon.centremark" => {
             app.drawing.erase_tool = false;
             app.drawing.mark_tool = !app.drawing.mark_tool;
+            app.drawing.mark_pts.clear();
             app.drawing.dim_tool = None;
         }
         "drawing.ribbon.base" => app.drawing.base = Some((1, app.drawing.sheet_scale.clone())),
@@ -2980,6 +2986,17 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.separator();
                     ui.label(format!("Centre marks: {}", app.drawing.marks.len()));
                     ui.small("Centre Mark in the ribbon: click circles (or points) to mark them; Esc ends.");
+                    ui.horizontal(|ui| {
+                        for (i, name) in ["Cross", "Axis (2 points)", "Circle"].iter().enumerate() {
+                            if ui.selectable_label(app.drawing.mark_mode as usize == i, *name).clicked() {
+                                app.drawing.mark_mode = i as u8;
+                                app.drawing.mark_pts.clear();
+                                app.drawing.mark_tool = true;
+                                app.drawing.erase_tool = false;
+                                app.drawing.dim_tool = None;
+                            }
+                        }
+                    });
                     ui.horizontal(|ui| {
                         if !app.drawing.marks.is_empty() && crate::ui_kit::button(ui, "Remove last", crate::ui_kit::Button::Small).clicked() {
                             app.drawing.marks.pop();
@@ -4580,28 +4597,89 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    // Centre Mark: click a circle for a cross sized to it, or any point for a small one; stays on until Esc.
+    // Centre Mark: a cross on a circle or point (mode 0), a centre line along two clicked points (mode 1),
+    // or a circular centre line from its centre and a point on it (mode 2); stays on until Esc.
     if app.drawing.mark_tool {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
             app.drawing.mark_tool = false;
+            app.drawing.mark_pts.clear();
         } else {
             let tol = 14.0 / px_per_mm;
+            let accent = Tokens::get().accent;
             let hover = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
+            let mode = app.drawing.mark_mode;
             let target = |c: Pos2| -> Option<[f32; 3]> {
-                if let Some((centre, r)) = snap_circle(sheet, c, tol * 1.5) {
+                if mode == 0
+                    && let Some((centre, r)) = snap_circle(sheet, c, tol * 1.5)
+                {
                     return Some([centre.x, centre.y, r + 3.0]);
                 }
                 snap_point(sheet, c, tol).map(|q| [q.x, q.y, 4.0])
             };
+            // A point for the two-click modes: a snapped point, else the raw click.
+            let pick = |c: Pos2| -> Pos2 { snap_point(sheet, c, tol).unwrap_or(c) };
+            let hint = match mode {
+                1 => "Centre line: click 2 points along the axis (Esc ends)",
+                2 => "Circular centre line: click the centre, then a hole centre on the circle (Esc ends)",
+                _ => "Centre mark: click a circle or point (Esc ends)",
+            };
+            painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
             if let Some(t) = hover.and_then(target) {
-                painter.circle_stroke(map(pos2(t[0], t[1])), 7.0, Stroke::new(2.0, Tokens::get().accent));
+                painter.circle_stroke(map(pos2(t[0], t[1])), 7.0, Stroke::new(2.0, accent));
+            }
+            if mode != 0
+                && let Some(first) = app.drawing.mark_pts.first().copied()
+                && let Some(h) = hover.map(pick)
+            {
+                if mode == 1 {
+                    painter.line_segment([map(first), map(h)], Stroke::new(1.5, accent));
+                } else {
+                    let c = map(first);
+                    painter.circle_stroke(c, (map(h) - c).length(), Stroke::new(1.5, accent));
+                }
             }
             if response.clicked_by(egui::PointerButton::Primary)
-                && let Some(t) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)).and_then(target)
-                && app.drawing.marks.len() < 400
+                && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             {
-                app.drawing.marks.push(t);
-                app.drawing.dirty_marks = true;
+                if mode == 0 {
+                    if let Some(t) = target(c)
+                        && app.drawing.marks.len() < 400
+                    {
+                        app.drawing.marks.push(t);
+                        app.drawing.dirty_marks = true;
+                    }
+                } else {
+                    let q = pick(c);
+                    if let Some(first) = app.drawing.mark_pts.first().copied() {
+                        let d = q - first;
+                        let len = d.length();
+                        if len.is_finite() && len > 0.01 {
+                            if mode == 1 {
+                                // The line runs a little past both clicked points.
+                                let u = d / len;
+                                let (a, b) = (first - u * 3.0, q + u * 3.0);
+                                if app.drawing.clines.len() < 400 {
+                                    app.drawing.clines.push([a.x, a.y, b.x, b.y]);
+                                }
+                            } else {
+                                // 48 chords make the circle; the centre linetype dashes each one.
+                                const N: usize = 48;
+                                if app.drawing.clines.len() + N <= 400 {
+                                    for k in 0..N {
+                                        let (t0, t1) = (k as f32 / N as f32 * std::f32::consts::TAU, (k + 1) as f32 / N as f32 * std::f32::consts::TAU);
+                                        let pa = first + vec2(t0.cos(), t0.sin()) * len;
+                                        let pb = first + vec2(t1.cos(), t1.sin()) * len;
+                                        app.drawing.clines.push([pa.x, pa.y, pb.x, pb.y]);
+                                    }
+                                }
+                            }
+                            app.drawing.dirty_marks = true;
+                        }
+                        app.drawing.mark_pts.clear();
+                    } else {
+                        app.drawing.mark_pts.push(q);
+                    }
+                }
             }
         }
     }
