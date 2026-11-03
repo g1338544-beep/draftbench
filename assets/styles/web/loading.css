@@ -5,3 +5,5 @@
     #solidcraft_loading.done { opacity: 0; pointer-events: none; }
     #solidcraft_loading img { width: min(60vmin, 360px); height: auto; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    #solidcraft_loading .brand { margin-top: 8px; font: 600 clamp(28px, 6vmin, 44px) system-ui, -apple-system, 'Segoe UI', sans-serif; letter-spacing: .02em; color: #1f2937; }
+    #solidcraft_loading .sub { margin-top: 6px; font: 14px system-ui, sans-serif; color: #6b7280; }
