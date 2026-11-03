@@ -785,23 +785,30 @@ fn finish(
     let wanted = p.get("block_w").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 60.0).unwrap_or(190.0);
     let block_w = wanted.min(sheet_w - 2.0 * margin).max(10.0);
     let (bx0, by0) = (sheet_w - margin - block_w, margin);
-    let row = bh / 3.0;
+    // Dividers (fractions of the width) and the number of body rows under the title row.
+    let mut divs: Vec<f64> = match p.get("cols").and_then(Value::as_array) {
+        Some(a) => a.iter().filter_map(Value::as_f64).filter(|v| v.is_finite() && (0.05..=0.95).contains(v)).take(5).collect(),
+        None => vec![c1, c2],
+    };
+    divs.sort_by(f64::total_cmp);
+    let nrows = p.get("body_rows").and_then(Value::as_u64).filter(|n| (1..=5).contains(n)).unwrap_or(2) as usize;
+    let row = bh / (nrows as f64 + 1.0);
     let right = sheet_w - margin;
     let block_on = on("block_on");
     let mut block_entities: Vec<DxfEntity> = Vec::new();
     {
         let entities = &mut block_entities;
         rect("SHEET", Vec2::new(bx0, by0), Vec2::new(right, by0 + bh), entities);
-        line("SHEET", Vec2::new(bx0, by0 + row), Vec2::new(right, by0 + row), entities);
-        line("SHEET", Vec2::new(bx0, by0 + 2.0 * row), Vec2::new(right, by0 + 2.0 * row), entities);
-        for f in [c1, c2] {
-            line("SHEET", Vec2::new(bx0 + block_w * f, by0), Vec2::new(bx0 + block_w * f, by0 + 2.0 * row), entities);
+        for j in 1..=nrows {
+            line("SHEET", Vec2::new(bx0, by0 + row * j as f64), Vec2::new(right, by0 + row * j as f64), entities);
+        }
+        for f in &divs {
+            line("SHEET", Vec2::new(bx0 + block_w * f, by0), Vec2::new(bx0 + block_w * f, by0 + row * nrows as f64), entities);
         }
     }
     if block_on {
         entities.append(&mut block_entities);
     }
-    let (m0, m1, m2) = (c1 / 2.0, (c1 + c2) / 2.0, (c2 + 1.0) / 2.0);
     let field = |key: &str| -> String { p.get("block").and_then(|b| b.get(key)).and_then(Value::as_str).unwrap_or("").chars().take(60).collect() };
     let cap = |label: &str, value: String| if value.is_empty() { String::new() } else { format!("{label} {value}") };
     // Cells the user typed over: title, company, number, date, scale, drawn by, paper.
@@ -823,20 +830,35 @@ fn finish(
     };
     let put = |x: f64, y: f64, h: f64, (t, dx, dy, k, font): (String, f64, f64, f64, u8), entities: &mut Vec<DxfEntity>| {
         // The font travels as a marker in front of the text; the sheet reads it, the DXF drops it.
+        if t.is_empty() {
+            return;
+        }
         let t = if font > 0 { format!("\u{1}{font}{t}") } else { t };
         text("TEXT", Vec2::new(x + dx, y + dy), h * k, t, entities);
     };
     let text_from = entities.len();
-    let company = cell(1, field("company"));
-    put(bx0 + block_w / 2.0, by0 + 2.0 * row + row * 0.3, th * 1.4, cell(0, if title.is_empty() { "Untitled".into() } else { title }), &mut entities);
-    if !company.0.is_empty() {
-        put(bx0 + block_w * m0, by0 + row + row * 0.3, th, company, &mut entities);
+    put(bx0 + block_w / 2.0, by0 + nrows as f64 * row + row * 0.3, th * 1.4, cell(0, if title.is_empty() { "Untitled".into() } else { title }), &mut entities);
+    let ncols = divs.len() + 1;
+    let number = cap("No.", [field("number"), cap("Sh", field("sheet")), cap("Rev", field("revision"))].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("  "));
+    let paper_text = format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" });
+    for rr in 0..nrows {
+        for col in 0..ncols {
+            let idx = 1 + rr * ncols + col;
+            let lo = if col == 0 { 0.0 } else { divs.get(col - 1).copied().unwrap_or(1.0) };
+            let hi = divs.get(col).copied().unwrap_or(1.0);
+            let default = match idx {
+                1 => field("company"),
+                2 => number.clone(),
+                3 => cap("Date", field("date")),
+                4 => cap("Scale", scale_text.clone()),
+                5 => cap("By", field("author")),
+                6 => paper_text.clone(),
+                _ => String::new(),
+            };
+            let from_bottom = (nrows - 1 - rr) as f64;
+            put(bx0 + block_w * (lo + hi) / 2.0, by0 + row * from_bottom + row * 0.3, th, cell(idx, default), &mut entities);
+        }
     }
-    put(bx0 + block_w * m1, by0 + row + row * 0.3, th, cell(2, cap("No.", [field("number"), cap("Sh", field("sheet")), cap("Rev", field("revision"))].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join("  "))), &mut entities);
-    put(bx0 + block_w * m2, by0 + row + row * 0.3, th, cell(3, cap("Date", field("date"))), &mut entities);
-    put(bx0 + block_w * m0, by0 + row * 0.3, th, cell(4, cap("Scale", scale_text.clone())), &mut entities);
-    put(bx0 + block_w * m1, by0 + row * 0.3, th, cell(5, cap("By", field("author"))), &mut entities);
-    put(bx0 + block_w * m2, by0 + row * 0.3, th, cell(6, format!("{} {} - mm", paper_label(p, (sheet_w, sheet_h)), if first_angle { "1st angle" } else { "3rd angle" })), &mut entities);
     if !block_on {
         entities.truncate(text_from);
     }

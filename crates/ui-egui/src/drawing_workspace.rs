@@ -268,10 +268,16 @@ pub struct State {
     frame_on: bool,
     block_on: bool,
     block_h: String,
-    col1: String,
-    col2: String,
-    cells: [String; 7],
+    /// The title block's column dividers, percent of its width, comma separated.
+    cols: String,
+    /// Body rows under the title row (1–5).
+    body_rows: usize,
+    cells: Vec<String>,
     cell_edit: Option<usize>,
+    /// A title block line picked to move or delete (see `grid_hit`).
+    sel_grid: Option<u8>,
+    /// Right-click on the title block: the point, the line and the cell under it.
+    block_menu: Option<(Pos2, Option<u8>, Option<usize>)>,
     placed: Vec<PlacedView>,
     dims: Vec<DimItem>,
     /// The parts list drawn over the title block: item, description, quantity, material.
@@ -401,10 +407,12 @@ impl Default for State {
             frame_on: true,
             block_on: true,
             block_h: "36".into(),
-            col1: "40".into(),
-            col2: "70".into(),
-            cells: Default::default(),
+            cols: "40,70".into(),
+            body_rows: 2,
+            cells: vec![String::new(); MAX_CELLS],
             cell_edit: None,
+            sel_grid: None,
+            block_menu: None,
             placed: Vec::new(),
             dims: Vec::new(),
             bom: Vec::new(),
@@ -521,7 +529,7 @@ impl State {
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
             "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
-            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_h": self.block_h, "col1": self.col1, "col2": self.col2, "cells": self.cells, "designs": designs,
+            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "cells": self.cells, "designs": designs,
         })
     }
 
@@ -569,8 +577,7 @@ impl State {
             ("margin", &mut self.margin, 6),
             ("block_w", &mut self.block_w, 6),
             ("block_h", &mut self.block_h, 6),
-            ("col1", &mut self.col1, 6),
-            ("col2", &mut self.col2, 6),
+            ("cols", &mut self.cols, 40),
             ("author", &mut self.author, 80),
             ("company", &mut self.company, 80),
         ] {
@@ -585,10 +592,16 @@ impl State {
                 }
             }
         }
+        if v.get("cols").is_none()
+            && let (Some(a), Some(b)) = (v.get("col1").and_then(serde_json::Value::as_str), v.get("col2").and_then(serde_json::Value::as_str))
+        {
+            self.cols = format!("{},{}", a.trim(), b.trim());
+        }
+        if let Some(n) = v.get("body_rows").and_then(serde_json::Value::as_u64).filter(|n| (1..=5).contains(n)) {
+            self.body_rows = n as usize;
+        }
         if let Some(c) = v.get("cells").and_then(serde_json::Value::as_array) {
-            for (slot, t) in self.cells.iter_mut().zip(c) {
-                *slot = t.as_str().unwrap_or("").chars().take(110).collect();
-            }
+            load_cells(&mut self.cells, c);
         }
         if let Some(d) = v.get("designs").and_then(serde_json::Value::as_object) {
             self.saved_designs = d.iter().take(40).map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -754,9 +767,7 @@ impl State {
             }
         }
         if let Some(c) = d.get("cells").and_then(serde_json::Value::as_array) {
-            for (slot, t) in self.cells.iter_mut().zip(c) {
-                *slot = t.as_str().unwrap_or("").chars().take(110).collect();
-            }
+            load_cells(&mut self.cells, c);
         }
         if let Some(n) = d.get("paper").and_then(serde_json::Value::as_u64).filter(|n| *n <= 5) {
             self.paper = n as usize;
@@ -1032,13 +1043,13 @@ fn params(st: &State) -> Value {
     }
     p["frame_on"] = json!(st.frame_on);
     p["block_on"] = json!(st.block_on);
-    for (key, text, scale) in [("block_h", &st.block_h, 1.0), ("col1", &st.col1, 0.01), ("col2", &st.col2, 0.01)] {
-        if let Ok(k) = text.trim().parse::<f64>()
-            && k.is_finite()
-        {
-            p[key] = json!(k * scale);
-        }
+    if let Ok(k) = st.block_h.trim().parse::<f64>()
+        && k.is_finite()
+    {
+        p["block_h"] = json!(k);
     }
+    p["cols"] = json!(parse_cols(&st.cols));
+    p["body_rows"] = json!(st.body_rows.clamp(1, 5));
     for (key, text) in [("margin", &st.margin), ("block_w", &st.block_w)] {
         if let Ok(k) = text.trim().parse::<f64>()
             && k.is_finite()
@@ -1798,70 +1809,257 @@ fn join_cell(dx: f32, dy: f32, k: f32, font: u8, body: &str) -> String {
     }
 }
 
-/// The title block in sheet mm: (margin, width, left edge, height, first divider, second divider),
-/// the dividers as fractions of the width.
-fn block_geo(st: &State, sheet_w: f32) -> (f32, f32, f32, f32, f32, f32) {
+/// Cells in a title block (the title, then the body rows from the top, left to right).
+const MAX_CELLS: usize = 32;
+
+/// Fill the cell texts from saved JSON.
+fn load_cells(cells: &mut Vec<String>, saved: &[serde_json::Value]) {
+    cells.resize(MAX_CELLS, String::new());
+    for (slot, t) in cells.iter_mut().zip(saved) {
+        *slot = t.as_str().unwrap_or("").chars().take(110).collect();
+    }
+}
+
+/// The dividers of the title block as fractions of its width, from "40,70" (percent): sorted,
+/// at least 6 % apart, at most five.
+fn parse_cols(text: &str) -> Vec<f32> {
+    let mut v: Vec<f32> = text.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).filter(|p| p.is_finite()).map(|p| p / 100.0).filter(|f| (0.08..=0.92).contains(f)).collect();
+    v.sort_by(f32::total_cmp);
+    let mut out: Vec<f32> = Vec::new();
+    for f in v {
+        if out.last().is_none_or(|l| f - l >= 0.06) && out.len() < 5 {
+            out.push(f);
+        }
+    }
+    out
+}
+
+fn fmt1(v: f32) -> String {
+    format!("{v:.1}").trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn cols_text(v: &[f32]) -> String {
+    v.iter().map(|f| fmt1(f * 100.0)).collect::<Vec<_>>().join(",")
+}
+
+/// The title block in sheet mm: its frame, the dividers (fractions of the width) and the body rows.
+#[derive(Clone)]
+struct BlockGeo {
+    margin: f32,
+    bw: f32,
+    x0: f32,
+    bh: f32,
+    divs: Vec<f32>,
+    rows: usize,
+}
+
+impl BlockGeo {
+    fn cols(&self) -> usize {
+        self.divs.len() + 1
+    }
+    /// Every row, the title row included, is this high.
+    fn rowh(&self) -> f32 {
+        self.bh / (self.rows as f32 + 1.0)
+    }
+}
+
+fn block_geo(st: &State, sheet_w: f32) -> BlockGeo {
     let num = |t: &str, d: f32| t.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
     let margin = num(&st.margin, 10.0).clamp(2.0, 40.0);
     let block_w = num(&st.block_w, 190.0).max(60.0).min(sheet_w - 2.0 * margin).max(10.0);
     let bh = num(&st.block_h, 36.0).clamp(18.0, 90.0);
-    let c1 = (num(&st.col1, 40.0) / 100.0).clamp(0.15, 0.6);
-    let c2 = (num(&st.col2, 70.0) / 100.0).clamp(c1 + 0.1, 0.9);
-    (margin, block_w, sheet_w - margin - block_w, bh, c1, c2)
+    BlockGeo { margin, bw: block_w, x0: sheet_w - margin - block_w, bh, divs: parse_cols(&st.cols), rows: st.body_rows.clamp(1, 5) }
 }
 
 /// Where a cell's text sits (its bottom middle), the cell's width and the row height.
-fn cell_centre(g: (f32, f32, f32, f32, f32, f32), index: usize) -> (Pos2, f32, f32) {
-    let (margin, bw, x0, bh, c1, c2) = g;
-    let rowh = bh / 3.0;
-    let mids = [c1 / 2.0, (c1 + c2) / 2.0, (c2 + 1.0) / 2.0];
-    let widths = [c1, c2 - c1, 1.0 - c2];
-    let (row, col) = match index {
-        0 => (2, None),
-        1..=3 => (1, Some(index - 1)),
-        _ => (0, Some(index - 4)),
-    };
-    let (f, w) = match col {
-        Some(c) => (mids.get(c).copied().unwrap_or(0.5), widths.get(c).copied().unwrap_or(0.3)),
-        None => (0.5, 1.0),
-    };
-    (pos2(x0 + bw * f, margin + rowh * row as f32 + rowh * 0.3), bw * w, rowh)
+fn cell_centre(g: &BlockGeo, index: usize) -> (Pos2, f32, f32) {
+    let rowh = g.rowh();
+    if index == 0 {
+        return (pos2(g.x0 + g.bw * 0.5, g.margin + rowh * g.rows as f32 + rowh * 0.3), g.bw, rowh);
+    }
+    let n = g.cols();
+    let k = index - 1;
+    let rr = (k / n).min(g.rows.saturating_sub(1));
+    let col = k % n;
+    let from_bottom = g.rows.saturating_sub(1 + rr);
+    let lo = if col == 0 { 0.0 } else { g.divs.get(col - 1).copied().unwrap_or(1.0) };
+    let hi = g.divs.get(col).copied().unwrap_or(1.0);
+    (pos2(g.x0 + g.bw * (lo + hi) / 2.0, g.margin + rowh * from_bottom as f32 + rowh * 0.3), g.bw * (hi - lo), rowh)
 }
 
 /// The title block cell under a sheet point.
-fn cell_at(g: (f32, f32, f32, f32, f32, f32), s: Pos2) -> Option<usize> {
-    let (margin, bw, x0, bh, c1, c2) = g;
-    if s.x < x0 || s.x > x0 + bw || s.y < margin || s.y > margin + bh {
+fn cell_at(g: &BlockGeo, s: Pos2) -> Option<usize> {
+    if s.x < g.x0 || s.x > g.x0 + g.bw || s.y < g.margin || s.y > g.margin + g.bh {
         return None;
     }
-    let row = (((s.y - margin) / (bh / 3.0)) as usize).min(2);
-    let f = (s.x - x0) / bw;
-    let col = if f < c1 { 0 } else if f < c2 { 1 } else { 2 };
-    Some(match (row, col) {
-        (2, _) => 0,
-        (1, c) => 1 + c,
-        (_, c) => 4 + c,
-    })
+    let row = (((s.y - g.margin) / g.rowh()) as usize).min(g.rows);
+    if row >= g.rows {
+        return Some(0);
+    }
+    let f = (s.x - g.x0) / g.bw;
+    let col = g.divs.iter().filter(|d| f >= **d).count();
+    Some(1 + (g.rows - 1 - row) * g.cols() + col)
 }
 
-/// The title block line near a sheet point: 0 and 1 the dividers, 2 the top edge, 3 the left edge.
-fn grid_hit(g: (f32, f32, f32, f32, f32, f32), s: Pos2, tol: f32) -> Option<u8> {
-    let (margin, bw, x0, bh, c1, c2) = g;
-    if (s.y - (margin + bh)).abs() <= tol && s.x >= x0 - tol && s.x <= x0 + bw + tol {
-        return Some(2);
+/// The title block line near a sheet point: 0… a column divider, 100 the top edge, 101 the left
+/// edge, 110 + j the j-th horizontal line from the bottom (the last one is under the title).
+fn grid_hit(g: &BlockGeo, s: Pos2, tol: f32) -> Option<u8> {
+    let rowh = g.rowh();
+    let in_x = s.x >= g.x0 - tol && s.x <= g.x0 + g.bw + tol;
+    if (s.y - (g.margin + g.bh)).abs() <= tol && in_x {
+        return Some(100);
     }
-    if (s.x - x0).abs() <= tol && s.y >= margin - tol && s.y <= margin + bh + tol {
-        return Some(3);
+    if (s.x - g.x0).abs() <= tol && s.y >= g.margin - tol && s.y <= g.margin + g.bh + tol {
+        return Some(101);
     }
-    if s.y >= margin - tol && s.y <= margin + bh * 2.0 / 3.0 + tol {
-        if (s.x - (x0 + bw * c1)).abs() <= tol {
-            return Some(0);
+    for j in 1..=g.rows {
+        if (s.y - (g.margin + rowh * j as f32)).abs() <= tol && in_x {
+            return Some(110 + j as u8);
         }
-        if (s.x - (x0 + bw * c2)).abs() <= tol {
-            return Some(1);
+    }
+    if s.y >= g.margin - tol && s.y <= g.margin + rowh * g.rows as f32 + tol {
+        for (i, d) in g.divs.iter().enumerate() {
+            if (s.x - (g.x0 + g.bw * d)).abs() <= tol {
+                return Some(i as u8);
+            }
         }
     }
     None
+}
+
+/// The two ends of a title block line (see `grid_hit`).
+fn grid_line(g: &BlockGeo, which: u8) -> [Pos2; 2] {
+    let rowh = g.rowh();
+    match which {
+        100 => [pos2(g.x0, g.margin + g.bh), pos2(g.x0 + g.bw, g.margin + g.bh)],
+        101 => [pos2(g.x0, g.margin), pos2(g.x0, g.margin + g.bh)],
+        j if j >= 110 => {
+            let y = g.margin + rowh * f32::from(j - 110);
+            [pos2(g.x0, y), pos2(g.x0 + g.bw, y)]
+        }
+        i => {
+            let x = g.x0 + g.bw * g.divs.get(usize::from(i)).copied().unwrap_or(0.5);
+            [pos2(x, g.margin), pos2(x, g.margin + rowh * g.rows as f32)]
+        }
+    }
+}
+
+/// Re-lay the cell texts for a new grid: `place` says where the text of (row from the top, column)
+/// goes now, or `None` to drop it. Texts landing in one cell keep the first that has any.
+fn regrid(st: &mut State, divs: &[f32], rows: usize, place: impl Fn(usize, usize) -> Option<(usize, usize)>) {
+    let (r0, c0) = (st.body_rows.clamp(1, 5), parse_cols(&st.cols).len() + 1);
+    let c1 = divs.len() + 1;
+    let mut fresh = vec![String::new(); MAX_CELLS];
+    if let (Some(slot), Some(t)) = (fresh.get_mut(0), st.cells.first()) {
+        slot.clone_from(t);
+    }
+    for rr in 0..r0 {
+        for c in 0..c0 {
+            let Some(text) = st.cells.get(1 + rr * c0 + c) else { continue };
+            if let Some((nr, nc)) = place(rr, c)
+                && nr < rows
+                && nc < c1
+                && let Some(slot) = fresh.get_mut(1 + nr * c1 + nc)
+                && slot.is_empty()
+            {
+                slot.clone_from(text);
+            }
+        }
+    }
+    st.cells = fresh;
+    st.cols = cols_text(divs);
+    st.body_rows = rows;
+}
+
+/// Split a column in two: at `at` (a fraction of the width) when it is clear of the other
+/// dividers, else the middle of the widest column.
+fn add_column(st: &mut State, at: Option<f32>) -> bool {
+    let mut divs = parse_cols(&st.cols);
+    if divs.len() >= 5 {
+        return false;
+    }
+    let mut edges = vec![0.0];
+    edges.extend(divs.iter().copied());
+    edges.push(1.0);
+    let wanted = at.filter(|f| (0.08..=0.92).contains(f) && edges.iter().all(|e| (e - f).abs() >= 0.06));
+    let f = wanted.unwrap_or_else(|| {
+        let widest = edges.windows(2).max_by(|a, b| (a[1] - a[0]).total_cmp(&(b[1] - b[0]))).map_or((0.0, 1.0), |w| (w[0], w[1]));
+        (widest.0 + widest.1) / 2.0
+    });
+    let col = divs.iter().filter(|d| **d < f).count();
+    divs.insert(col, f);
+    let rows = st.body_rows.clamp(1, 5);
+    regrid(st, &divs, rows, |r, c| Some((r, if c > col { c + 1 } else { c })));
+    true
+}
+
+/// Take a column divider away: its two columns become one.
+fn remove_divider(st: &mut State, i: usize) -> bool {
+    let mut divs = parse_cols(&st.cols);
+    if i >= divs.len() {
+        return false;
+    }
+    divs.remove(i);
+    let rows = st.body_rows.clamp(1, 5);
+    regrid(st, &divs, rows, |r, c| Some((r, if c > i { c - 1 } else { c })));
+    true
+}
+
+/// A row more at the bottom, as high as the others.
+fn add_row(st: &mut State) -> bool {
+    let rows = st.body_rows.clamp(1, 5);
+    if rows >= 5 {
+        return false;
+    }
+    let bh = st.block_h.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(36.0);
+    st.block_h = fmt1((bh * (rows as f32 + 2.0) / (rows as f32 + 1.0)).clamp(18.0, 90.0));
+    let divs = parse_cols(&st.cols);
+    regrid(st, &divs, rows + 1, |r, c| Some((r, c)));
+    true
+}
+
+/// The bottom row goes (its texts with it); the others keep their height.
+fn remove_bottom_row(st: &mut State) -> bool {
+    let rows = st.body_rows.clamp(1, 5);
+    if rows <= 1 {
+        return false;
+    }
+    let bh = st.block_h.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(36.0);
+    st.block_h = fmt1((bh * rows as f32 / (rows as f32 + 1.0)).clamp(18.0, 90.0));
+    let divs = parse_cols(&st.cols);
+    regrid(st, &divs, rows - 1, |r, c| (r + 1 < rows).then_some((r, c)));
+    true
+}
+
+/// Take the horizontal line between two body rows away: they become one row.
+fn remove_row_line(st: &mut State, j: usize) -> bool {
+    let rows = st.body_rows.clamp(1, 5);
+    if j == 0 || j >= rows {
+        return false;
+    }
+    let bh = st.block_h.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(36.0);
+    st.block_h = fmt1((bh * rows as f32 / (rows as f32 + 1.0)).clamp(18.0, 90.0));
+    let divs = parse_cols(&st.cols);
+    let lower = rows - j;
+    regrid(st, &divs, rows - 1, |r, c| {
+        if r == lower {
+            Some((lower - 1, c))
+        } else if r > lower {
+            Some((r - 1, c))
+        } else {
+            Some((r, c))
+        }
+    });
+    true
+}
+
+/// Delete a title block line; false for the frame and the line under the title.
+fn delete_grid_line(st: &mut State, which: u8) -> bool {
+    match which {
+        100 | 101 => false,
+        j if j >= 110 => remove_row_line(st, usize::from(j - 110)),
+        i => remove_divider(st, usize::from(i)),
+    }
 }
 
 /// Open the text window of the title block cell at a sheet point; false when there is none.
@@ -1871,18 +2069,18 @@ fn open_cell(app: &mut SolveApp, s: Pos2) -> bool {
         return false;
     }
     let g = block_geo(&app.drawing, width);
-    let Some(index) = cell_at(g, s) else { return false };
+    let Some(index) = cell_at(&g, s) else { return false };
     let (dx, dy, k, font, body) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
     if body.trim().is_empty() {
         // Start from the text shown there.
-        let (c, _, _) = cell_centre(g, index);
+        let (c, _, _) = cell_centre(&g, index);
         let centre = c + vec2(dx, dy);
         let shown = app.drawing.sheet.as_ref().and_then(|sheet| {
             sheet
                 .items
                 .iter()
                 .filter_map(|(_, sh)| if let Shape::Text(p, _, t, _, _) = sh { Some((p, t)) } else { None })
-                .filter(|(p, _)| (p.x - centre.x).abs() < g.1 * 0.3 && (p.y - centre.y).abs() < 6.0)
+                .filter(|(p, _)| (p.x - centre.x).abs() < g.bw * 0.3 && (p.y - centre.y).abs() < 6.0)
                 .min_by(|a, b| (*a.0 - centre).length().total_cmp(&(*b.0 - centre).length()))
                 .map(|(_, t)| t.clone())
         });
@@ -2654,10 +2852,25 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.label("Border and title block");
                     dirty |= crate::ui_kit::checkbox(ui, "Show the border", &mut app.drawing.frame_on).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "Show the title block", &mut app.drawing.block_on).changed();
-                    ui.label("Title block height (mm) · column dividers (% of width)");
+                    ui.label("Title block height (mm) · column dividers (% of width, separated by commas)");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_block_h"), &mut app.drawing.block_h, "36", false, 6).changed();
-                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_col1"), &mut app.drawing.col1, "40", false, 6).changed();
-                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_col2"), &mut app.drawing.col2, "70", false, 6).changed();
+                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_cols"), &mut app.drawing.cols, "40,70", false, 40).changed();
+                    ui.label("Add or take away lines (drag a line to move it; right-click the block for more)");
+                    ui.horizontal_wrapped(|ui| {
+                        if crate::ui_kit::button(ui, "Add column", crate::ui_kit::Button::Small).clicked() {
+                            dirty |= add_column(&mut app.drawing, None);
+                        }
+                        if crate::ui_kit::button(ui, "Remove column", crate::ui_kit::Button::Small).clicked() {
+                            let last = parse_cols(&app.drawing.cols).len().saturating_sub(1);
+                            dirty |= remove_divider(&mut app.drawing, last);
+                        }
+                        if crate::ui_kit::button(ui, "Add row", crate::ui_kit::Button::Small).clicked() {
+                            dirty |= add_row(&mut app.drawing);
+                        }
+                        if crate::ui_kit::button(ui, "Remove row", crate::ui_kit::Button::Small).clicked() {
+                            dirty |= remove_bottom_row(&mut app.drawing);
+                        }
+                    });
                     ui.label("Text size (mm, 2–10)");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_text_height"), &mut app.drawing.text_height, "3.5", false, 6).changed();
                     for (label, key) in [
@@ -2941,16 +3154,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
-            && let Some(which) = grid_hit(block_geo(&app.drawing, sheet.width), s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
+            && let Some(which) = grid_hit(&block_geo(&app.drawing, sheet.width), s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
         {
             // A line of the title block: drag it to resize the table.
             app.drawing.grid_drag = Some(which);
+            app.drawing.sel_grid = Some(which);
             app.drawing.selected = None;
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
-            && let Some(index) = cell_at(block_geo(&app.drawing, sheet.width), s)
+            && let Some(index) = cell_at(&block_geo(&app.drawing, sheet.width), s)
         {
             // A title block text: drag it anywhere.
             let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
@@ -3047,13 +3261,26 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging a title block line: the table follows, and letting go keeps it.
     if let (Some(which), Some(m)) = (app.drawing.grid_drag, &map) {
         if let (Some(s), Some(w)) = (response.interact_pointer_pos().and_then(|q| m.to_sheet(q)), app.drawing.sheet.as_ref().map(|x| x.width)) {
-            let (margin, bw, x0, _, c1, _) = block_geo(&app.drawing, w);
-            let fmt = |v: f32| format!("{v:.1}").trim_end_matches('0').trim_end_matches('.').to_string();
+            let g = block_geo(&app.drawing, w);
+            let (margin, bw, x0) = (g.margin, g.bw, g.x0);
             match which {
-                0 => app.drawing.col1 = fmt(((s.x - x0) / bw * 100.0).clamp(15.0, 60.0)),
-                1 => app.drawing.col2 = fmt(((s.x - x0) / bw * 100.0).clamp(c1 * 100.0 + 10.0, 90.0)),
-                2 => app.drawing.block_h = fmt((s.y - margin).clamp(18.0, 90.0)),
-                _ => app.drawing.block_w = fmt((x0 + bw - s.x).clamp(60.0, (w - 2.0 * margin).max(60.0))),
+                100 => app.drawing.block_h = fmt1((s.y - margin).clamp(18.0, 90.0)),
+                101 => app.drawing.block_w = fmt1((x0 + bw - s.x).clamp(60.0, (w - 2.0 * margin).max(60.0))),
+                j if j >= 110 => {
+                    let k = f32::from(j - 110).max(1.0);
+                    app.drawing.block_h = fmt1(((s.y - margin) * (g.rows as f32 + 1.0) / k).clamp(18.0, 90.0));
+                }
+                i => {
+                    let i = usize::from(i);
+                    let f = (s.x - x0) / bw;
+                    let lo = if i == 0 { 0.08 } else { g.divs.get(i - 1).map_or(0.08, |p| p + 0.06) };
+                    let hi = g.divs.get(i + 1).map_or(0.92, |n| n - 0.06).max(lo);
+                    let mut d = g.divs.clone();
+                    if let Some(slot) = d.get_mut(i) {
+                        *slot = f.clamp(lo, hi);
+                    }
+                    app.drawing.cols = cols_text(&d);
+                }
             }
         }
         if response.drag_stopped() || !response.dragged() {
@@ -3217,14 +3444,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut changed = false;
         let mut reset = false;
         let names = ["Title", "Company", "Number / sheet / revision", "Date", "Scale", "Drawn by", "Paper"];
-        let slot = i.min(6);
+        let slot = i.min(MAX_CELLS - 1);
         // The cell is `{dx;dy;k}text`: moved by dx, dy mm and scaled by k.
         let (mut dx, mut dy, mut k, mut font, mut body) = split_cell(&app.drawing.cells[slot]);
         let before = (dx, dy, k, font, body.clone());
         let mut copy_from: Option<usize> = None;
         let (mut copied, mut paste) = (false, false);
         let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_cell"), "cell", "Title block text").show_body(ui.ctx(), |ui| {
-            ui.label(names[slot]);
+            ui.label(names.get(slot).copied().unwrap_or("Cell"));
             crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_cell_text", i)), &mut body, "", false, 80);
             ui.label("Move (mm)");
             ui.horizontal(|ui| {
@@ -3286,7 +3513,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             changed = true;
         }
         if reset {
-            app.drawing.cells[i.min(6)].clear();
+            app.drawing.cells[slot].clear();
         }
         if closed {
             app.drawing.cell_edit = None;
@@ -3296,7 +3523,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Double-click a view to edit its scale; right-click for the add / remove menu.
-    let mut right_cell: Option<Pos2> = None;
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let under = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).map(|b| b.0);
         if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
@@ -3312,11 +3538,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
         {
             let v = under(s);
-            let over_cell = v.is_none() && app.drawing.block_on && cell_at(block_geo(&app.drawing, sheet.width), s).is_some();
-            if over_cell {
-                // Right-click on a title block text: its window, with Copy and Paste.
-                right_cell = Some(s);
+            let g = block_geo(&app.drawing, sheet.width);
+            let (line, cell) = (grid_hit(&g, s, 12.0 / m.px_per_mm().max(1e-3) * 0.5), cell_at(&g, s));
+            if v.is_none() && app.drawing.block_on && (line.is_some() || cell.is_some()) {
+                // Right-click on the title block: a menu with Copy, Paste and the lines.
+                app.drawing.block_menu = Some((s, line, cell));
+                app.drawing.menu_at = None;
             } else {
+                app.drawing.block_menu = None;
                 if v.is_some() {
                     app.drawing.selected = v;
                 }
@@ -3324,8 +3553,116 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if let Some(s) = right_cell {
-        open_cell(app, s);
+    // Title block menu: copy and paste a text, add or delete lines.
+    let mut block_act: Option<u8> = None;
+    if let Some((s, line, cell)) = app.drawing.block_menu {
+        let has_clip = app.drawing.cell_clip.is_some();
+        crate::ui_kit::Menu::context(&response, |ui| {
+            if cell.is_some() {
+                if crate::ui_kit::list_picker(ui, "Copy text", "Copy text", false).clicked() {
+                    block_act = Some(1);
+                    ui.close();
+                }
+                if has_clip && crate::ui_kit::list_picker(ui, "Paste text", "Paste text", false).clicked() {
+                    block_act = Some(2);
+                    ui.close();
+                }
+                if crate::ui_kit::list_picker(ui, "Edit text…", "Edit text…", false).clicked() {
+                    block_act = Some(3);
+                    ui.close();
+                }
+                if crate::ui_kit::list_picker(ui, "Reset to automatic text", "Reset to automatic text", false).clicked() {
+                    block_act = Some(4);
+                    ui.close();
+                }
+                ui.separator();
+            }
+            if line.is_some_and(|w| w != 100 && w != 101) && crate::ui_kit::list_picker(ui, "Delete this line", "Delete this line", false).clicked() {
+                block_act = Some(5);
+                ui.close();
+            }
+            if crate::ui_kit::list_picker(ui, "Add column here", "Add column here", false).clicked() {
+                block_act = Some(6);
+                ui.close();
+            }
+            if crate::ui_kit::list_picker(ui, "Add row", "Add row", false).clicked() {
+                block_act = Some(7);
+                ui.close();
+            }
+            if crate::ui_kit::list_picker(ui, "Remove bottom row", "Remove bottom row", false).clicked() {
+                block_act = Some(8);
+                ui.close();
+            }
+        });
+        if let Some(act) = block_act {
+            let width = app.drawing.sheet.as_ref().map_or(420.0, |x| x.width);
+            let g = block_geo(&app.drawing, width);
+            let changed = match (act, cell) {
+                (1, Some(i)) => {
+                    let (_, _, k, font, body) = split_cell(app.drawing.cells.get(i).map_or("", String::as_str));
+                    let shown = if body.trim().is_empty() {
+                        let centre = cell_centre(&g, i).0;
+                        app.drawing.sheet.as_ref().and_then(|sh| {
+                            sh.items
+                                .iter()
+                                .filter_map(|(_, x)| if let Shape::Text(p, _, t, _, _) = x { Some((p, t)) } else { None })
+                                .filter(|(p, _)| (p.x - centre.x).abs() < g.bw * 0.3 && (p.y - centre.y).abs() < 6.0)
+                                .min_by(|a, b| (*a.0 - centre).length().total_cmp(&(*b.0 - centre).length()))
+                                .map(|(_, t)| t.clone())
+                        })
+                    } else {
+                        Some(body)
+                    };
+                    if let Some(t) = shown {
+                        let t: String = t.chars().take(80).collect();
+                        ui.ctx().copy_text(t.clone());
+                        app.drawing.cell_clip = Some(join_cell(0.0, 0.0, k, font, &t));
+                    }
+                    false
+                }
+                (2, Some(i)) => match (app.drawing.cell_clip.clone(), app.drawing.cells.get_mut(i)) {
+                    (Some(clip), Some(slot)) => {
+                        *slot = clip;
+                        true
+                    }
+                    _ => false,
+                },
+                (3, _) => {
+                    open_cell(app, s);
+                    false
+                }
+                (4, Some(i)) => match app.drawing.cells.get_mut(i) {
+                    Some(slot) => {
+                        slot.clear();
+                        true
+                    }
+                    None => false,
+                },
+                (5, _) => line.is_some_and(|w| delete_grid_line(&mut app.drawing, w)),
+                (6, _) => add_column(&mut app.drawing, Some((s.x - g.x0) / g.bw)),
+                (7, _) => add_row(&mut app.drawing),
+                (8, _) => remove_bottom_row(&mut app.drawing),
+                _ => false,
+            };
+            app.drawing.block_menu = None;
+            app.drawing.sel_grid = None;
+            if changed {
+                refresh(app);
+            }
+        }
+    }
+    // A picked title block line: Delete takes it away.
+    if let Some(w) = app.drawing.sel_grid
+        && !ui.ctx().egui_wants_keyboard_input()
+        && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+    {
+        app.drawing.sel_grid = None;
+        if delete_grid_line(&mut app.drawing, w) {
+            refresh(app);
+        }
+    }
+    if app.drawing.sel_grid.is_some() && (response.clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape))) && app.drawing.grid_drag.is_none() {
+        app.drawing.sel_grid = None;
     }
     let mut menu_add: Option<(usize, Pos2)> = None;
     let mut menu_remove: Option<usize> = None;
@@ -3915,19 +4252,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if let Some((index, _, _, _)) = app.drawing.cell_drag {
         let g = block_geo(&app.drawing, sheet.width);
-        let (c, cw, rowh) = cell_centre(g, index);
+        let (c, cw, rowh) = cell_centre(&g, index);
         let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
         let r = Rect::from_center_size(map(c + vec2(dx, dy + rowh * 0.2)), vec2(cw * 0.5 * px_per_mm, rowh * 0.5 * px_per_mm));
         painter.rect_stroke(r, 2.0, Stroke::new(1.5, Tokens::get().accent), egui::StrokeKind::Inside);
     }
-    if let Some(which) = app.drawing.grid_drag {
-        let (margin, bw, x0, bh, c1, c2) = block_geo(&app.drawing, sheet.width);
-        let seg = match which {
-            0 => [pos2(x0 + bw * c1, margin), pos2(x0 + bw * c1, margin + bh * 2.0 / 3.0)],
-            1 => [pos2(x0 + bw * c2, margin), pos2(x0 + bw * c2, margin + bh * 2.0 / 3.0)],
-            2 => [pos2(x0, margin + bh), pos2(x0 + bw, margin + bh)],
-            _ => [pos2(x0, margin), pos2(x0, margin + bh)],
-        };
+    if let Some(which) = app.drawing.grid_drag.or(app.drawing.sel_grid) {
+        let seg = grid_line(&block_geo(&app.drawing, sheet.width), which);
         painter.line_segment([map(seg[0]), map(seg[1])], Stroke::new(2.5, Tokens::get().accent));
     }
     if let Some((a, b)) = app.drawing.erase {
