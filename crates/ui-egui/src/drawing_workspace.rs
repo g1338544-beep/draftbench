@@ -277,6 +277,8 @@ pub struct State {
     /// The border and title block: shown or not, the block's height (mm) and where its two column dividers sit (% of its width).
     frame_on: bool,
     block_on: bool,
+    /// The Detail title block (tolerance and finish tables, part fields) scaled to the paper.
+    block_detail: bool,
     block_h: String,
     /// The title block's column dividers, percent of its width, comma separated.
     cols: String,
@@ -446,6 +448,7 @@ impl Default for State {
             block_w: "190".into(),
             frame_on: true,
             block_on: true,
+            block_detail: false,
             block_h: "36".into(),
             cols: "40,70".into(),
             body_rows: 2,
@@ -591,7 +594,7 @@ impl State {
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
             "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
-            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
+            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_detail": self.block_detail, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
         })
     }
 
@@ -602,6 +605,9 @@ impl State {
         }
         if let Some(b) = flag("block_on") {
             self.block_on = b;
+        }
+        if let Some(b) = flag("block_detail") {
+            self.block_detail = b;
         }
         let index = |k: &str, max: u64| v.get(k).and_then(serde_json::Value::as_u64).filter(|n| *n <= max).map(|n| n as usize);
         if let Some(n) = index("paper", 5) {
@@ -1218,6 +1224,7 @@ fn params(st: &State) -> Value {
     }
     p["frame_on"] = json!(st.frame_on);
     p["block_on"] = json!(st.block_on);
+    p["block_template"] = json!(if st.block_detail { "detail" } else { "" });
     if let Ok(k) = st.block_h.trim().parse::<f64>()
         && k.is_finite()
     {
@@ -3312,6 +3319,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.label("Border and title block");
                     dirty |= crate::ui_kit::checkbox(ui, "Show the border", &mut app.drawing.frame_on).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "Show the title block", &mut app.drawing.block_on).changed();
+                    dirty |= crate::ui_kit::checkbox(ui, "Detail title block (tolerance + finish tables, sized to the paper)", &mut app.drawing.block_detail).changed();
                     ui.label("Title block height (mm) · column dividers (% of width, separated by commas)");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_block_h"), &mut app.drawing.block_h, "36", false, 6).changed();
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_cols"), &mut app.drawing.cols, "40,70", false, 40).changed();

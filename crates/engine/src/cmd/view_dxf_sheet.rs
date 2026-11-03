@@ -8,7 +8,7 @@ use solidcraft_io::{DxfEntity, DxfLayer, DxfLinetype, DxfShape};
 use solidcraft_render::{Camera, StandardView};
 
 use super::super::CommandSpec;
-use super::{meshes, progress, projection, sketch};
+use super::{detail, meshes, progress, projection, sketch};
 use crate::params::{bad, str_};
 use crate::{Result, Session};
 
@@ -943,7 +943,9 @@ fn finish(
     let c1 = p.get("col1").and_then(Value::as_f64).filter(|v| v.is_finite() && (0.15..=0.6).contains(v)).unwrap_or(0.4);
     let c2 = p.get("col2").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > c1 + 0.1 && *v <= 0.9).unwrap_or(0.7);
     let wanted = p.get("block_w").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 60.0).unwrap_or(190.0);
-    let block_w = wanted.min(sheet_w - 2.0 * margin).max(10.0);
+    // The Detail title block is sized from the paper: about 45 % of its width.
+    let template = p.get("block_template").and_then(Value::as_str) == Some("detail");
+    let block_w = if template { (0.45 * sheet_w).clamp(130.0, (sheet_w - 2.0 * margin).max(60.0)) } else { wanted.min(sheet_w - 2.0 * margin).max(10.0) };
     let (bx0, by0) = (sheet_w - margin - block_w, margin);
     // Dividers (fractions of the width) and the number of body rows under the title row.
     let mut divs: Vec<f64> = match p.get("cols").and_then(Value::as_array) {
@@ -958,12 +960,19 @@ fn finish(
     let mut block_entities: Vec<DxfEntity> = Vec::new();
     {
         let entities = &mut block_entities;
-        rect("SHEET", Vec2::new(bx0, by0), Vec2::new(right, by0 + bh), entities);
-        for j in 1..=nrows {
-            line("SHEET", Vec2::new(bx0, by0 + row * j as f64), Vec2::new(right, by0 + row * j as f64), entities);
-        }
-        for f in &divs {
-            line("SHEET", Vec2::new(bx0 + block_w * f, by0), Vec2::new(bx0 + block_w * f, by0 + row * nrows as f64), entities);
+        if template {
+            let k = block_w / detail::WIDTH;
+            for l in detail::LINES {
+                line("SHEET", Vec2::new(bx0 + l[0] * k, by0 + l[1] * k), Vec2::new(bx0 + l[2] * k, by0 + l[3] * k), entities);
+            }
+        } else {
+            rect("SHEET", Vec2::new(bx0, by0), Vec2::new(right, by0 + bh), entities);
+            for j in 1..=nrows {
+                line("SHEET", Vec2::new(bx0, by0 + row * j as f64), Vec2::new(right, by0 + row * j as f64), entities);
+            }
+            for f in &divs {
+                line("SHEET", Vec2::new(bx0 + block_w * f, by0), Vec2::new(bx0 + block_w * f, by0 + row * nrows as f64), entities);
+            }
         }
         // Lines the user drew freely: from (u1, v1) to (u2, v2) mm from the block's lower left corner.
         if let Some(list) = p.get("free_lines").and_then(Value::as_array) {
@@ -1030,8 +1039,22 @@ fn finish(
             put(bx0 + block_w * (lo + hi) / 2.0, by0 + row * from_bottom + row * 0.3, th, cell(idx, default), &mut entities);
         }
     }
-    if !block_on {
+    if !block_on || template {
         entities.truncate(text_from);
+    }
+    if block_on && template {
+        let k = block_w / detail::WIDTH;
+        for (x, y, h, words, fill) in detail::TEXTS {
+            let body = match *fill {
+                1 => scale_text.clone(),
+                2 => field("number"),
+                4 => field("sheet"),
+                5 => str_(p, "title").unwrap_or("").chars().take(40).collect(),
+                0 => (*words).to_string(),
+                _ => String::new(),
+            };
+            put(bx0 + x * k, by0 + y * k, h * k, (body, 0.0, 0.0, 1.0, 0), &mut entities);
+        }
     }
     // Texts the user put anywhere on the sheet: x, y, size factor, font and the words.
     if let Some(list) = p.get("free_texts").and_then(Value::as_array) {
