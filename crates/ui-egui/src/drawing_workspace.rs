@@ -3072,7 +3072,16 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     });
                     for i in 0..app.drawing.placed.len() {
-                        let name = if app.drawing.placed[i].custom.is_some() { "Model view (as in 3D)" } else { VIEWS[app.drawing.placed[i].view.min(6)].1 };
+                        let pv = &app.drawing.placed[i];
+                        let name = if pv.detail.is_some() {
+                            format!("Detail of {}", VIEWS[pv.view.min(6)].1)
+                        } else if pv.section_line.is_some() || pv.section.is_some() {
+                            format!("Section of {}", VIEWS[pv.view.min(6)].1)
+                        } else if pv.custom.is_some() {
+                            "Model view (as in 3D)".to_string()
+                        } else {
+                            VIEWS[pv.view.min(6)].1.to_string()
+                        };
                         let selected = app.drawing.selected == Some(i);
                         if ui.add(egui::Button::selectable(selected, format!("{}. {name}", i + 1))).clicked() {
                             app.drawing.selected = Some(i);
