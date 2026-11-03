@@ -1309,6 +1309,8 @@ fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
 /// its distance from the points' line for aligned). The value is measured on the sheet and divided
 /// by the scale of the view the dimension sits on (the placed box it is in or near).
 fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: f64, arrow: f64, decimals: Option<usize>) {
+    // A dimension may have its own decimal places (0..=4).
+    let decimals = d.get("decimals").and_then(Value::as_i64).filter(|n| (0..=4).contains(n)).map(|n| n as usize).or(decimals);
     let pt = |k: &str| -> Option<Vec2> {
         let a = d.get(k)?.as_array()?;
         let (x, y) = (a.first()?.as_f64()?, a.get(1)?.as_f64()?);

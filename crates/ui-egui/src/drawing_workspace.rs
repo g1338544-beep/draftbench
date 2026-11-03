@@ -61,6 +61,8 @@ struct DimItem {
     text: String,
     /// How far the value has been slid along the dimension line, in mm.
     slide: f32,
+    /// Decimal places of this dimension's value: -1 follows the drawing's setting, else 0–4.
+    decimals: i32,
 }
 
 /// One view the user placed: its centre on the sheet in mm and how its lines are drawn.
@@ -487,7 +489,7 @@ impl State {
     fn page_json(&self) -> serde_json::Value {
         json!({
             "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
-            "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide})).collect::<Vec<_>>(),
+            "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
             "clines": self.clines,
@@ -686,6 +688,7 @@ impl State {
                     at: f(v, "at").unwrap_or(0.0) as f32,
                     text: v.get("text").and_then(serde_json::Value::as_str).unwrap_or("").chars().take(40).collect(),
                     slide: f(v, "slide").unwrap_or(0.0).clamp(-5000.0, 5000.0) as f32,
+                    decimals: v.get("decimals").and_then(serde_json::Value::as_i64).filter(|n| (-1..=4).contains(n)).map_or(-1, |n| n as i32),
                 });
             }
         }
@@ -1020,6 +1023,7 @@ fn params(st: &State) -> Value {
             "b": [d.b.x, d.b.y],
             "at": d.at,
             "slide": d.slide,
+            "decimals": d.decimals,
             "text": d.text,
         })).collect::<Vec<_>>(),
         "centre_extra": st.centre_extra.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..=50.0).contains(h)).unwrap_or(3.0),
@@ -2317,6 +2321,8 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     let mut close = false;
     let mut text = sel.and_then(|i| app.drawing.dims.get(i)).map(|d| d.text.clone());
     let kind_name = sel.and_then(|i| app.drawing.dims.get(i)).map(|d| DIM_KINDS[d.kind.min(6)].1);
+    let mut sel_dec = sel.and_then(|i| app.drawing.dims.get(i)).map(|d| d.decimals);
+    let sel_dec_before = sel_dec;
     let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_dimwin"), "dimension", "Dimension").show_body(ctx, |ui| {
         ui.label("Type");
         ui.horizontal_wrapped(|ui| {
@@ -2357,6 +2363,16 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
             ui.label(format!("Selected: {name}"));
             ui.small("Value text (blank = measured). Drag the line or the value anywhere to move it; drag the numbered points to re-pick.");
             changed |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("dimwin_text"), t, "measured", false, 40).changed();
+            if let Some(dec) = sel_dec.as_mut() {
+                ui.label("Decimal places of this dimension");
+                ui.horizontal_wrapped(|ui| {
+                    for (n, label) in [(-1, "Same as drawing"), (0, "0"), (1, "1"), (2, "2"), (3, "3"), (4, "4")] {
+                        if crate::ui_kit::list_picker(ui, label, label, *dec == n).clicked() {
+                            *dec = n;
+                        }
+                    }
+                });
+            }
             if crate::ui_kit::button(ui, "Delete dimension", crate::ui_kit::Button::Small).clicked() {
                 remove = true;
             }
@@ -2369,6 +2385,13 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     if size_changed {
         app.drawing.dim_text = dtext;
         app.drawing.dim_arrow = darrow;
+        refresh(app);
+    }
+    if let (Some(i), Some(n)) = (sel, sel_dec)
+        && sel_dec != sel_dec_before
+        && let Some(d) = app.drawing.dims.get_mut(i)
+    {
+        d.decimals = n;
         refresh(app);
     }
     if decimals != app.drawing.dim_decimals {
@@ -4136,7 +4159,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ((h.x - pa.x) * -uy + (h.y - pa.y) * ux) / n
                     }
                 };
-                let tmp = DimItem { kind: ek, a: pa, b: pb, at, text: String::new(), slide: 0.0 };
+                let tmp = DimItem { kind: ek, a: pa, b: pb, at, text: String::new(), slide: 0.0, decimals: -1 };
                 let accent = Tokens::get().accent;
                 let mid = pos2((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0);
                 let k = sheet
@@ -4192,7 +4215,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     } else {
                         let v = c - centre;
                         let len = v.length().max(1e-6);
-                        new_dim = Some(DimItem { kind: 3, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0 });
+                        new_dim = Some(DimItem { kind: 3, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0, decimals: -1 });
                         app.drawing.dim_tool = Some((7, Vec::new()));
                     }
                 } else if let (Some((a, b)), Some(k)) = (seg_pick, tool_kind) {
@@ -4202,7 +4225,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if let Some(target) = picks.first().copied() {
                         let number = app.drawing.dims.iter().filter(|d| d.kind == 5).count() + 1;
                         let text = if kind == 5 { number.to_string() } else if app.drawing.note_text.trim().is_empty() { "NOTE".to_string() } else { app.drawing.note_text.trim().to_string() };
-                        new_dim = Some(DimItem { kind, a: target, b: snap_leader(target, c), at: 0.0, text, slide: 0.0 });
+                        new_dim = Some(DimItem { kind, a: target, b: snap_leader(target, c), at: 0.0, text, slide: 0.0, decimals: -1 });
                         app.drawing.dim_tool = Some((again, Vec::new()));
                     } else {
                         app.drawing.dim_tool = Some((if kind == 0 || kind == 1 || kind == 2 { again } else { kind }, vec![hit_pt.unwrap_or(c)]));
@@ -4212,7 +4235,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if let (Some(centre), Some(r)) = (picks.first().copied(), picks.get(1).map(|p| p.x)) {
                         let v = c - centre;
                         let len = v.length().max(1e-6);
-                        new_dim = Some(DimItem { kind, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0 });
+                        new_dim = Some(DimItem { kind, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0, decimals: -1 });
                         app.drawing.dim_tool = Some((again, Vec::new()));
                     } else if let Some((centre, r)) = snap_circle(sheet, c, tol * 2.5) {
                         app.drawing.dim_tool = Some((kind, vec![centre, pos2(r, 0.0)]));
@@ -4232,7 +4255,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ((c.x - a.x) * -dy + (c.y - a.y) * dx) / n
                         }
                     };
-                    new_dim = Some(DimItem { kind, a, b, at, text: String::new(), slide: 0.0 });
+                    new_dim = Some(DimItem { kind, a, b, at, text: String::new(), slide: 0.0, decimals: -1 });
                     app.drawing.dim_tool = Some((again, Vec::new()));
                 }
             }
