@@ -125,6 +125,8 @@ pub(crate) fn pinch_factor(input: &egui::InputState) -> f32 {
             (*f).is_finite().then_some(*f).filter(|f| *f > 0.0)
         })
         .fold(1.0, |acc, f| acc * f)
+        // Two fingers on a touch screen: the spread of the fingers is the pinch.
+        * input.multi_touch().map(|t| t.zoom_delta).filter(|z| z.is_finite() && *z > 0.0).map_or(1.0, |z| z.clamp(0.2, 5.0))
 }
 
 /// Zoom anchor: the model point under the cursor, else the target's depth.
