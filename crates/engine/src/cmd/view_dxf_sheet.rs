@@ -337,7 +337,7 @@ fn manual(
             text("TEXT", Vec2::new(x + cdx, lo.y - if dims { 18.0 } else { 8.0 } + cdy), th, caption, &mut entities);
         }
         scales.insert(index, scale);
-        boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));
+        boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale, "cx": c.x, "cy": c.y}));
         names.push(view_name(view).to_string());
     }
     // The cutting line of each section on the views it crosses: a chain line with arrows toward the

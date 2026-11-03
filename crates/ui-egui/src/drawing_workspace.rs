@@ -129,11 +129,13 @@ struct ShadedView {
     zoom: f32,
     /// Half the picture's height in model mm (a view's colour picture at the view's scale); 0 = use `zoom`.
     world_half: f32,
+    /// Where the view's lines are centred in the camera plane (model mm from the origin): the picture is centred there, not on the bodies' bounding box.
+    centre: Option<(f32, f32)>,
 }
 
 impl ShadedView {
     fn new(x: f32, y: f32, w: f32, yaw: f64, pitch: f64) -> Self {
-        ShadedView { x, y, w, yaw, pitch, ratio: 0.75, bg: 0, style: 0, zoom: 0.8, world_half: 0.0 }
+        ShadedView { x, y, w, yaw, pitch, ratio: 0.75, bg: 0, style: 0, zoom: 0.8, world_half: 0.0, centre: None }
     }
 }
 
@@ -149,6 +151,8 @@ struct Sheet {
     boxes: Vec<(usize, f32, f32, f32, f32)>,
     /// The scale (drawing : model) each placed view was drawn at.
     scales: Vec<(usize, f32)>,
+    /// (placement index, x, y): where each view's lines are centred in the camera plane, model mm.
+    centres: Vec<(usize, f32, f32)>,
     /// The circles the drawing shows (found once, on first use) for snapping to their centres.
     rounds: std::sync::OnceLock<Rounds>,
 }
@@ -839,7 +843,7 @@ impl State {
 
 /// Where the picture of a shaded view is kept: its camera, size and the state of the design.
 fn shaded_key(app: &SolveApp, v: &ShadedView) -> String {
-    format!("{:.4}/{:.4}/{:.2}/{:.3}/{}/{}/{:.3}/{:.3}/{}", v.yaw, v.pitch, v.w, v.ratio, v.bg, v.style, v.zoom, v.world_half, app.session.log.len())
+    format!("{:.4}/{:.4}/{:.2}/{:.3}/{}/{}/{:.3}/{:.3}/{:.3}/{:.3}/{}", v.yaw, v.pitch, v.w, v.ratio, v.bg, v.style, v.zoom, v.world_half, v.centre.map_or(0.0, |c| c.0), v.centre.map_or(0.0, |c| c.1), app.session.log.len())
 }
 
 /// The picture of a shaded view, drawn now if it is not in the cache. One CPU render of the whole
@@ -862,6 +866,12 @@ fn shaded_picture(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
         cam.distance = f64::from(v.world_half) / 0.4;
     } else {
         cam.distance *= f64::from(v.zoom.clamp(0.2, 3.0));
+    }
+    // The picture is centred where the view's lines are, which is not the middle of the bounding box.
+    if let Some((cx, cy)) = v.centre {
+        let (right, up, _) = cam.basis();
+        let at = cam.target;
+        cam.target = at + right * (f64::from(cx) - at.dot(right)) + up * (f64::from(cy) - at.dot(up));
     }
     let mut scene = solidcraft_engine::view::scene_with_guides(&app.session, &cam, None, solidcraft_engine::view::Guides { grid: false, axes: false });
     match v.style {
@@ -926,6 +936,7 @@ fn colour_views(app: &SolveApp) -> Vec<(usize, ShadedView)> {
             v.bg = 2;
             v.style = 1;
             v.world_half = fh / 2.0 / k;
+            v.centre = sh.centres.iter().find(|c| c.0 == i).map(|c| (c.1, c.2));
             Some((i, v))
         })
         .collect()
@@ -1177,7 +1188,12 @@ fn parse(v: &Value) -> Option<Sheet> {
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(|b| Some((b.get("index")?.as_u64()? as usize, b.get("scale")?.as_f64()? as f32))).collect())
         .unwrap_or_default();
-    Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items, boxes, scales, rounds: std::sync::OnceLock::new() })
+    let centres = v
+        .pointer("/summary/boxes")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|b| Some((b.get("index")?.as_u64()? as usize, b.get("cx")?.as_f64()? as f32, b.get("cy")?.as_f64()? as f32))).collect())
+        .unwrap_or_default();
+    Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items, boxes, scales, centres, rounds: std::sync::OnceLock::new() })
 }
 
 /// Start an Update: the model first, then each placed view, one stage per frame.
