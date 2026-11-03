@@ -314,6 +314,10 @@ pub struct State {
     mark_mode: u8,
     /// The Section View tool: the points of the cutting line picked so far.
     sec_tool: Option<Vec<Pos2>>,
+    /// A phone shows the settings panel only when asked.
+    panel_open: Option<bool>,
+    /// Whether the screen is a phone's (set each frame).
+    phone: bool,
     /// The Detail View tool: the centre picked so far.
     det_tool: Option<Vec<Pos2>>,
     mark_pts: Vec<Pos2>,
@@ -473,6 +477,8 @@ impl Default for State {
             mark_tool: false,
             mark_mode: 0,
             sec_tool: None,
+            panel_open: None,
+            phone: false,
             det_tool: None,
             mark_pts: Vec::new(),
             erase_tool: false,
@@ -1991,6 +1997,10 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             }
         }
         "drawing.ribbon.fit" => fit(app),
+        "drawing.ribbon.panel" => {
+            let open = app.drawing.panel_open.unwrap_or(!app.drawing.phone);
+            app.drawing.panel_open = Some(!open);
+        }
         "drawing.ribbon.export" => {
             let name = format!("{}-drawing.dxf", app.session.doc.name);
             let mut p = params(&app.drawing);
@@ -2945,6 +2955,12 @@ pub fn leave(app: &mut SolveApp) {
 }
 
 pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
+    // On a phone the panel is closed until the Sheet Settings button opens it.
+    let phone = crate::shell::is_phone(ui.ctx());
+    app.drawing.phone = phone;
+    if !app.drawing.panel_open.unwrap_or(!phone) {
+        return;
+    }
     Container::new(ui.ctx(), Surface::Panel)
         .edge("sc_drawing_settings", Edge::Right)
         .default_size(285.0)
@@ -2958,6 +2974,9 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let mut add: Option<usize> = None;
                     let mut remove: Option<usize> = None;
                     let mut start_projected: Option<usize> = None;
+                    if phone && crate::ui_kit::button(ui, "Close panel", crate::ui_kit::Button::Small).clicked() {
+                        app.drawing.panel_open = Some(false);
+                    }
                     ui.heading("Drawing");
                     ui.small("Add the views you want, then drag each one on the sheet.");
                     ui.separator();

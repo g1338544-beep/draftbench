@@ -532,7 +532,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let mut action: Option<Box<dyn FnOnce(&mut SolveApp)>> = None;
     let page = Container::new(ui.ctx(), Surface::Viewport).central();
-    page.frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(t.panel).inner_margin(egui::Margin::symmetric(36, 24))).show(ui, |ui| {
+    page.frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(t.panel).inner_margin(if crate::shell::is_phone(ui.ctx()) { egui::Margin::symmetric(12, 12) } else { egui::Margin::symmetric(36, 24) })).show(ui, |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             // A banner: the name, what it is for, and the two ways in just below.
             egui::Frame::new().fill(t.accent_soft).corner_radius(t.radius_md).inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {

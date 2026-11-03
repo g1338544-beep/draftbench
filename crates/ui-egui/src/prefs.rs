@@ -855,7 +855,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Scaling while the pointer is held moves the slider under the pointer, feeding a
     // different value back into it. Commit the layout change after the drag ends.
-    let z = app.preferences.ui_scale.clamp(0.5, 2.5);
+    let z = (app.preferences.ui_scale * crate::shell::phone_scale(ctx)).clamp(0.4, 2.5);
     if z.is_finite() && !ctx.input(|i| i.pointer.any_down()) && (ctx.zoom_factor() - z).abs() > 1e-3 {
         ctx.set_zoom_factor(z);
     }

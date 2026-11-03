@@ -25,6 +25,19 @@ impl LayoutMode {
     }
 }
 
+/// Phones and other narrow screens (under 700 CSS pixels): the interface is drawn smaller so the desktop
+/// layouts (ribbon, panels, dialogs) still fit; the layout is then about 560 points wide.
+pub(crate) fn phone_scale(ctx: &egui::Context) -> f32 {
+    let css = ctx.content_rect().width() * ctx.zoom_factor();
+    if css.is_finite() && css > 120.0 && css < 700.0 { (css / 560.0).clamp(0.6, 1.0) } else { 1.0 }
+}
+
+/// A narrow screen: side panels start closed and the page margins shrink.
+pub(crate) fn is_phone(ctx: &egui::Context) -> bool {
+    let css = ctx.content_rect().width() * ctx.zoom_factor();
+    css.is_finite() && css > 120.0 && css < 700.0
+}
+
 /// The gap from the viewport edge to the floating cards and between the cards.
 pub(crate) const SHELL_GAP: f32 = 7.0;
 

@@ -1687,6 +1687,15 @@ impl SolveApp {
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
         self.ui.layout.publish(ui.ctx());
+        // A phone: the Browser and the timeline start closed (the screen is the model's); opened again, they stay.
+        if shell::is_phone(ui.ctx()) {
+            let key = egui::Id::new("sc_phone_collapsed");
+            if !ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false)) {
+                ui.ctx().data_mut(|d| d.insert_temp(key, true));
+                self.ui.show_browser = false;
+                self.ui.show_timeline = false;
+            }
+        }
         scenario::clear_handles();
         self.poll_deferred(ui.ctx());
         self.poll_delete_check(ui.ctx());
