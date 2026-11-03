@@ -289,6 +289,36 @@ fn manual(
             }
             infos.insert(index, ViewInfo { lines: all.clone(), circles: here, x, y, c, scale, view });
         }
+        // The Isometric view: each hole's axis (found from the Top, Front and Right views) drawn as a centre line in 3D.
+        if centres_on && view == StandardView::Iso && custom.is_none() {
+            if let (Ok(top), Ok(front), Ok(right_view)) = (
+                view_lines(scene, parts, StandardView::Top, None, key),
+                view_lines(scene, parts, StandardView::Front, None, key),
+                view_lines(scene, parts, StandardView::Right, None, key),
+            ) {
+                let cam = Camera { target: Vec3::ZERO, yaw: angles.0, pitch: angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+                let (rv, uv, _) = cam.basis();
+                for (c, r) in circles(&top.lines, true).into_iter().take(40) {
+                    let span = vertical_span(&front.lines, c.x, r)
+                        .or_else(|| vertical_span(&front.lines, -c.x, r))
+                        .or_else(|| vertical_span(&right_view.lines, c.y, r))
+                        .or_else(|| vertical_span(&right_view.lines, -c.y, r));
+                    let Some((z0, z1)) = span else { continue };
+                    let project = |z: f64| {
+                        let p = Vec3::new(c.x, c.y, z);
+                        to_sheet(Vec2::new(p.dot(rv), p.dot(uv)))
+                    };
+                    let (a, b) = (project(z0), project(z1));
+                    let d = Vec2::new(b.x - a.x, b.y - a.y);
+                    let len = (d.x * d.x + d.y * d.y).sqrt();
+                    if len.is_finite() && len > 1.0 {
+                        let u = Vec2::new(d.x / len * 3.0, d.y / len * 3.0);
+                        line("CENTER", Vec2::new(a.x - u.x, a.y - u.y), Vec2::new(b.x + u.x, b.y + u.y), &mut entities);
+                        any_centre = true;
+                    }
+                }
+            }
+        }
         if section.is_none() && item.get("center").and_then(Value::as_bool).unwrap_or(true) {
             let mode = str_(p, "centre_mode").unwrap_or("lines");
             let found = circles(&all.lines, dashed);
