@@ -4961,6 +4961,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         let (a, b) = fline_abs(&block_geo(&app.drawing, sheet.width), l);
         let accent = Tokens::get().accent;
+        painter.line_segment([map(a), map(b)], Stroke::new(9.0, accent.gamma_multiply(0.3)));
         painter.line_segment([map(a), map(b)], Stroke::new(3.0, accent));
         for q in [a, b] {
             painter.circle(map(q), 4.0, Color32::WHITE, Stroke::new(2.0, accent));
@@ -4970,18 +4971,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let Some(t) = app.drawing.texts.get(i)
     {
         let r = text_box(pos2(t.x, t.y), ui_text_height(&app.drawing) * t.k, t.text.chars().count());
-        painter.rect_stroke(Rect::from_two_pos(map(r.min), map(r.max)), 2.0, Stroke::new(1.5, Tokens::get().accent), egui::StrokeKind::Inside);
+        let screen = Rect::from_two_pos(map(r.min), map(r.max));
+        painter.rect_filled(screen, 2.0, Tokens::get().accent.gamma_multiply(0.18));
+        painter.rect_stroke(screen, 2.0, Stroke::new(2.0, Tokens::get().accent), egui::StrokeKind::Inside);
     }
     if let Some((index, _, _, _)) = app.drawing.cell_drag {
         let g = block_geo(&app.drawing, sheet.width);
         let (c, cw, rowh) = cell_centre(&g, index);
         let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
         let r = Rect::from_center_size(map(c + vec2(dx, dy + rowh * 0.2)), vec2(cw * 0.5 * px_per_mm, rowh * 0.5 * px_per_mm));
-        painter.rect_stroke(r, 2.0, Stroke::new(1.5, Tokens::get().accent), egui::StrokeKind::Inside);
+        painter.rect_filled(r, 2.0, Tokens::get().accent.gamma_multiply(0.18));
+        painter.rect_stroke(r, 2.0, Stroke::new(2.0, Tokens::get().accent), egui::StrokeKind::Inside);
     }
     if let Some(which) = app.drawing.grid_drag.or(app.drawing.sel_grid) {
         let seg = grid_line(&block_geo(&app.drawing, sheet.width), which);
-        painter.line_segment([map(seg[0]), map(seg[1])], Stroke::new(2.5, Tokens::get().accent));
+        painter.line_segment([map(seg[0]), map(seg[1])], Stroke::new(9.0, Tokens::get().accent.gamma_multiply(0.3)));
+        painter.line_segment([map(seg[0]), map(seg[1])], Stroke::new(3.0, Tokens::get().accent));
     }
     if let Some((a, b)) = app.drawing.erase {
         let r = Rect::from_two_pos(map(a), map(b));
