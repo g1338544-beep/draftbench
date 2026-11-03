@@ -319,6 +319,8 @@ pub struct State {
     shaded_cache: Vec<(String, Picture, Option<egui::TextureHandle>)>,
     /// The dimension being placed: its kind and the points picked so far.
     dim_tool: Option<(usize, Vec<Pos2>)>,
+    /// The dimension type last used: Enter brings it back once the tool has ended.
+    last_dim: Option<usize>,
     /// The Smart dimension tool (tool kind 7) is on: it goes back to it after each dimension.
     dim_back: bool,
     /// Decimal places of measured values: -1 = as needed (up to one), else 0 to 4.
@@ -439,6 +441,7 @@ impl Default for State {
             shaded: Vec::new(),
             shaded_cache: Vec::new(),
             dim_tool: None,
+            last_dim: None,
             dim_back: false,
             dim_decimals: -1,
             dim_text: String::new(),
@@ -4109,6 +4112,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     // Placing a dimension: snap to the drawn geometry, three clicks.
     let mut new_dim: Option<DimItem> = None;
+    // Enter repeats the last dimension type, as in other CAD programs.
+    if let Some((k, _)) = &app.drawing.dim_tool {
+        app.drawing.last_dim = Some(if *k == 8 { 7 } else { *k });
+    } else if let Some(k) = app.drawing.last_dim
+        && app.drawing.proj_tool.is_none()
+        && app.drawing.base.is_none()
+        && app.drawing.text_edit.is_none()
+        && app.drawing.cell_edit.is_none()
+        && !ui.ctx().egui_wants_keyboard_input()
+        && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space))
+    {
+        app.drawing.dim_back = k == 7;
+        app.drawing.dim_tool = Some((k, Vec::new()));
+    }
     if let Some((kind, picks)) = app.drawing.dim_tool.clone() {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             app.drawing.dim_tool = None;
