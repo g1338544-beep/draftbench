@@ -2987,7 +2987,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.label(format!("Centre marks: {}", app.drawing.marks.len()));
                     ui.small("Centre Mark in the ribbon: click circles (or points) to mark them; Esc ends.");
                     ui.horizontal(|ui| {
-                        for (i, name) in ["Cross", "Axis (2 points)", "Circle"].iter().enumerate() {
+                        for (i, name) in ["Cross", "Axis (2 points)", "Circle (3 holes)", "Circle (centre)"].iter().enumerate() {
                             if ui.selectable_label(app.drawing.mark_mode as usize == i, *name).clicked() {
                                 app.drawing.mark_mode = i as u8;
                                 app.drawing.mark_pts.clear();
@@ -4620,7 +4620,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let pick = |c: Pos2| -> Pos2 { snap_point(sheet, c, tol).unwrap_or(c) };
             let hint = match mode {
                 1 => "Centre line: click 2 points along the axis (Esc ends)",
-                2 => "Circular centre line: click the centre, then a hole centre on the circle (Esc ends)",
+                2 => "Circular centre line through holes: click 3 hole centres on the circle (Esc ends)",
+                3 => "Circular centre line: click the centre, then a point on the circle (Esc ends)",
                 _ => "Centre mark: click a circle or point (Esc ends)",
             };
             painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
@@ -4633,6 +4634,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             {
                 if mode == 1 {
                     painter.line_segment([map(first), map(h)], Stroke::new(1.5, accent));
+                } else if mode == 2 {
+                    for p in &app.drawing.mark_pts {
+                        painter.circle_filled(map(*p), 4.0, accent);
+                    }
                 } else {
                     let c = map(first);
                     painter.circle_stroke(c, (map(h) - c).length(), Stroke::new(1.5, accent));
@@ -4650,7 +4655,25 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 } else {
                     let q = pick(c);
-                    if let Some(first) = app.drawing.mark_pts.first().copied() {
+                    if mode == 2 {
+                        app.drawing.mark_pts.push(q);
+                        if let [a, b, cc] = app.drawing.mark_pts[..] {
+                            app.drawing.mark_pts.clear();
+                            if let Some((ctr, r)) = circumcircle(a, b, cc)
+                                && r > 0.05
+                                && r < 5000.0
+                                && app.drawing.clines.len() + 48 <= 400
+                            {
+                                for k in 0..48usize {
+                                    let (t0, t1) = (k as f32 / 48.0 * std::f32::consts::TAU, (k + 1) as f32 / 48.0 * std::f32::consts::TAU);
+                                    let pa = ctr + vec2(t0.cos(), t0.sin()) * r;
+                                    let pb = ctr + vec2(t1.cos(), t1.sin()) * r;
+                                    app.drawing.clines.push([pa.x, pa.y, pb.x, pb.y]);
+                                }
+                                app.drawing.dirty_marks = true;
+                            }
+                        }
+                    } else if let Some(first) = app.drawing.mark_pts.first().copied() {
                         let d = q - first;
                         let len = d.length();
                         if len.is_finite() && len > 0.01 {
@@ -5497,4 +5520,18 @@ fn print_sheet(app: &mut SolveApp) {
             Err(e) => app.set_status(format!("Could not save the PDF: {e}"), true),
         }
     });
+}
+
+/// The circle through three points: its centre and radius (None when they are in a line).
+fn circumcircle(a: Pos2, b: Pos2, c: Pos2) -> Option<(Pos2, f32)> {
+    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    if !d.is_finite() || d.abs() < 1e-4 {
+        return None;
+    }
+    let (a2, b2, c2) = (a.x * a.x + a.y * a.y, b.x * b.x + b.y * b.y, c.x * c.x + c.y * c.y);
+    let x = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d;
+    let y = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d;
+    let ctr = pos2(x, y);
+    let r = (a - ctr).length();
+    (x.is_finite() && y.is_finite() && r.is_finite()).then_some((ctr, r))
 }
