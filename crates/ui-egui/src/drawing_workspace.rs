@@ -551,7 +551,7 @@ impl State {
             "dim_decimals": self.dim_decimals,
             "dim_text": self.dim_text, "dim_arrow": self.dim_arrow,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch, v.ratio, v.bg, v.style, v.zoom])).collect::<Vec<_>>(),
-            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
+            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "flines": self.flines, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
             "paper": self.paper, "landscape": self.landscape,
         })
     }
@@ -880,7 +880,20 @@ impl State {
             }
         }
         if let Some(c) = d.get("cells").and_then(serde_json::Value::as_array) {
+            self.cells.clear();
             load_cells(&mut self.cells, c);
+        }
+        // Free title-block lines belong to the sheet they were drawn on; older saves have none per sheet and keep the current ones.
+        if let Some(a) = d.get("flines").and_then(serde_json::Value::as_array) {
+            self.flines = a
+                .iter()
+                .take(MAX_FREE_LINES)
+                .filter_map(|l| {
+                    let n: Vec<f32> = l.as_array()?.iter().filter_map(serde_json::Value::as_f64).filter(|x| x.is_finite() && x.abs() < 1e5).map(|x| x as f32).collect();
+                    if let [a, b, c, e] = n[..] { Some([a, b, c, e]) } else { None }
+                })
+                .collect();
+            self.fl_sel = None;
         }
         self.texts = d
             .get("texts")
@@ -1070,7 +1083,7 @@ fn add_page(app: &mut SolveApp) {
     }
     st.pages = st.all_pages();
     let n = st.pages.len() + 1;
-    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": st.cells, "texts": [], "paper": st.paper, "landscape": st.landscape}));
+    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": [], "flines": [], "texts": [], "paper": st.paper, "landscape": st.landscape}));
     switch_page(app, n - 1);
 }
 
