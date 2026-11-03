@@ -452,7 +452,7 @@ impl Default for State {
             block_w: "190".into(),
             frame_on: true,
             block_on: true,
-            block_detail: false,
+            block_detail: true,
             block_h: "36".into(),
             cols: "40,70".into(),
             body_rows: 2,
@@ -600,7 +600,7 @@ impl State {
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
             "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
-            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_detail": self.block_detail, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
+            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_tpl": self.block_detail, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
         })
     }
 
@@ -612,7 +612,7 @@ impl State {
         if let Some(b) = flag("block_on") {
             self.block_on = b;
         }
-        if let Some(b) = flag("block_detail") {
+        if let Some(b) = flag("block_tpl") {
             self.block_detail = b;
         }
         let index = |k: &str, max: u64| v.get(k).and_then(serde_json::Value::as_u64).filter(|n| *n <= max).map(|n| n as usize);
