@@ -546,7 +546,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 );
             });
             ui.add_space(t.space_16);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let big = |ui: &mut egui::Ui, icon: &str, label: &str, primary: bool| -> bool {
                     // The label sets the width: a translation longer than the English one widens
                     // the button instead of running past its edge.
