@@ -3401,7 +3401,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if let (Some((_, Some(pv))), Some(_)) = (&app.drawing.proj_preview, found)
                 && app.drawing.proj_want.is_some()
             {
-                paint_preview(&painter, &m, pv, at);
+                paint_preview(&painter, &m, pv, snap_to_front(&app.drawing.placed, view, at));
             }
             painter.line_segment([map(pos2(b.1, b.2)), map(at)], Stroke::new(1.0, Tokens::get().accent));
             painter.text(map(at) + vec2(14.0, -14.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(Tokens::get().font_body), Tokens::get().accent);
@@ -3458,12 +3458,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else {
             add_view(app, view);
         }
+        // A view projected from the Front view sits on its projection line.
+        let at = snap_to_front(&app.drawing.placed[..app.drawing.placed.len().saturating_sub(1)], view, at);
         if let Some(v) = app.drawing.placed.last_mut() {
             v.x = f64::from(at.x);
             v.y = f64::from(at.y);
-            v.scale = scale;
+            v.scale = scale.clone();
             v.dashed = base_dashed;
             v.colour = base_shaded;
+        }
+        // The next click offers a standard view not on the sheet yet, so it does not land on the same one.
+        if view < 7 {
+            let used: Vec<usize> = app.drawing.placed.iter().filter(|v| v.rot == 0 && v.section.is_none() && v.custom.is_none()).map(|v| v.view).collect();
+            if let Some(next) = (1..7).map(|k| (view + k) % 7).find(|c| !used.contains(c)) {
+                app.drawing.base = Some((next, scale));
+            }
         }
         refresh(app);
         return;
@@ -3958,6 +3967,17 @@ fn natural_parent(placed: &[PlacedView], i: usize) -> Option<(usize, bool)> {
     };
     let p = placed.iter().position(|q| q.view == 0 && q.rot == 0 && q.section.is_none() && q.custom.is_none())?;
     (p != i).then_some((p, horizontal))
+}
+
+/// A standard view placed beside the Front view lines up with it: Top and Bottom share its x,
+/// Right, Left and Back share its y. Other views stay where they are put.
+fn snap_to_front(placed: &[PlacedView], view: usize, at: Pos2) -> Pos2 {
+    let Some(front) = placed.iter().find(|q| q.view == 0 && q.rot == 0 && q.section.is_none() && q.custom.is_none()) else { return at };
+    match view {
+        1 | 5 => pos2(front.x as f32, at.y),
+        2..=4 => pos2(at.x, front.y as f32),
+        _ => at,
+    }
 }
 
 /// A leader's far end, turned onto the nearest multiple of 15 degrees from the spot it points at
