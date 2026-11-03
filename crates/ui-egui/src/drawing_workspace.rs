@@ -4121,7 +4121,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && app.drawing.text_edit.is_none()
         && app.drawing.cell_edit.is_none()
         && !ui.ctx().egui_wants_keyboard_input()
-        && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space))
+        && ui.input(|i| i.key_pressed(egui::Key::Enter))
     {
         app.drawing.dim_back = k == 7;
         app.drawing.dim_tool = Some((k, Vec::new()));
