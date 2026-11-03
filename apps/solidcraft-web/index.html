@@ -45,6 +45,8 @@
     // Install as an app: the browser's offer can come before the app runs, so it is kept here for
     // the app's File ▸ Install app… item (src/install.rs). Installed, the browser makes no more offers.
     addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); window.solidcraftInstall = e; });
+    // Ctrl+Shift+R is the app's shortcut to the 2D drawing: the browser must not reload on it.
+    addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyR") e.preventDefault(); }, true);
     addEventListener("appinstalled", () => { window.solidcraftInstall = null; });
   </script>
 </body>

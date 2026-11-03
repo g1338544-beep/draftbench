@@ -1873,6 +1873,13 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         if shown && crate::navigation::view_key(app, ctx, k, mods, repeat) {
             continue;
         }
+        // M in the 2D drawing goes back to the 3D model.
+        if k == Key::M && !mods.command && !mods.alt && !mods.shift && crate::drawing_workspace::active(app) {
+            if let Err(e) = crate::render_workspace::enter(app, false) {
+                app.set_status(e, true);
+            }
+            continue;
+        }
         if mods.command {
             match k {
                 Key::N => crate::documents::new_design(app),
@@ -1885,6 +1892,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
                 _ if !shown => {}
+                // Ctrl+Shift+R goes to the 2D drawing.
+                Key::R if mods.shift && !mods.alt => {
+                    if let Err(e) = crate::drawing_workspace::enter(app) {
+                        app.set_status(e, true);
+                    }
+                }
                 Key::Z => drop(app.run("edit.undo", json!({}))),
                 Key::Y => drop(app.run("edit.redo", json!({}))),
                 // Copy, Cut and Paste (`edit_clipboard::handle`).
