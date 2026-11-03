@@ -421,7 +421,7 @@ impl Default for State {
             sheet_no: "1".into(),
             revision: "A".into(),
             centre_mode: 0,
-            bolt: false,
+            bolt: true,
             hidden_style: 0,
             colours: [7, 8, 1, 3],
             centre: true,
