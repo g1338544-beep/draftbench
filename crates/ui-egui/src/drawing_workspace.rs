@@ -322,6 +322,9 @@ pub struct State {
     drag_end: Option<(usize, bool)>,
     /// The centre line last clicked, as its two ends on the sheet.
     sel_centre: Option<(Pos2, Pos2)>,
+    /// A frame being dragged over empty sheet, and the frame kept as the selection of centre lines.
+    box_sel: Option<(Pos2, Pos2)>,
+    centre_box: Option<[f32; 4]>,
     text_edit: Option<usize>,
     selected: Option<usize>,
     title: String,
@@ -424,6 +427,8 @@ impl Default for State {
             drag_dim: None,
             drag_end: None,
             sel_centre: None,
+            box_sel: None,
+            centre_box: None,
             text_edit: None,
             selected: None,
             title: String::new(),
@@ -1543,6 +1548,33 @@ fn erase_centre(app: &mut SolveApp, mut r: [f32; 4]) {
     }
     app.drawing.sel_centre = None;
     app.drawing.dirty_marks = true;
+}
+
+/// The centre-line segments the frame `r` touches: the sheet's own centre lines and the ones
+/// placed by hand, each with whether it was placed by hand.
+fn centre_segments(app: &SolveApp, r: [f32; 4]) -> Vec<((Pos2, Pos2), bool)> {
+    let mut out = Vec::new();
+    if let Some(sheet) = app.drawing.sheet.as_ref() {
+        for (layer, shape) in &sheet.items {
+            if !matches!(layer, Layer::Center) {
+                continue;
+            }
+            match shape {
+                Shape::Line(a, b) if segment_in_rect(*a, *b, r) => out.push(((*a, *b), false)),
+                Shape::Poly(points) => {
+                    out.extend(points.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).filter(|(a, b)| segment_in_rect(*a, *b, r)).map(|seg| (seg, false)));
+                }
+                _ => {}
+            }
+        }
+    }
+    out.extend(app.drawing.clines.iter().map(|c| (pos2(c[0], c[1]), pos2(c[2], c[3]))).filter(|(a, b)| segment_in_rect(*a, *b, r)).map(|seg| (seg, true)));
+    out
+}
+
+/// How many centre lines and marks the frame `r` holds.
+fn centre_in_box(app: &SolveApp, r: [f32; 4]) -> usize {
+    centre_segments(app, r).len() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
 }
 
 /// Erase exactly one centre line (its ends), leaving any line that crosses it.
@@ -2770,6 +2802,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.erase = Some((s, s));
             app.drawing.selected = None;
             app.drawing.sel_dim = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            && hit(s).is_none()
+            && !ui.input(|i| i.modifiers.command || i.modifiers.alt)
+        {
+            // A frame dragged over empty sheet selects the centre lines and marks it touches.
+            app.drawing.box_sel = Some((s, s));
+            app.drawing.centre_box = None;
+            app.drawing.selected = None;
+            app.drawing.sel_dim = None;
+            app.drawing.sel_centre = None;
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
@@ -2819,6 +2863,26 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 app.drawing.sel_centre = Some((la, lb));
             }
+        }
+    }
+    // Selecting centre lines: the frame follows the pointer; letting go keeps it as the selection.
+    if let (Some((from, _)), Some(m)) = (app.drawing.box_sel, &map) {
+        if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)) {
+            app.drawing.box_sel = Some((from, s));
+        }
+        if response.drag_stopped() || !response.dragged() {
+            if let Some((a, b)) = app.drawing.box_sel.take() {
+                let r = [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)];
+                app.drawing.centre_box = (r[2] - r[0] > 0.5 || r[3] - r[1] > 0.5).then_some(r).filter(|r| centre_in_box(app, *r) > 0);
+            }
+        }
+    }
+    if let Some(r) = app.drawing.centre_box {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked() {
+            app.drawing.centre_box = None;
+        } else if !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
+            app.drawing.centre_box = None;
+            erase_centre(app, r);
         }
     }
     // Erasing centre lines: the frame follows the pointer; letting go removes what it touches.
@@ -3184,7 +3248,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -3609,6 +3673,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             egui::FontId::proportional(Tokens::get().font_body),
             Color32::from_rgb(235, 110, 110),
         );
+    }
+    {
+        let accent = Tokens::get().accent;
+        let frame = app.drawing.box_sel.map(|(a, b)| [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)]).or(app.drawing.centre_box);
+        if let Some(r) = frame {
+            let screen = Rect::from_two_pos(map(pos2(r[0], r[1])), map(pos2(r[2], r[3])));
+            painter.rect_filled(screen, 0.0, accent.gamma_multiply(0.12));
+            painter.rect_stroke(screen, 0.0, Stroke::new(1.5, accent), egui::StrokeKind::Inside);
+            // The centre lines inside, drawn heavier so the selection can be seen.
+            for (c, _) in centre_segments(app, r) {
+                painter.line_segment([map(c.0), map(c.1)], Stroke::new(3.0, accent));
+            }
+            if app.drawing.centre_box.is_some() {
+                let n = centre_in_box(app, r);
+                painter.text(screen.left_top() + vec2(4.0, -4.0), egui::Align2::LEFT_BOTTOM, format!("{n} centre lines/marks selected: press Delete to remove"), egui::FontId::proportional(Tokens::get().font_body), accent);
+            }
+        }
     }
     if let Some((a, b)) = app.drawing.erase {
         let r = Rect::from_two_pos(map(a), map(b));
