@@ -804,7 +804,7 @@ fn finish(
     // Cells the user typed over: title, company, number, date, scale, drawn by, paper.
     let cells = p.get("block_cells").and_then(Value::as_array);
     // A cell may start with `{dx;dy;k}`: the text moved by dx, dy mm and scaled by k.
-    let cell = |i: usize, default: String| -> (String, f64, f64, f64) {
+    let cell = |i: usize, default: String| -> (String, f64, f64, f64, u8) {
         let raw: String = cells.and_then(|c| c.get(i)).and_then(Value::as_str).unwrap_or("").chars().take(100).collect();
         let (style, body) = match raw.strip_prefix('{').and_then(|r| r.split_once('}')) {
             Some((st, rest)) => (st.to_string(), rest.to_string()),
@@ -814,10 +814,13 @@ fn finish(
         let dx = n.first().copied().unwrap_or(0.0).clamp(-300.0, 300.0);
         let dy = n.get(1).copied().unwrap_or(0.0).clamp(-300.0, 300.0);
         let k = n.get(2).copied().unwrap_or(1.0).clamp(0.2, 8.0);
+        let font = n.get(3).copied().filter(|f| (0.0..=4.0).contains(f)).map_or(0, |f| f as u8);
         let body = body.trim();
-        (if body.is_empty() { default } else { body.chars().take(80).collect() }, dx, dy, k)
+        (if body.is_empty() { default } else { body.chars().take(80).collect() }, dx, dy, k, font)
     };
-    let put = |x: f64, y: f64, h: f64, (t, dx, dy, k): (String, f64, f64, f64), entities: &mut Vec<DxfEntity>| {
+    let put = |x: f64, y: f64, h: f64, (t, dx, dy, k, font): (String, f64, f64, f64, u8), entities: &mut Vec<DxfEntity>| {
+        // The font travels as a marker in front of the text; the sheet reads it, the DXF drops it.
+        let t = if font > 0 { format!("\u{1}{font}{t}") } else { t };
         text("TEXT", Vec2::new(x + dx, y + dy), h * k, t, entities);
     };
     let text_from = entities.len();
@@ -982,7 +985,16 @@ fn preview(s: &mut Session, p: &Value) -> Result<Value> {
             DxfShape::Polyline { points } => json!({"layer": l, "poly": points.iter().map(|q| pt(*q)).collect::<Vec<_>>()}),
             DxfShape::Circle { c, r } => json!({"layer": l, "circle": [pt(*c), r]}),
             DxfShape::Arc { c, r, a0, a1 } => json!({"layer": l, "arc": [pt(*c), r, a0, a1]}),
-            DxfShape::Text { at, height, text, angle_deg } => json!({"layer": l, "text": text, "at": pt(*at), "h": height, "angle": angle_deg}),
+            DxfShape::Text { at, height, text, angle_deg } => {
+                let (font, shown) = match text.strip_prefix('\u{1}') {
+                    Some(rest) => match rest.chars().next().and_then(|c| c.to_digit(10)) {
+                        Some(f) => (f, rest.get(1..).unwrap_or("")),
+                        None => (0, rest),
+                    },
+                    None => (0, text.as_str()),
+                };
+                json!({"layer": l, "text": shown, "at": pt(*at), "h": height, "angle": angle_deg, "font": font})
+            }
             _ => continue, // ellipses and splines are written to the DXF; the preview skips them
         });
     }

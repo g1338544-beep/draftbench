@@ -318,6 +318,11 @@ impl Out {
 /// A text on one line, as a TEXT entity holds it: at most 250 characters, control characters as
 /// spaces, letters outside ASCII as `\U+XXXX` (`?` beyond the first 65536).
 fn text_value(s: &str) -> String {
+    // A sheet's font marker (control code 1 and a digit) is for the on-screen sheet only.
+    let s = match s.strip_prefix('\u{1}') {
+        Some(rest) => rest.strip_prefix(|c: char| c.is_ascii_digit()).unwrap_or(rest),
+        None => s,
+    };
     s.chars()
         .take(250)
         .map(|c| match c {

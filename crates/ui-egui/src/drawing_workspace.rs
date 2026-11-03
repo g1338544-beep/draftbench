@@ -103,7 +103,8 @@ enum Shape {
     Circle(Pos2, f32),
     Arc(Pos2, f32, f32, f32),
     /// Text: where (bottom centre), height, the words, and the turn in degrees (counter-clockwise).
-    Text(Pos2, f32, String, f32),
+    /// Position, height, text, angle (degrees) and font (0 normal, 1 medium, 2 semibold, 3 bold, 4 mono).
+    Text(Pos2, f32, String, f32, u8),
 }
 
 /// A colour picture of the model, from a camera, placed on the sheet (centre and width in mm).
@@ -324,6 +325,11 @@ pub struct State {
     sel_centre: Option<(Pos2, Pos2)>,
     /// A frame being dragged over empty sheet, and the frame kept as the selection of centre lines.
     box_sel: Option<(Pos2, Pos2)>,
+    /// A title block text being dragged (cell, pointer at the start, its move at the start); a title
+    /// block line being dragged (0, 1 dividers, 2 top, 3 left); the cell last copied.
+    cell_drag: Option<(usize, Pos2, f32, f32)>,
+    grid_drag: Option<u8>,
+    cell_clip: Option<String>,
     centre_box: Option<[f32; 4]>,
     text_edit: Option<usize>,
     selected: Option<usize>,
@@ -428,6 +434,9 @@ impl Default for State {
             drag_end: None,
             sel_centre: None,
             box_sel: None,
+            cell_drag: None,
+            grid_drag: None,
+            cell_clip: None,
             centre_box: None,
             text_edit: None,
             selected: None,
@@ -1062,7 +1071,7 @@ fn parse(v: &Value) -> Option<Sheet> {
         } else if let Some(a) = it.get("arc").and_then(Value::as_array) {
             Shape::Arc(pt(a.first()?)?, a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32, a.get(3)?.as_f64()? as f32)
         } else if let Some(t) = it.get("text").and_then(Value::as_str) {
-            Shape::Text(pt(it.get("at")?)?, it.get("h")?.as_f64()? as f32, t.replace("%%c", "Ø").replace("%%C", "Ø"), it.get("angle").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0) as f32)
+            Shape::Text(pt(it.get("at")?)?, it.get("h")?.as_f64()? as f32, t.replace("%%c", "Ø").replace("%%C", "Ø"), it.get("angle").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0) as f32, it.get("font").and_then(Value::as_u64).filter(|f| *f <= 4).unwrap_or(0) as u8)
         } else {
             continue;
         };
@@ -1758,21 +1767,120 @@ fn normal_angles(n: [f64; 3]) -> Option<(f64, f64)> {
     Some((yaw, z.clamp(-1.0, 1.0).asin()))
 }
 
-/// A title block cell is `{dx;dy;k}text`: split it into the move (mm), the size factor and the text.
-fn split_cell(raw: &str) -> (f32, f32, f32, String) {
+/// A title block cell is `{dx;dy;k;font}text`: split it into the move (mm), the size factor, the
+/// font (0 normal, 1 medium, 2 semibold, 3 bold, 4 mono) and the text.
+fn split_cell(raw: &str) -> (f32, f32, f32, u8, String) {
     if let Some((style, rest)) = raw.strip_prefix('{').and_then(|r| r.split_once('}')) {
         let n: Vec<f32> = style.split(';').filter_map(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite()).collect();
-        return (n.first().copied().unwrap_or(0.0), n.get(1).copied().unwrap_or(0.0), n.get(2).copied().unwrap_or(1.0), rest.to_string());
+        let font = n.get(3).copied().filter(|f| (0.0..=4.0).contains(f)).map_or(0, |f| f as u8);
+        return (n.first().copied().unwrap_or(0.0), n.get(1).copied().unwrap_or(0.0), n.get(2).copied().unwrap_or(1.0), font, rest.to_string());
     }
-    (0.0, 0.0, 1.0, raw.to_string())
+    (0.0, 0.0, 1.0, 0, raw.to_string())
 }
 
-fn join_cell(dx: f32, dy: f32, k: f32, body: &str) -> String {
-    if dx == 0.0 && dy == 0.0 && (k - 1.0).abs() < 1e-3 {
+fn join_cell(dx: f32, dy: f32, k: f32, font: u8, body: &str) -> String {
+    if dx == 0.0 && dy == 0.0 && (k - 1.0).abs() < 1e-3 && font == 0 {
         body.to_string()
     } else {
-        format!("{{{dx};{dy};{k:.2}}}{body}")
+        let r = |v: f32| (v * 10.0).round() / 10.0;
+        format!("{{{};{};{:.2};{font}}}{body}", r(dx), r(dy), k)
     }
+}
+
+/// The title block in sheet mm: (margin, width, left edge, height, first divider, second divider),
+/// the dividers as fractions of the width.
+fn block_geo(st: &State, sheet_w: f32) -> (f32, f32, f32, f32, f32, f32) {
+    let num = |t: &str, d: f32| t.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
+    let margin = num(&st.margin, 10.0).clamp(2.0, 40.0);
+    let block_w = num(&st.block_w, 190.0).max(60.0).min(sheet_w - 2.0 * margin).max(10.0);
+    let bh = num(&st.block_h, 36.0).clamp(18.0, 90.0);
+    let c1 = (num(&st.col1, 40.0) / 100.0).clamp(0.15, 0.6);
+    let c2 = (num(&st.col2, 70.0) / 100.0).clamp(c1 + 0.1, 0.9);
+    (margin, block_w, sheet_w - margin - block_w, bh, c1, c2)
+}
+
+/// Where a cell's text sits (its bottom middle), the cell's width and the row height.
+fn cell_centre(g: (f32, f32, f32, f32, f32, f32), index: usize) -> (Pos2, f32, f32) {
+    let (margin, bw, x0, bh, c1, c2) = g;
+    let rowh = bh / 3.0;
+    let mids = [c1 / 2.0, (c1 + c2) / 2.0, (c2 + 1.0) / 2.0];
+    let widths = [c1, c2 - c1, 1.0 - c2];
+    let (row, col) = match index {
+        0 => (2, None),
+        1..=3 => (1, Some(index - 1)),
+        _ => (0, Some(index - 4)),
+    };
+    let (f, w) = match col {
+        Some(c) => (mids.get(c).copied().unwrap_or(0.5), widths.get(c).copied().unwrap_or(0.3)),
+        None => (0.5, 1.0),
+    };
+    (pos2(x0 + bw * f, margin + rowh * row as f32 + rowh * 0.3), bw * w, rowh)
+}
+
+/// The title block cell under a sheet point.
+fn cell_at(g: (f32, f32, f32, f32, f32, f32), s: Pos2) -> Option<usize> {
+    let (margin, bw, x0, bh, c1, c2) = g;
+    if s.x < x0 || s.x > x0 + bw || s.y < margin || s.y > margin + bh {
+        return None;
+    }
+    let row = (((s.y - margin) / (bh / 3.0)) as usize).min(2);
+    let f = (s.x - x0) / bw;
+    let col = if f < c1 { 0 } else if f < c2 { 1 } else { 2 };
+    Some(match (row, col) {
+        (2, _) => 0,
+        (1, c) => 1 + c,
+        (_, c) => 4 + c,
+    })
+}
+
+/// The title block line near a sheet point: 0 and 1 the dividers, 2 the top edge, 3 the left edge.
+fn grid_hit(g: (f32, f32, f32, f32, f32, f32), s: Pos2, tol: f32) -> Option<u8> {
+    let (margin, bw, x0, bh, c1, c2) = g;
+    if (s.y - (margin + bh)).abs() <= tol && s.x >= x0 - tol && s.x <= x0 + bw + tol {
+        return Some(2);
+    }
+    if (s.x - x0).abs() <= tol && s.y >= margin - tol && s.y <= margin + bh + tol {
+        return Some(3);
+    }
+    if s.y >= margin - tol && s.y <= margin + bh * 2.0 / 3.0 + tol {
+        if (s.x - (x0 + bw * c1)).abs() <= tol {
+            return Some(0);
+        }
+        if (s.x - (x0 + bw * c2)).abs() <= tol {
+            return Some(1);
+        }
+    }
+    None
+}
+
+/// Open the text window of the title block cell at a sheet point; false when there is none.
+fn open_cell(app: &mut SolveApp, s: Pos2) -> bool {
+    let Some(width) = app.drawing.sheet.as_ref().map(|x| x.width) else { return false };
+    if !app.drawing.block_on {
+        return false;
+    }
+    let g = block_geo(&app.drawing, width);
+    let Some(index) = cell_at(g, s) else { return false };
+    let (dx, dy, k, font, body) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
+    if body.trim().is_empty() {
+        // Start from the text shown there.
+        let (c, _, _) = cell_centre(g, index);
+        let centre = c + vec2(dx, dy);
+        let shown = app.drawing.sheet.as_ref().and_then(|sheet| {
+            sheet
+                .items
+                .iter()
+                .filter_map(|(_, sh)| if let Shape::Text(p, _, t, _, _) = sh { Some((p, t)) } else { None })
+                .filter(|(p, _)| (p.x - centre.x).abs() < g.1 * 0.3 && (p.y - centre.y).abs() < 6.0)
+                .min_by(|a, b| (*a.0 - centre).length().total_cmp(&(*b.0 - centre).length()))
+                .map(|(_, t)| t.clone())
+        });
+        if let (Some(t), Some(slot)) = (shown, app.drawing.cells.get_mut(index)) {
+            *slot = join_cell(dx, dy, k, font, &t.chars().take(80).collect::<String>());
+        }
+    }
+    app.drawing.cell_edit = Some(index);
+    true
 }
 
 /// A section-view icon: a block cut by a dashed plane, the cut face hatched, with the arrows
@@ -2743,7 +2851,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let text = b
                             .and_then(|b| {
                                 sheet.items.iter().find_map(|(l, sh)| match (l, sh) {
-                                    (Layer::Text, Shape::Text(p, _, t, _)) if (p.x - b.1).abs() < 2.0 && p.y <= b.2 - b.4 / 2.0 - 1.0 && p.y >= b.2 - b.4 / 2.0 - 24.0 => Some(t.clone()),
+                                    (Layer::Text, Shape::Text(p, _, t, _, _)) if (p.x - b.1).abs() < 2.0 && p.y <= b.2 - b.4 / 2.0 - 1.0 && p.y >= b.2 - b.4 / 2.0 - 24.0 => Some(t.clone()),
                                     _ => None,
                                 })
                             })
@@ -2802,6 +2910,26 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.erase = Some((s, s));
             app.drawing.selected = None;
             app.drawing.sel_dim = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            && hit(s).is_none()
+            && let g = block_geo(&app.drawing, sheet.width)
+            && let Some(which) = grid_hit(g, s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
+        {
+            // A line of the title block: drag it to resize the table.
+            app.drawing.grid_drag = Some(which);
+            app.drawing.selected = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            && hit(s).is_none()
+            && let Some(index) = cell_at(block_geo(&app.drawing, sheet.width), s)
+        {
+            // A title block text: drag it anywhere.
+            let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
+            app.drawing.cell_drag = Some((index, s, dx, dy));
+            app.drawing.selected = None;
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
@@ -2863,6 +2991,36 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 app.drawing.sel_centre = Some((la, lb));
             }
+        }
+    }
+    // Dragging a title block text: it follows the pointer, and letting go keeps it there.
+    if let (Some((index, from, dx0, dy0)), Some(m)) = (app.drawing.cell_drag, &map) {
+        if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)) {
+            let (_, _, k, font, body) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
+            if let Some(slot) = app.drawing.cells.get_mut(index) {
+                *slot = join_cell(dx0 + (s.x - from.x), dy0 + (s.y - from.y), k, font, &body);
+            }
+        }
+        if response.drag_stopped() || !response.dragged() {
+            app.drawing.cell_drag = None;
+            refresh(app);
+        }
+    }
+    // Dragging a title block line: the table follows, and letting go keeps it.
+    if let (Some(which), Some(m)) = (app.drawing.grid_drag, &map) {
+        if let (Some(s), Some(w)) = (response.interact_pointer_pos().and_then(|q| m.to_sheet(q)), app.drawing.sheet.as_ref().map(|x| x.width)) {
+            let (margin, bw, x0, _, c1, _) = block_geo(&app.drawing, w);
+            let fmt = |v: f32| format!("{v:.1}").trim_end_matches('0').trim_end_matches('.').to_string();
+            match which {
+                0 => app.drawing.col1 = fmt(((s.x - x0) / bw * 100.0).clamp(15.0, 60.0)),
+                1 => app.drawing.col2 = fmt(((s.x - x0) / bw * 100.0).clamp(c1 * 100.0 + 10.0, 90.0)),
+                2 => app.drawing.block_h = fmt((s.y - margin).clamp(18.0, 90.0)),
+                _ => app.drawing.block_w = fmt((x0 + bw - s.x).clamp(60.0, (w - 2.0 * margin).max(60.0))),
+            }
+        }
+        if response.drag_stopped() || !response.dragged() {
+            app.drawing.grid_drag = None;
+            refresh(app);
         }
     }
     // Selecting centre lines: the frame follows the pointer; letting go keeps it as the selection.
@@ -3015,41 +3173,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref())
         && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
     {
-        let num = |t: &str, d: f32| t.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
-        let margin = num(&app.drawing.margin, 10.0).clamp(2.0, 40.0);
-        let block_w = num(&app.drawing.block_w, 190.0).max(60.0).min(sheet.width - 2.0 * margin).max(10.0);
-        let x0 = sheet.width - margin - block_w;
-        let bh = num(&app.drawing.block_h, 36.0).clamp(18.0, 90.0);
-        let c1 = (num(&app.drawing.col1, 40.0) / 100.0).clamp(0.15, 0.6);
-        let c2 = (num(&app.drawing.col2, 70.0) / 100.0).clamp(c1 + 0.1, 0.9);
-        let rowh = bh / 3.0;
-        if app.drawing.block_on && s.x >= x0 && s.x <= sheet.width - margin && s.y >= margin && s.y <= margin + bh {
-            let row = (((s.y - margin) / rowh) as usize).min(2);
-            let col = if (s.x - x0) / block_w < c1 { 0 } else if (s.x - x0) / block_w < c2 { 1 } else { 2 };
-            let index = match (row, col) {
-                (2, _) => 0,
-                (1, c) => 1 + c,
-                (_, c) => 4 + c,
-            };
-            if split_cell(&app.drawing.cells[index]).3.trim().is_empty() {
-                // Start from the text shown there.
-                let centre = pos2(x0 + block_w * [c1 / 2.0, (c1 + c2) / 2.0, (c2 + 1.0) / 2.0][col], margin + rowh * row as f32 + rowh * 0.3);
-                let shown = sheet
-                    .items
-                    .iter()
-                    .filter_map(|(_, sh)| if let Shape::Text(p, _, t, _) = sh { Some((p, t)) } else { None })
-                    .filter(|(p, _)| (p.x - centre.x).abs() < block_w * 0.3 && (p.y - centre.y).abs() < 6.0)
-                    .min_by(|a, b| (*a.0 - centre).length().total_cmp(&(*b.0 - centre).length()))
-                    .map(|(_, t)| t.clone());
-                if let Some(t) = shown {
-                    {
-                        let (dx, dy, k, _) = split_cell(&app.drawing.cells[index]);
-                        app.drawing.cells[index] = join_cell(dx, dy, k, &t.chars().take(80).collect::<String>());
-                    }
-                }
-            }
-            app.drawing.cell_edit = Some(index);
-        }
+        open_cell(app, s);
     }
     if let Some(i) = app.drawing.cell_edit {
         let mut changed = false;
@@ -3057,9 +3181,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let names = ["Title", "Company", "Number / sheet / revision", "Date", "Scale", "Drawn by", "Paper"];
         let slot = i.min(6);
         // The cell is `{dx;dy;k}text`: moved by dx, dy mm and scaled by k.
-        let (mut dx, mut dy, mut k, mut body) = split_cell(&app.drawing.cells[slot]);
-        let before = (dx, dy, k, body.clone());
+        let (mut dx, mut dy, mut k, mut font, mut body) = split_cell(&app.drawing.cells[slot]);
+        let before = (dx, dy, k, font, body.clone());
         let mut copy_from: Option<usize> = None;
+        let (mut copied, mut paste) = (false, false);
         let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_cell"), "cell", "Title block text").show_body(ui.ctx(), |ui| {
             ui.label(names[slot]);
             crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_cell_text", i)), &mut body, "", false, 80);
@@ -3083,6 +3208,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 ui.label(format!("{:.0}%", k * 100.0));
             });
+            ui.label("Font");
+            ui.horizontal_wrapped(|ui| {
+                for (n, name) in ["Normal", "Medium", "Semibold", "Bold", "Mono"].iter().enumerate() {
+                    if ui.add(egui::Button::selectable(font as usize == n, *name)).clicked() {
+                        font = n as u8;
+                    }
+                }
+            });
             ui.label("Copy text and style from");
             ui.horizontal_wrapped(|ui| {
                 for (n, name) in names.iter().enumerate() {
@@ -3092,18 +3225,26 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
             ui.horizontal(|ui| {
-                if crate::ui_kit::button(ui, "Copy to clipboard", crate::ui_kit::Button::Small).clicked() {
+                if crate::ui_kit::button(ui, "Copy", crate::ui_kit::Button::Small).clicked() {
                     ui.ctx().copy_text(body.clone());
+                    copied = true;
                 }
+                paste = crate::ui_kit::button(ui, "Paste", crate::ui_kit::Button::Small).clicked();
                 reset = crate::ui_kit::button(ui, "Reset to automatic", crate::ui_kit::Button::Small).clicked();
             });
         });
+        if copied {
+            app.drawing.cell_clip = Some(join_cell(dx, dy, k, font, &body));
+        }
         if let Some(n) = copy_from {
             let src = app.drawing.cells[n].clone();
             app.drawing.cells[slot] = src;
             changed = true;
-        } else if (dx, dy, k, &body) != (before.0, before.1, before.2, &before.3) {
-            app.drawing.cells[slot] = join_cell(dx, dy, k, &body);
+        } else if paste && let Some(clip) = app.drawing.cell_clip.clone() {
+            app.drawing.cells[slot] = clip;
+            changed = true;
+        } else if (dx, dy, k, font, &body) != (before.0, before.1, before.2, before.3, &before.4) {
+            app.drawing.cells[slot] = join_cell(dx, dy, k, font, &body);
             changed = true;
         }
         if reset {
@@ -3117,6 +3258,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Double-click a view to edit its scale; right-click for the add / remove menu.
+    let mut right_cell: Option<Pos2> = None;
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let under = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).map(|b| b.0);
         if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
@@ -3132,11 +3274,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
         {
             let v = under(s);
-            if v.is_some() {
-                app.drawing.selected = v;
+            let over_cell = v.is_none() && app.drawing.block_on && cell_at(block_geo(&app.drawing, sheet.width), s).is_some();
+            if over_cell {
+                // Right-click on a title block text: its window, with Copy and Paste.
+                right_cell = Some(s);
+            } else {
+                if v.is_some() {
+                    app.drawing.selected = v;
+                }
+                app.drawing.menu_at = Some((v, s));
             }
-            app.drawing.menu_at = Some((v, s));
         }
+    }
+    if let Some(s) = right_cell {
+        open_cell(app, s);
     }
     let mut menu_add: Option<(usize, Pos2)> = None;
     let mut menu_remove: Option<usize> = None;
@@ -3248,7 +3399,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -3328,14 +3479,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.add(egui::Shape::line(pts, s));
                 }
             }
-            Shape::Text(p, height, text, angle) => {
+            Shape::Text(p, height, text, angle, font) => {
                 let size = (height * px_per_mm).clamp(0.0, 300.0);
+                let face = |sz: f32| match font {
+                    1 => crate::fonts::medium(sz),
+                    2 => crate::fonts::semibold(sz),
+                    3 => crate::fonts::bold(sz),
+                    4 => egui::FontId::monospace(sz),
+                    _ => egui::FontId::proportional(sz),
+                };
                 if size >= 3.0 {
                     if angle.rem_euclid(360.0).abs() < 0.01 {
-                        painter.text(map(*p), egui::Align2::CENTER_BOTTOM, text, egui::FontId::proportional(size), Color32::BLACK);
+                        painter.text(map(*p), egui::Align2::CENTER_BOTTOM, text, face(size), Color32::BLACK);
                     } else {
                         // A dimension's value turned along its line: the sheet turns counter-clockwise, the screen clockwise.
-                        let galley = painter.layout_no_wrap(text.clone(), egui::FontId::proportional(size), Color32::BLACK);
+                        let galley = painter.layout_no_wrap(text.clone(), face(size), Color32::BLACK);
                         let theta = -angle.to_radians();
                         let (sin, cos) = theta.sin_cos();
                         let q = galley.size();
@@ -3699,6 +3857,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    if let Some((index, _, _, _)) = app.drawing.cell_drag {
+        let g = block_geo(&app.drawing, sheet.width);
+        let (c, cw, rowh) = cell_centre(g, index);
+        let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
+        let r = Rect::from_center_size(map(c + vec2(dx, dy + rowh * 0.2)), vec2(cw * 0.5 * px_per_mm, rowh * 0.5 * px_per_mm));
+        painter.rect_stroke(r, 2.0, Stroke::new(1.5, Tokens::get().accent), egui::StrokeKind::Inside);
+    }
+    if let Some(which) = app.drawing.grid_drag {
+        let (margin, bw, x0, bh, c1, c2) = block_geo(&app.drawing, sheet.width);
+        let seg = match which {
+            0 => [pos2(x0 + bw * c1, margin), pos2(x0 + bw * c1, margin + bh * 2.0 / 3.0)],
+            1 => [pos2(x0 + bw * c2, margin), pos2(x0 + bw * c2, margin + bh * 2.0 / 3.0)],
+            2 => [pos2(x0, margin + bh), pos2(x0 + bw, margin + bh)],
+            _ => [pos2(x0, margin), pos2(x0, margin + bh)],
+        };
+        painter.line_segment([map(seg[0]), map(seg[1])], Stroke::new(2.5, Tokens::get().accent));
+    }
     if let Some((a, b)) = app.drawing.erase {
         let r = Rect::from_two_pos(map(a), map(b));
         painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(220, 60, 60, 40));
@@ -4058,7 +4233,7 @@ fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4]) -> (String, f32, f32) {
             }
         };
         match shape {
-            Shape::Text(p, h, t, _) => {
+            Shape::Text(p, h, t, _, _) => {
                 let bytes: Vec<u8> = t.chars().map(|ch| if (ch as u32) < 256 { ch as u32 as u8 } else { b'?' }).collect();
                 let mut esc = String::new();
                 for b in bytes {
