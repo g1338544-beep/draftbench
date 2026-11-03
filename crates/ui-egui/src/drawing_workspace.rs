@@ -2914,8 +2914,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
-            && let g = block_geo(&app.drawing, sheet.width)
-            && let Some(which) = grid_hit(g, s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
+            && let Some(which) = grid_hit(block_geo(&app.drawing, sheet.width), s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
         {
             // A line of the title block: drag it to resize the table.
             app.drawing.grid_drag = Some(which);
