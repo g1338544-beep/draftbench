@@ -4090,6 +4090,32 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if let Some(Some(pt)) = snapped {
                 painter.circle_stroke(map(pt), 6.0, Stroke::new(1.5, Tokens::get().accent));
             }
+            // What a click would take: the circle or the line under the pointer is drawn heavy.
+            if let Some(h) = hover_s
+                && !matches!(snapped, Some(Some(_)))
+            {
+                let accent = Tokens::get().accent;
+                if (picks.is_empty() && matches!(kind, 3 | 4 | 7)) || kind == 8 {
+                    if let Some((c, r)) = snap_circle(sheet, h, tol * 2.5) {
+                        painter.circle_stroke(map(c), r * px_per_mm, Stroke::new(3.5, accent));
+                    } else if picks.is_empty()
+                        && matches!(kind, 7)
+                        && let Some((a, b)) = nearest_segment(sheet, h, tol)
+                    {
+                        painter.line_segment([map(a), map(b)], Stroke::new(3.5, accent));
+                        painter.circle_filled(map(a), 3.5, accent);
+                        painter.circle_filled(map(b), 3.5, accent);
+                    }
+                } else if picks.is_empty()
+                    && matches!(kind, 0..=2)
+                    && snap_circle(sheet, h, tol * 2.5).is_none()
+                    && let Some((a, b)) = nearest_segment(sheet, h, tol)
+                {
+                    painter.line_segment([map(a), map(b)], Stroke::new(3.5, accent));
+                    painter.circle_filled(map(a), 3.5, accent);
+                    painter.circle_filled(map(b), 3.5, accent);
+                }
+            }
             if let (Some(first), Some(h)) = (picks.first(), hover_s) {
                 let end = snapped.flatten().unwrap_or(h);
                 painter.line_segment([map(*first), map(end)], Stroke::new(1.0, Tokens::get().accent));
@@ -4569,8 +4595,8 @@ fn nearest_segment(sheet: &Sheet, c: Pos2, tol: f32) -> Option<(Pos2, Pos2)> {
         .iter()
         .flat_map(|(l, sh)| -> Vec<(Pos2, Pos2)> {
             match (l, sh) {
-                (Layer::Visible, Shape::Line(a, b)) => vec![(*a, *b)],
-                (Layer::Visible, Shape::Poly(pts)) => pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).collect(),
+                (Layer::Visible | Layer::Hidden, Shape::Line(a, b)) => vec![(*a, *b)],
+                (Layer::Visible | Layer::Hidden, Shape::Poly(pts)) => pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).collect(),
                 _ => Vec::new(),
             }
         })
