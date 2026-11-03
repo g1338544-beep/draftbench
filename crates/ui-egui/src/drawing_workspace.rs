@@ -3367,7 +3367,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 d.at = match DIM_KINDS[d.kind.min(6)].0 {
                     "horizontal" => s.y,
                     "vertical" => s.x,
-                    "diameter" | "radius" => (s - d.a).length(),
+                    "diameter" | "radius" => {
+                        // The line turns about the centre to follow the pointer, as a note's leader does.
+                        let (v, r) = (s - d.a, (d.b - d.a).length());
+                        let len = v.length().max(1e-6);
+                        d.b = d.a + v / len * r;
+                        len
+                    }
                     "balloon" | "note" => {
                         d.b = s;
                         d.at
