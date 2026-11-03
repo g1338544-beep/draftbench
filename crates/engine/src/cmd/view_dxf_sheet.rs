@@ -126,6 +126,7 @@ fn manual(
         let n = (v.x * v.x + v.y * v.y).sqrt();
         if n > 1e-9 { Some(Vec2::new(v.x / n, v.y / n)) } else { None }
     };
+    let axes = hole_axes(scene, parts, key);
     for (index, item) in list.iter().take(12).enumerate() {
         let name = item.get("view").and_then(Value::as_str).ok_or_else(|| bad(CMD, "each placement needs a view"))?;
         let view = StandardView::parse(name).ok_or_else(|| bad(CMD, format!("unknown view `{name}`")))?;
@@ -248,6 +249,7 @@ fn manual(
                 // Views placed one by one still share their hole axes when their projections share an axis.
                 .or_else(|| if custom.is_some() { None } else { infos.iter().find_map(|(i, info)| shared_axis(view, info.view).map(|h| (*i, h))) });
             if let Some((pi, horizontal)) = link
+                && axes.is_empty()
                 && let Some(par) = infos.get(&pi)
             {
                 for (c, r) in &par.circles {
@@ -264,58 +266,21 @@ fn manual(
                     }
                 }
             }
-            // Top and Right views share the vertical hole axes: a hole seen as a circle from above is two vertical
-            // lines in the Right view (its horizontal axis is the Top view's vertical one), with the centre line between.
-            if matches!(view, StandardView::Top | StandardView::Right) {
-                let want = if view == StandardView::Right { StandardView::Top } else { StandardView::Right };
-                if let Some(par) = infos.values().find(|i| i.view == want) {
-                    if view == StandardView::Right {
-                        for (c, r) in &par.circles {
-                            if let Some((u, lo, hi)) = vertical_span(&all.lines, c.y, *r).map(|(l, h)| (c.y, l, h)).or_else(|| vertical_span(&all.lines, -c.y, *r).map(|(l, h)| (-c.y, l, h))) {
-                                axis_line(Vec2::new(lo, u), Vec2::new(hi, u), Vec2::new(u, lo), Vec2::new(u, hi), false, &to_sheet, &mut entities);
-                                any_centre = true;
-                            }
-                        }
-                    } else {
-                        let parent_sheet = |q: Vec2| Vec2::new(par.x + (q.x - par.c.x) * par.scale, par.y + (q.y - par.c.y) * par.scale);
-                        for (c, r) in &here {
-                            if let Some((u, lo, hi)) = vertical_span(&par.lines.lines, c.y, *r).map(|(l, h)| (c.y, l, h)).or_else(|| vertical_span(&par.lines.lines, -c.y, *r).map(|(l, h)| (-c.y, l, h))) {
-                                axis_line(Vec2::new(lo, u), Vec2::new(hi, u), Vec2::new(u, lo), Vec2::new(u, hi), false, &parent_sheet, &mut entities);
-                                any_centre = true;
-                            }
-                        }
-                    }
-                }
-            }
             infos.insert(index, ViewInfo { lines: all.clone(), circles: here, x, y, c, scale, view });
         }
-        // The Isometric view: each hole's axis (found from the Top, Front and Right views) drawn as a centre line in 3D.
-        if centres_on && view == StandardView::Iso && custom.is_none() {
-            if let (Ok(top), Ok(front), Ok(right_view)) = (
-                view_lines(scene, parts, StandardView::Top, None, key),
-                view_lines(scene, parts, StandardView::Front, None, key),
-                view_lines(scene, parts, StandardView::Right, None, key),
-            ) {
-                let cam = Camera { target: Vec3::ZERO, yaw: angles.0, pitch: angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
-                let (rv, uv, _) = cam.basis();
-                for (c, r) in circles(&top.lines, true).into_iter().take(40) {
-                    let span = vertical_span(&front.lines, c.x, r)
-                        .or_else(|| vertical_span(&front.lines, -c.x, r))
-                        .or_else(|| vertical_span(&right_view.lines, c.y, r))
-                        .or_else(|| vertical_span(&right_view.lines, -c.y, r));
-                    let Some((z0, z1)) = span else { continue };
-                    let project = |z: f64| {
-                        let p = Vec3::new(c.x, c.y, z);
-                        to_sheet(Vec2::new(p.dot(rv), p.dot(uv)))
-                    };
-                    let (a, b) = (project(z0), project(z1));
-                    let d = Vec2::new(b.x - a.x, b.y - a.y);
-                    let len = (d.x * d.x + d.y * d.y).sqrt();
-                    if len.is_finite() && len > 1.0 {
-                        let u = Vec2::new(d.x / len * 3.0, d.y / len * 3.0);
-                        line("CENTER", Vec2::new(a.x - u.x, a.y - u.y), Vec2::new(b.x + u.x, b.y + u.y), &mut entities);
-                        any_centre = true;
-                    }
+        // Every projected view: each hole's axis, wherever it shows as a line, is drawn as a centre line.
+        if centres_on && !axes.is_empty() {
+            let cam = Camera { target: Vec3::ZERO, yaw: angles.0, pitch: angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+            let (rv, uv, _) = cam.basis();
+            for (p0, p1) in &axes {
+                let a = to_sheet(Vec2::new(p0.dot(rv), p0.dot(uv)));
+                let b = to_sheet(Vec2::new(p1.dot(rv), p1.dot(uv)));
+                let d = Vec2::new(b.x - a.x, b.y - a.y);
+                let len = (d.x * d.x + d.y * d.y).sqrt();
+                if len.is_finite() && len > 1.0 {
+                    let u = Vec2::new(d.x / len * 3.0, d.y / len * 3.0);
+                    line("CENTER", Vec2::new(a.x - u.x, a.y - u.y), Vec2::new(b.x + u.x, b.y + u.y), &mut entities);
+                    any_centre = true;
                 }
             }
         }
@@ -525,6 +490,39 @@ fn axis_span(lines: &[(Vec2, Vec2, bool)], c: Vec2, r: f64, horizontal: bool) ->
         hi = hi.max(pa.max(pb));
     }
     (near && far && hi > lo).then_some((lo, hi))
+}
+
+/// Hole axes in model space (start, end), from the circles seen in the Top, Front and Right views and the
+/// lines the same holes make in the other views.
+fn hole_axes(scene: &meshes::Scene, parts: &[sketch::Part], key: Key) -> Vec<(Vec3, Vec3)> {
+    let (Ok(top), Ok(front), Ok(right)) = (
+        view_lines(scene, parts, StandardView::Top, None, key),
+        view_lines(scene, parts, StandardView::Front, None, key),
+        view_lines(scene, parts, StandardView::Right, None, key),
+    ) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    // Holes along Z: circles in the Top view; their length shows as two vertical lines in the Front or Right view.
+    for (c, r) in circles(&top.lines, true).into_iter().take(40) {
+        if let Some((z0, z1)) = vertical_span(&front.lines, c.x, r).or_else(|| vertical_span(&right.lines, c.y, r)) {
+            out.push((Vec3::new(c.x, c.y, z0), Vec3::new(c.x, c.y, z1)));
+        }
+    }
+    // Holes along Y: circles in the Front view (x, z); their length shows in the Top view.
+    for (c, r) in circles(&front.lines, true).into_iter().take(40) {
+        if let Some((y0, y1)) = vertical_span(&top.lines, c.x, r) {
+            out.push((Vec3::new(c.x, y0, c.y), Vec3::new(c.x, y1, c.y)));
+        }
+    }
+    // Holes along X: circles in the Right view (y, z); their length shows in the Top view.
+    for (c, r) in circles(&right.lines, true).into_iter().take(40) {
+        if let Some((x0, x1)) = axis_span(&top.lines, Vec2::new(0.0, c.x), r, true) {
+            out.push((Vec3::new(x0, c.x, c.y), Vec3::new(x1, c.x, c.y)));
+        }
+    }
+    out.truncate(120);
+    out
 }
 
 /// Vertical lines at `u - r` and `u + r` (a hole's two sides seen from the side): their extent along the vertical.
