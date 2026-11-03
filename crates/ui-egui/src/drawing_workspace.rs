@@ -1707,9 +1707,47 @@ fn centre_segments(app: &SolveApp, r: [f32; 4]) -> Vec<((Pos2, Pos2), bool)> {
     out
 }
 
-/// How many centre lines and marks the frame `r` holds.
+/// The free title-block lines and free texts a selection frame holds (indices).
+fn free_in_box(app: &SolveApp, r: [f32; 4]) -> (Vec<usize>, Vec<usize>) {
+    let mut lines = Vec::new();
+    if let Some(sheet) = app.drawing.sheet.as_ref() {
+        let g = block_geo(&app.drawing, sheet.width);
+        for (i, l) in app.drawing.flines.iter().enumerate() {
+            let (a, b) = fline_abs(&g, l);
+            if segment_in_rect(a, b, r) {
+                lines.push(i);
+            }
+        }
+    }
+    let texts = app.drawing.texts.iter().enumerate().filter(|(_, t)| t.x >= r[0] && t.x <= r[2] && t.y >= r[1] && t.y <= r[3]).map(|(i, _)| i).collect();
+    (lines, texts)
+}
+
+/// Delete everything a selection frame holds: centre lines and marks, free lines and free texts.
+fn erase_selection(app: &mut SolveApp, r: [f32; 4]) {
+    let (lines, texts) = free_in_box(app, r);
+    erase_centre(app, r);
+    let mut i = 0;
+    app.drawing.flines.retain(|_| {
+        let keep = !lines.contains(&i);
+        i += 1;
+        keep
+    });
+    let mut i = 0;
+    app.drawing.texts.retain(|_| {
+        let keep = !texts.contains(&i);
+        i += 1;
+        keep
+    });
+    app.drawing.fl_sel = None;
+    app.drawing.ft_sel = None;
+    app.drawing.dirty_marks = true;
+}
+
+/// How many centre lines, marks, free lines and free texts the frame `r` holds.
 fn centre_in_box(app: &SolveApp, r: [f32; 4]) -> usize {
-    centre_segments(app, r).len() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
+    let (fl, ft) = free_in_box(app, r);
+    fl.len() + ft.len() + centre_segments(app, r).len() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
 }
 
 /// Erase exactly one centre line (its ends), leaving any line that crosses it.
@@ -3454,7 +3492,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.cap_drag = Some((v, s, cx, cy));
             app.drawing.caption_sel = Some(v);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && hit(s).is_none()
@@ -3465,7 +3503,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.fl_drag = Some((i, part, s, orig));
             app.drawing.fl_sel = Some(i);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
@@ -3475,7 +3513,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.grid_drag = Some(which);
             app.drawing.sel_grid = Some(which);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
@@ -3663,7 +3701,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.centre_box = None;
         } else if !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
             app.drawing.centre_box = None;
-            erase_centre(app, r);
+            erase_selection(app, r);
         }
     }
     // Erasing centre lines: the frame follows the pointer; letting go removes what it touches.
@@ -4914,7 +4952,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if app.drawing.centre_box.is_some() {
                 let n = centre_in_box(app, r);
-                painter.text(screen.left_top() + vec2(4.0, -4.0), egui::Align2::LEFT_BOTTOM, format!("{n} centre lines/marks selected: press Delete to remove"), egui::FontId::proportional(Tokens::get().font_body), accent);
+                painter.text(screen.left_top() + vec2(4.0, -4.0), egui::Align2::LEFT_BOTTOM, format!("{n} lines/marks/texts selected: press Delete to remove (Shift+drag frames the title block)"), egui::FontId::proportional(Tokens::get().font_body), accent);
             }
         }
     }
