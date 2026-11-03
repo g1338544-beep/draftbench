@@ -3463,7 +3463,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if let Some(v) = app.drawing.placed.last_mut() {
             v.x = f64::from(at.x);
             v.y = f64::from(at.y);
-            v.scale = scale.clone();
+            v.scale = scale;
             v.dashed = base_dashed;
             v.colour = base_shaded;
         }
