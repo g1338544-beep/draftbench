@@ -883,7 +883,7 @@ fn finish(
         let k = n.get(2).copied().unwrap_or(1.0).clamp(0.2, 8.0);
         let font = n.get(3).copied().filter(|f| (0.0..=4.0).contains(f)).map_or(0, |f| f as u8);
         let body = body.trim();
-        (if body.is_empty() { default } else { body.chars().take(80).collect() }, dx, dy, k, font)
+        (if body == "\u{200b}" { String::new() } else if body.is_empty() { default } else { body.chars().take(80).collect() }, dx, dy, k, font)
     };
     let put = |x: f64, y: f64, h: f64, (t, dx, dy, k, font): (String, f64, f64, f64, u8), entities: &mut Vec<DxfEntity>| {
         // The font travels as a marker in front of the text; the sheet reads it, the DXF drops it.

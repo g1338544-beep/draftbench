@@ -790,15 +790,7 @@ impl State {
         if let Some(n) = d.get("dim_decimals").and_then(serde_json::Value::as_i64).filter(|n| (-1..=4).contains(n)) {
             self.dim_decimals = n as i32;
         }
-        if let Some(list) = d.get("centre_cut").and_then(serde_json::Value::as_array) {
-            for m in list.iter().take(400) {
-                let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
-                if n.len() >= 4 && n.iter().all(|t| t.is_finite() && t.abs() < 1e5) {
-                    let flag = n.get(4).copied().unwrap_or(0.0);
-                    self.centre_cut.push([n[0] as f32, n[1] as f32, n[2] as f32, n[3] as f32, flag as f32]);
-                }
-            }
-        }
+        // Erased-centre frames are not restored: they were tied to where the views sat, and hid centre lines of views placed later.
         if let Some(list) = d.get("clines").and_then(serde_json::Value::as_array) {
             for m in list.iter().take(400) {
                 let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
@@ -1265,6 +1257,8 @@ pub fn update(app: &mut SolveApp) {
 }
 
 fn add_view(app: &mut SolveApp, view: usize) {
+    // Erased-centre frames belong to where views were; a new view brings its centre lines.
+    app.drawing.centre_cut.clear();
     let (mut w, mut h) = if app.drawing.paper >= 5 {
         let num = |t: &str, d: f32| t.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
         (num(&app.drawing.custom_w, 420.0), num(&app.drawing.custom_h, 297.0))
@@ -1708,10 +1702,23 @@ fn centre_segments(app: &SolveApp, r: [f32; 4]) -> Vec<((Pos2, Pos2), bool)> {
 }
 
 /// The free title-block lines and free texts a selection frame holds (indices).
-fn free_in_box(app: &SolveApp, r: [f32; 4]) -> (Vec<usize>, Vec<usize>) {
+fn free_in_box(app: &SolveApp, r: [f32; 4]) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
     let mut lines = Vec::new();
+    let mut cells = Vec::new();
     if let Some(sheet) = app.drawing.sheet.as_ref() {
         let g = block_geo(&app.drawing, sheet.width);
+        if app.drawing.block_on {
+            for i in 0..=(g.rows * g.cols()) {
+                let (dx, dy, _, _, body) = split_cell(app.drawing.cells.get(i).map_or("", String::as_str));
+                if body == "\u{200b}" {
+                    continue;
+                }
+                let c = cell_centre(&g, i).0 + vec2(dx, dy);
+                if c.x >= r[0] && c.x <= r[2] && c.y >= r[1] && c.y <= r[3] {
+                    cells.push(i);
+                }
+            }
+        }
         for (i, l) in app.drawing.flines.iter().enumerate() {
             let (a, b) = fline_abs(&g, l);
             if segment_in_rect(a, b, r) {
@@ -1720,13 +1727,22 @@ fn free_in_box(app: &SolveApp, r: [f32; 4]) -> (Vec<usize>, Vec<usize>) {
         }
     }
     let texts = app.drawing.texts.iter().enumerate().filter(|(_, t)| t.x >= r[0] && t.x <= r[2] && t.y >= r[1] && t.y <= r[3]).map(|(i, _)| i).collect();
-    (lines, texts)
+    (lines, texts, cells)
 }
 
 /// Delete everything a selection frame holds: centre lines and marks, free lines and free texts.
 fn erase_selection(app: &mut SolveApp, r: [f32; 4]) {
-    let (lines, texts) = free_in_box(app, r);
+    let (lines, texts, cells) = free_in_box(app, r);
     erase_centre(app, r);
+    for i in cells {
+        if app.drawing.cells.len() <= i {
+            app.drawing.cells.resize(i + 1, String::new());
+        }
+        let (dx, dy, k, font, _) = split_cell(app.drawing.cells.get(i).map_or("", String::as_str));
+        if let Some(c) = app.drawing.cells.get_mut(i) {
+            *c = format!("{{{dx};{dy};{k};{font}}}\u{200b}");
+        }
+    }
     let mut i = 0;
     app.drawing.flines.retain(|_| {
         let keep = !lines.contains(&i);
@@ -1746,8 +1762,8 @@ fn erase_selection(app: &mut SolveApp, r: [f32; 4]) {
 
 /// How many centre lines, marks, free lines and free texts the frame `r` holds.
 fn centre_in_box(app: &SolveApp, r: [f32; 4]) -> usize {
-    let (fl, ft) = free_in_box(app, r);
-    fl.len() + ft.len() + centre_segments(app, r).len() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
+    let (fl, ft, fc) = free_in_box(app, r);
+    fl.len() + ft.len() + fc.len() + centre_segments(app, r).len() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
 }
 
 /// Erase exactly one centre line (its ends), leaving any line that crosses it.
@@ -1791,6 +1807,7 @@ fn remove_view(app: &mut SolveApp, i: usize) {
         return;
     }
     app.drawing.placed.remove(i);
+    app.drawing.centre_cut.clear();
     for v in &mut app.drawing.placed {
         v.align = match v.align {
             Some((p, _)) if p == i => None,
@@ -1913,6 +1930,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
 
 /// A view as the 3D window showed the model when Drawing was entered.
 fn add_model_view(app: &mut SolveApp) {
+    app.drawing.centre_cut.clear();
     let Some((cam, _)) = app.drawing.design_camera else { return };
     add_view(app, 6);
     if let Some(v) = app.drawing.placed.last_mut() {
