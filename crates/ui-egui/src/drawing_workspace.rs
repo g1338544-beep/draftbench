@@ -327,6 +327,10 @@ pub struct State {
     clines: Vec<[f32; 4]>,
     /// Circular centre lines placed by hand: centre x, y and radius (sheet mm).
     ccircles: Vec<[f32; 3]>,
+    /// Colours the user gave single lines (double-click): the line's key and an AutoCAD colour number.
+    line_cols: Vec<LineCol>,
+    /// The line whose colour strip is open, and where on the sheet it was clicked.
+    col_pick: Option<(LineKey, Pos2)>,
     /// Rectangles (x0, y0, x1, y1 on the sheet) where centre lines were erased.
     centre_cut: Vec<[f32; 5]>,
     /// A centre line being stretched: its original ends, its ends now, and whether the second end moves.
@@ -472,6 +476,8 @@ impl Default for State {
             base_shaded: false,
             clines: Vec::new(),
             ccircles: Vec::new(),
+            line_cols: Vec::new(),
+            col_pick: None,
             centre_cut: Vec::new(),
             cl_drag: None,
             erase: None,
@@ -540,6 +546,7 @@ impl State {
             "marks": self.marks,
             "clines": self.clines,
             "ccircles": self.ccircles,
+            "line_cols": self.line_cols.iter().map(|(v, k, c)| json!([v, k, c])).collect::<Vec<_>>(),
             "centre_cut": self.centre_cut,
             "dim_decimals": self.dim_decimals,
             "dim_text": self.dim_text, "dim_arrow": self.dim_arrow,
@@ -715,6 +722,8 @@ impl State {
         self.marks.clear();
         self.clines.clear();
         self.ccircles.clear();
+        self.line_cols.clear();
+        self.col_pick = None;
         self.centre_cut.clear();
         self.erase = None;
         self.shaded.clear();
@@ -808,6 +817,21 @@ impl State {
             self.dim_decimals = n as i32;
         }
         // Erased-centre frames are not restored: they were tied to where the views sat, and hid centre lines of views placed later.
+        if let Some(list) = d.get("line_cols").and_then(serde_json::Value::as_array) {
+            for m in list.iter().take(2000) {
+                let Some(a) = m.as_array() else { continue };
+                let v = a.first().and_then(serde_json::Value::as_i64);
+                let k: Vec<i64> = a.get(1).and_then(serde_json::Value::as_array).map(|k| k.iter().filter_map(serde_json::Value::as_i64).collect()).unwrap_or_default();
+                let c = a.get(2).and_then(serde_json::Value::as_u64);
+                if let (Some(v), [k0, k1, k2, k3], Some(c)) = (v, &k[..], c)
+                    && [*k0, *k1, *k2, *k3].iter().all(|t| t.abs() < 100_000_000)
+                    && v.abs() < 1000
+                    && c < 256
+                {
+                    self.line_cols.push((v as i32, [*k0 as i32, *k1 as i32, *k2 as i32, *k3 as i32], c as u8));
+                }
+            }
+        }
         if let Some(list) = d.get("ccircles").and_then(serde_json::Value::as_array) {
             for m in list.iter().take(200) {
                 let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
@@ -4471,8 +4495,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             painter.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
     }
+    let over = line_cols_map(&app.drawing.line_cols);
     for (layer, shape) in &sheet.items {
-        let s = stroke(*layer);
+        let mut s = stroke(*layer);
+        if let Some(c) = line_colour(&over, sheet, shape) {
+            s = Stroke::new(s.width, colour_of(c));
+        }
         match shape {
             Shape::Line(a, b) => {
                 if *layer == Layer::Hidden {
@@ -4851,6 +4879,94 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.drawing.sec_tool = None;
                 } else {
                     app.drawing.sec_tool = Some(picked);
+                }
+            }
+        }
+    }
+    // Double-click a line: a strip of colours appears beside it; pick one (or Auto) and the line takes it.
+    {
+        let idle = app.drawing.dim_tool.is_none()
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && app.drawing.sec_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool
+            && app.drawing.base.is_none()
+            && app.drawing.text_edit.is_none()
+            && app.drawing.cell_edit.is_none();
+        let pointer_sheet = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
+        if idle
+            && response.double_clicked()
+            && let Some(s) = pointer_sheet
+        {
+            app.drawing.col_pick = shape_near(sheet, s, 8.0 / px_per_mm).map(|k| (k, s));
+        } else if let Some((key, at)) = app.drawing.col_pick {
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                app.drawing.col_pick = None;
+            } else {
+                let accent = Tokens::get().accent;
+                // The picked line, marked with a halo.
+                for (_, shape) in &sheet.items {
+                    if shape_key(sheet, shape) == Some(key) {
+                        match shape {
+                            Shape::Line(a, b) => {
+                                painter.line_segment([map(*a), map(*b)], Stroke::new(7.0, accent.gamma_multiply(0.35)));
+                            }
+                            Shape::Poly(pts) => {
+                                painter.add(egui::Shape::line(pts.iter().map(|p| map(*p)).collect(), Stroke::new(7.0, accent.gamma_multiply(0.35))));
+                            }
+                            Shape::Circle(c, r) => {
+                                painter.add(egui::Shape::line(arc_points(*c, *r, 0.0, 360.0).into_iter().map(map).collect(), Stroke::new(7.0, accent.gamma_multiply(0.35))));
+                            }
+                            Shape::Arc(c, r, a0, a1) => {
+                                painter.add(egui::Shape::line(arc_points(*c, *r, *a0, *a1).into_iter().map(map).collect(), Stroke::new(7.0, accent.gamma_multiply(0.35))));
+                            }
+                            Shape::Text(..) => {}
+                        }
+                    }
+                }
+                let sw = 20.0;
+                let n = COLOURS.len() + 1;
+                let size = vec2(12.0 + n as f32 * (sw + 3.0), sw + 12.0);
+                let mut origin = map(at) + vec2(12.0, 12.0);
+                let room = response.rect;
+                origin.x = origin.x.min(room.right() - size.x - 4.0).max(room.left() + 4.0);
+                origin.y = origin.y.min(room.bottom() - size.y - 4.0).max(room.top() + 4.0);
+                let strip = Rect::from_min_size(origin, size);
+                painter.rect_filled(strip, 6.0, Color32::from_rgb(34, 36, 44));
+                painter.rect_stroke(strip, 6.0, Stroke::new(1.5, accent), egui::StrokeKind::Inside);
+                let current = app.drawing.line_cols.iter().find(|c| (c.0, c.1) == key).map(|c| c.2);
+                let mut chosen: Option<Option<u8>> = None;
+                let click = if response.clicked_by(egui::PointerButton::Primary) { response.interact_pointer_pos() } else { None };
+                for i in 0..n {
+                    let r = Rect::from_min_size(origin + vec2(6.0 + i as f32 * (sw + 3.0), 6.0), vec2(sw, sw));
+                    if i < COLOURS.len() {
+                        let (index, _, col) = COLOURS[i];
+                        painter.rect_filled(r, 3.0, col);
+                        if current == Some(index) {
+                            painter.rect_stroke(r.expand(2.0), 3.0, Stroke::new(2.0, Color32::WHITE), egui::StrokeKind::Outside);
+                        }
+                        if click.is_some_and(|q| r.contains(q)) {
+                            chosen = Some(Some(index));
+                        }
+                    } else {
+                        painter.rect_stroke(r, 3.0, Stroke::new(1.5, Color32::from_gray(200)), egui::StrokeKind::Inside);
+                        painter.text(r.center(), egui::Align2::CENTER_CENTER, "A", egui::FontId::proportional(13.0), Color32::from_gray(220));
+                        if click.is_some_and(|q| r.contains(q)) {
+                            chosen = Some(None);
+                        }
+                    }
+                }
+                if let Some(c) = chosen {
+                    app.drawing.line_cols.retain(|x| (x.0, x.1) != key);
+                    if let Some(index) = c
+                        && app.drawing.line_cols.len() < 2000
+                    {
+                        app.drawing.line_cols.push((key.0, key.1, index));
+                    }
+                    app.drawing.col_pick = None;
+                } else if click.is_some_and(|q| !strip.contains(q)) {
+                    app.drawing.col_pick = None;
                 }
             }
         }
@@ -5495,7 +5611,7 @@ fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
 }
 
 /// The sheet as a one-page vector PDF at paper size (mm → points), ready to print.
-fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4]) -> (String, f32, f32) {
+fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4], user_cols: &[LineCol]) -> (String, f32, f32) {
     use std::fmt::Write as _;
     let k = 72.0 / 25.4;
     let rgb = |l: Layer| -> (f32, f32, f32) {
@@ -5512,8 +5628,15 @@ fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4]) -> (String, f32, f32) {
     };
     let mut c = String::new();
     let _ = writeln!(c, "{k:.5} 0 0 {k:.5} 0 0 cm 1 J 1 j");
+    let over = line_cols_map(user_cols);
     for (layer, shape) in sheet.items.iter().take(400_000) {
-        let (r, g, b) = rgb(*layer);
+        let (r, g, b) = match line_colour(&over, sheet, shape) {
+            Some(n) => {
+                let c = colour_of(n);
+                (f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0)
+            }
+            None => rgb(*layer),
+        };
         let (width, dash) = match layer {
             Layer::Visible => (0.5, ""),
             Layer::Hidden => (0.25, "[1.5 1] 0 d"),
@@ -5624,8 +5747,8 @@ fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
     out
 }
 
-fn sheet_page(sheet: &Sheet, cols: [u8; 4], images: Vec<(Picture, [f32; 4])>) -> PdfPage {
-    let (content, w, h) = sheet_pdf_content(sheet, cols);
+fn sheet_page(sheet: &Sheet, cols: [u8; 4], user_cols: &[LineCol], images: Vec<(Picture, [f32; 4])>) -> PdfPage {
+    let (content, w, h) = sheet_pdf_content(sheet, cols, user_cols);
     PdfPage { content, w, h, images }
 }
 
@@ -5663,7 +5786,7 @@ fn print_all_sheets(app: &mut SolveApp) {
         refresh(app);
         let images = pdf_images(app);
         if let Some(sheet) = app.drawing.sheet.as_ref() {
-            doc.push(sheet_page(sheet, cols, images));
+            doc.push(sheet_page(sheet, cols, &app.drawing.line_cols, images));
         }
     }
     if let Some(page) = pages.get(back) {
@@ -5694,7 +5817,7 @@ fn print_sheet(app: &mut SolveApp) {
     }
     let images = pdf_images(app);
     let Some(sheet) = app.drawing.sheet.as_ref() else { return };
-    let bytes = pdf_document(&[sheet_page(sheet, app.drawing.colours, images)]);
+    let bytes = pdf_document(&[sheet_page(sheet, app.drawing.colours, &app.drawing.line_cols, images)]);
     let name = format!("{}-sheet{}.pdf", app.session.doc.name, app.drawing.page + 1);
     app.pick_save(&name, &["pdf"], move |app, path| {
         let Some(path) = path else { return };
@@ -5749,4 +5872,61 @@ fn chain_shapes(pts: &[Pos2], stroke: Stroke, unit: f32) -> Vec<egui::Shape> {
         }
     }
     out
+}
+
+/// A line the user coloured: the view it belongs to (-1 = the sheet itself) and where it lies, in 0.01 mm
+/// (relative to the view's centre in model mm, so it follows the view when that moves or is rescaled).
+type LineKey = (i32, [i32; 4]);
+type LineCol = (i32, [i32; 4], u8);
+
+/// The key of a drawn shape (None for text).
+fn shape_key(sheet: &Sheet, shape: &Shape) -> Option<LineKey> {
+    let (p, q) = match shape {
+        Shape::Line(a, b) => (*a, *b),
+        Shape::Poly(pts) => (*pts.first()?, *pts.last()?),
+        Shape::Circle(c, r) => (*c, pos2(c.x + r, c.y)),
+        Shape::Arc(c, r, a0, a1) => (*c, pos2(c.x + r, c.y + (a0 + a1))),
+        Shape::Text(..) => return None,
+    };
+    let mid = pos2((p.x + q.x) / 2.0, (p.y + q.y) / 2.0);
+    let inside = |b: &&(usize, f32, f32, f32, f32), margin: f32| (mid.x - b.1).abs() <= b.3 / 2.0 + margin && (mid.y - b.2).abs() <= b.4 / 2.0 + margin;
+    let found = sheet.boxes.iter().rev().find(|b| inside(b, 0.0)).or_else(|| sheet.boxes.iter().rev().find(|b| inside(b, 8.0)));
+    let q100 = |v: f32| (v * 100.0).round().clamp(-1.0e8, 1.0e8) as i32;
+    match found {
+        Some(b) => {
+            let k = sheet.scales.iter().find(|s| s.0 == b.0).map_or(1.0, |s| s.1).max(1e-6);
+            Some((b.0 as i32, [q100((p.x - b.1) / k), q100((p.y - b.2) / k), q100((q.x - b.1) / k), q100((q.y - b.2) / k)]))
+        }
+        None => Some((-1, [q100(p.x), q100(p.y), q100(q.x), q100(q.y)])),
+    }
+}
+
+/// The nearest non-text shape within `tol` mm of `c`.
+fn shape_near(sheet: &Sheet, c: Pos2, tol: f32) -> Option<LineKey> {
+    let mut best: Option<(f32, &Shape)> = None;
+    for (_, shape) in &sheet.items {
+        let d = match shape {
+            Shape::Line(a, b) => dist_to_segment(c, (*a, *b)),
+            Shape::Poly(pts) => pts.windows(2).filter_map(|w| Some(dist_to_segment(c, (*w.first()?, *w.get(1)?)))).fold(f32::MAX, f32::min),
+            Shape::Circle(ctr, r) => ((c - *ctr).length() - r).abs(),
+            Shape::Arc(ctr, r, _, _) => ((c - *ctr).length() - r).abs(),
+            Shape::Text(..) => continue,
+        };
+        if d <= tol && best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, shape));
+        }
+    }
+    best.and_then(|(_, shape)| shape_key(sheet, shape))
+}
+
+/// The colour number the user gave a shape, if any.
+fn line_colour(over: &std::collections::HashMap<LineKey, u8>, sheet: &Sheet, shape: &Shape) -> Option<u8> {
+    if over.is_empty() {
+        return None;
+    }
+    over.get(&shape_key(sheet, shape)?).copied()
+}
+
+fn line_cols_map(list: &[LineCol]) -> std::collections::HashMap<LineKey, u8> {
+    list.iter().map(|(v, k, c)| ((*v, *k), *c)).collect()
 }
