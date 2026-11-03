@@ -3723,7 +3723,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && (kind <= 2 || kind == 7)
             {
                 let (dx, dy) = ((pb.x - pa.x).abs(), (pb.y - pa.y).abs());
-                let ek = if kind != 7 { kind } else if dx >= 2.0 * dy { 0 } else if dy >= 2.0 * dx { 1 } else { 2 };
+                let ek = if kind != 7 { kind } else { smart_kind(pa, pb, h) };
                 let at = match DIM_KINDS[ek.min(6)].0 {
                     "horizontal" => h.y,
                     "vertical" => h.x,
@@ -3761,23 +3761,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // Smart: a circle is a diameter; two points pick horizontal, vertical or aligned by their direction.
                 let mut kind = kind;
                 if kind == 7 {
-                    kind = if picks.is_empty() && snap_circle(sheet, c, tol * 1.5).is_some() {
+                    kind = if picks.is_empty() && snap_circle(sheet, c, tol * 2.5).is_some() {
                         3
                     } else if let [a, b] = picks[..] {
-                        let (dx, dy) = ((b.x - a.x).abs(), (b.y - a.y).abs());
-                        if dx >= 2.0 * dy {
-                            0
-                        } else if dy >= 2.0 * dx {
-                            1
-                        } else {
-                            2
-                        }
+                        smart_kind(a, b, c)
                     } else {
                         0
                     };
                 }
                 let again = if app.drawing.dim_back { 7 } else { kind };
-                if kind == 5 || kind == 6 {
+                // Smart: a click on a line (away from its ends and corners) takes both its ends.
+                let seg_pick = if app.drawing.dim_tool.as_ref().is_some_and(|(k, p)| *k == 7 && p.is_empty()) && hit_pt.is_none() && snap_circle(sheet, c, tol * 2.5).is_none() { nearest_segment(sheet, c, tol) } else { None };
+                if let Some((a, b)) = seg_pick {
+                    app.drawing.dim_tool = Some((7, vec![a, b]));
+                } else if kind == 5 || kind == 6 {
                     // Balloon or note: the point on the part, then where it goes; balloons are numbered in turn.
                     if let Some(target) = picks.first().copied() {
                         let number = app.drawing.dims.iter().filter(|d| d.kind == 5).count() + 1;
@@ -3794,7 +3791,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let len = v.length().max(1e-6);
                         new_dim = Some(DimItem { kind, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0 });
                         app.drawing.dim_tool = Some((again, Vec::new()));
-                    } else if let Some((centre, r)) = snap_circle(sheet, c, tol * 1.5) {
+                    } else if let Some((centre, r)) = snap_circle(sheet, c, tol * 2.5) {
                         app.drawing.dim_tool = Some((kind, vec![centre, pos2(r, 0.0)]));
                     }
                 } else if picks.len() < 2 {
@@ -4151,6 +4148,45 @@ fn snap_to_front(placed: &[PlacedView], view: usize, at: Pos2) -> Pos2 {
         2..=4 => pos2(at.x, front.y as f32),
         _ => at,
     }
+}
+
+/// Smart dimension of two points: a nearly horizontal or vertical pair keeps its direction; a
+/// slanted pair is horizontal when the pointer is above or below the pair, vertical when it is
+/// beside it, and aligned (along the pair) when it is in between.
+fn smart_kind(a: Pos2, b: Pos2, h: Pos2) -> usize {
+    let (dx, dy) = ((b.x - a.x).abs(), (b.y - a.y).abs());
+    if dx >= 4.0 * dy {
+        return 0;
+    }
+    if dy >= 4.0 * dx {
+        return 1;
+    }
+    let out_x = h.x < a.x.min(b.x) || h.x > a.x.max(b.x);
+    let out_y = h.y < a.y.min(b.y) || h.y > a.y.max(b.y);
+    match (out_x, out_y) {
+        (true, false) => 1,
+        (false, true) => 0,
+        _ => 2,
+    }
+}
+
+/// The drawn straight edge nearest a sheet point, within `tol` (its two ends).
+fn nearest_segment(sheet: &Sheet, c: Pos2, tol: f32) -> Option<(Pos2, Pos2)> {
+    sheet
+        .items
+        .iter()
+        .flat_map(|(l, sh)| -> Vec<(Pos2, Pos2)> {
+            match (l, sh) {
+                (Layer::Visible, Shape::Line(a, b)) => vec![(*a, *b)],
+                (Layer::Visible, Shape::Poly(pts)) => pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).collect(),
+                _ => Vec::new(),
+            }
+        })
+        .filter(|(a, b)| (*b - *a).length() >= 1.0)
+        .map(|seg| (dist_to_segment(c, seg), seg))
+        .filter(|(d, _)| *d <= tol)
+        .min_by(|x, y| x.0.total_cmp(&y.0))
+        .map(|(_, seg)| seg)
 }
 
 /// A leader's far end, turned onto the nearest multiple of 15 degrees from the spot it points at
