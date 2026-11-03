@@ -3421,7 +3421,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
                     label: None,
-                    colour: false,
+                    colour: app.drawing.placed.get(parent).is_some_and(|v| v.colour),
                     rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
                         (true, 2 | 3, 1 | 5) => if dx >= 0.0 { 1 } else { 3 },
                         (true, 1 | 5, 2 | 3) => if dy >= 0.0 { 1 } else { 3 },
