@@ -399,6 +399,8 @@ pub struct State {
     proj_preview: Option<(String, Option<Sheet>)>,
     /// Per-design views and dimensions kept between runs, by design name.
     saved_designs: serde_json::Map<String, serde_json::Value>,
+    /// The design the views on this page belong to (they are kept under its name).
+    owner: String,
     /// Every sheet of the drawing as saved JSON (the current one is refreshed when switching).
     pages: Vec<serde_json::Value>,
     page: usize,
@@ -508,6 +510,7 @@ impl Default for State {
             note_text: "NOTE".into(),
             base: None,
             saved_designs: serde_json::Map::new(),
+            owner: String::new(),
             pages: Vec::new(),
             page: 0,
         }
@@ -546,6 +549,7 @@ impl State {
     /// Everything worth keeping between runs: the sheet settings for all designs, and this
     /// design's views, dimensions and title block.
     pub fn prefs(&self, design: &str) -> serde_json::Value {
+        let design = if self.owner.is_empty() { design } else { self.owner.as_str() };
         let mut designs = self.saved_designs.clone();
         let pages = self.all_pages();
         if !design.is_empty() && pages.iter().any(|p| p.get("views").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty()) || p.get("dims").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty())) {
@@ -651,6 +655,23 @@ impl State {
     }
 
     /// Bring back the sheets saved for this design (only into an empty drawing).
+    /// The drawing now on screen belongs to another design: keep it under that design's name and
+    /// start empty, so erased centre lines, views and dimensions do not carry over.
+    fn switch_owner(&mut self, design: &str) {
+        if !self.owner.is_empty() && self.owner != design {
+            let pages = self.all_pages();
+            let has_content = pages.iter().any(|p| p.get("views").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty()) || p.get("dims").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty()));
+            if has_content {
+                self.saved_designs.insert(self.owner.chars().take(120).collect(), json!({"pages": pages}));
+            }
+            self.pages.clear();
+            self.page = 0;
+            self.load_page(&json!({}));
+            self.title.clear();
+        }
+        self.owner = design.to_string();
+    }
+
     fn restore_design(&mut self, design: &str) {
         if !self.placed.is_empty() || !self.dims.is_empty() || self.pages.len() > 1 {
             return;
@@ -2714,6 +2735,7 @@ pub fn enter(app: &mut SolveApp) -> Result<(), String> {
     app.drawing.design_camera = Some((app.cam, app.ui.perspective));
     app.ui.tab = "DRAWING".into();
     let design = app.session.doc.name.clone();
+    app.drawing.switch_owner(&design);
     app.drawing.restore_design(&design);
     if app.drawing.title.is_empty() {
         app.drawing.title = app.session.doc.name.clone();
@@ -2816,6 +2838,10 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         });
                         dirty |= crate::ui_kit::checkbox(ui, "Bolt circle centreline", &mut app.drawing.bolt).changed();
+                        if !app.drawing.centre_cut.is_empty() && crate::ui_kit::button(ui, &format!("Bring back erased centre lines ({})", app.drawing.centre_cut.len()), crate::ui_kit::Button::Small).clicked() {
+                            app.drawing.centre_cut.clear();
+                            dirty = true;
+                        }
                         ui.label("Centre line length past the circle (mm, 0–50)");
                         dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_centre_extra"), &mut app.drawing.centre_extra, "3", false, 6).changed();
                     }
