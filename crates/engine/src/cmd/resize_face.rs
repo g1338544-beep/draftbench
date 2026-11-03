@@ -253,3 +253,60 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     }
     Ok(json!({"body": body, "resized": targets.len(), "diameter": d}))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(s: &mut Session, id: &str, p: Value) -> Value {
+        match s.execute(id, &p) {
+            Ok(v) => v,
+            Err(e) => panic!("{id} {p}: {e}"),
+        }
+    }
+
+    fn plate() -> Session {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 10, "body_name": "Plate"}));
+        for x in [10.0, 30.0] {
+            run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 12, "base": [x, 15, -1], "operation": "cut", "targets": ["Plate"]}));
+        }
+        run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 12, "base": [50, 15, -1], "operation": "cut", "targets": ["Plate"]}));
+        s
+    }
+
+    fn volume(s: &mut Session) -> f64 {
+        run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(0.0)
+    }
+
+    #[test]
+    fn equal_holes_are_counted_and_follow_each_other() {
+        let mut s = plate();
+        let found = run(&mut s, "face.same_size", json!({"face": [13.0, 15.0, 5.0]}));
+        assert_eq!(found["count"], 2);
+        let before = volume(&mut s);
+        let done = run(&mut s, "face.resize", json!({"face": [13.0, 15.0, 5.0], "diameter": 8}));
+        assert_eq!(done["resized"], 2);
+        let pi = std::f64::consts::PI;
+        let removed = 2.0 * pi * (16.0 - 9.0) * 10.0;
+        assert!((before - volume(&mut s) - removed).abs() < removed * 0.02, "{} {}", before, volume(&mut s));
+    }
+
+    #[test]
+    fn only_the_picked_hole_changes_when_asked() {
+        let mut s = plate();
+        let done = run(&mut s, "face.resize", json!({"face": [13.0, 15.0, 5.0], "diameter": 5, "same_size": false}));
+        assert_eq!(done["resized"], 1);
+        let found = run(&mut s, "face.same_size", json!({"face": [33.0, 15.0, 5.0]}));
+        assert_eq!(found["count"], 1);
+    }
+
+    #[test]
+    fn nonsense_diameters_and_picks_are_refused() {
+        let mut s = plate();
+        assert!(s.execute("face.resize", &json!({"face": [13.0, 15.0, 5.0], "diameter": -1})).is_err());
+        assert!(s.execute("face.resize", &json!({"face": [13.0, 15.0, 5.0], "diameter": "x"})).is_err());
+        assert!(s.execute("face.resize", &json!({"diameter": 5})).is_err());
+        assert!(s.execute("face.resize", &json!({"face": [0.0, 0.0, 100.0], "diameter": 5})).is_err());
+    }
+}
