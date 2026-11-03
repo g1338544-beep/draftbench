@@ -331,7 +331,10 @@ fn manual(
             None => caption,
         };
         if !caption.trim().is_empty() {
-            text("TEXT", Vec2::new(x, lo.y - if dims { 18.0 } else { 8.0 }), th, caption, &mut entities);
+            // The caption can be dragged off its place: `cap` is its move in mm.
+            let cap: Vec<f64> = item.get("cap").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).filter(|v| v.is_finite()).collect()).unwrap_or_default();
+            let (cdx, cdy) = (cap.first().copied().unwrap_or(0.0).clamp(-2000.0, 2000.0), cap.get(1).copied().unwrap_or(0.0).clamp(-2000.0, 2000.0));
+            text("TEXT", Vec2::new(x + cdx, lo.y - if dims { 18.0 } else { 8.0 } + cdy), th, caption, &mut entities);
         }
         scales.insert(index, scale);
         boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale}));

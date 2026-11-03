@@ -83,6 +83,8 @@ struct PlacedView {
     rot: u8,
     /// The caption under the view: `None` = the automatic one (name and scale), an empty text hides it.
     label: Option<String>,
+    /// How far the caption was dragged from its place (sheet mm).
+    cap: (f32, f32),
     /// Drawn in 3D colour behind its lines (the 3D View button): same place and scale as the view.
     colour: bool,
 }
@@ -282,6 +284,8 @@ pub struct State {
     /// The view whose caption is selected on the sheet, and the one being edited with its text.
     caption_sel: Option<usize>,
     caption_edit: Option<usize>,
+    /// A caption being dragged: the view, the pointer at the start and the caption's move then.
+    cap_drag: Option<(usize, Pos2, f32, f32)>,
     caption_buf: String,
     /// Whether a view placed from the Base View window shows its hidden lines (dashed).
     base_dashed: bool,
@@ -409,6 +413,7 @@ impl Default for State {
             erase_tool: false,
             caption_sel: None,
             caption_edit: None,
+            cap_drag: None,
             caption_buf: String::new(),
             base_dashed: true,
             base_shaded: false,
@@ -473,7 +478,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -650,6 +655,7 @@ impl State {
                     rot: v.get("rot").and_then(serde_json::Value::as_u64).map_or(0, |n| (n % 4) as u8),
                     label: v.get("label").and_then(serde_json::Value::as_str).map(|t| t.chars().take(80).collect()),
                     colour: v.get("colour").and_then(serde_json::Value::as_bool).unwrap_or(false),
+                    cap: v.get("cap").and_then(serde_json::Value::as_array).and_then(|a| Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32))).filter(|(x, y)| x.is_finite() && y.is_finite()).unwrap_or((0.0, 0.0)),
                 });
             }
         }
@@ -955,6 +961,9 @@ fn params(st: &State) -> Value {
             if let Some(t) = &v.label {
                 o["label"] = json!(t);
             }
+            if v.cap != (0.0, 0.0) {
+                o["cap"] = json!([v.cap.0, v.cap.1]);
+            }
             if let Some((yaw, pitch)) = v.custom {
                 o["yaw"] = json!(yaw);
                 o["pitch"] = json!(pitch);
@@ -1164,6 +1173,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         custom: None,
         rot: 0,
         label: None,
+        cap: (0.0, 0.0),
         colour: false,
     });
     app.drawing.selected = Some(n);
@@ -1185,6 +1195,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         custom: None,
         rot,
         label: None,
+        cap: (0.0, 0.0),
         colour: false,
     });
     let mut p = params(&app.drawing);
@@ -2817,7 +2828,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let dtol = 18.0 / m.px_per_mm();
         let dim_hit = |s: Pos2| dims.iter().enumerate().rev().find(|(_, d)| dim_parts(d).into_iter().any(|seg| dist_to_segment(s, seg) <= dtol)).map(|(i, _)| i);
         // The caption under a view: the strip below its frame.
-        let cap_hit = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= 30.0 && s.y <= b.2 - b.4 / 2.0 - 1.0 && s.y >= b.2 - b.4 / 2.0 - 24.0).map(|b| b.0);
+        let caps = &app.drawing.placed;
+        let cap_hit = |s: Pos2| {
+            sheet.boxes.iter().rev().find(|b| {
+                let (cx, cy) = caps.get(b.0).map_or((0.0, 0.0), |v| v.cap);
+                (s.x - b.1 - cx).abs() <= 30.0 && s.y <= b.2 - b.4 / 2.0 - 1.0 + cy && s.y >= b.2 - b.4 / 2.0 - 24.0 + cy
+            }).map(|b| b.0)
+        };
         let centre_hit = |s: Pos2| {
             sheet.items.iter().find_map(|(l, sh)| match (l, sh) {
                 (Layer::Center, Shape::Line(a, b)) if dist_to_segment(s, (*a, *b)) <= tol => Some((*a, *b)),
@@ -2910,6 +2927,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.erase = Some((s, s));
             app.drawing.selected = None;
             app.drawing.sel_dim = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            && let Some(v) = cap_hit(s).filter(|v| app.drawing.placed.get(*v).is_some_and(|p| p.label.as_deref() != Some("")))
+        {
+            // A view's caption: drag it anywhere.
+            let (cx, cy) = app.drawing.placed.get(v).map_or((0.0, 0.0), |p| p.cap);
+            app.drawing.cap_drag = Some((v, s, cx, cy));
+            app.drawing.caption_sel = Some(v);
+            app.drawing.selected = None;
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
@@ -2990,6 +3017,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 app.drawing.sel_centre = Some((la, lb));
             }
+        }
+    }
+    // Dragging a view caption: it follows the pointer, and letting go keeps it there.
+    if let (Some((v, from, cx0, cy0)), Some(m)) = (app.drawing.cap_drag, &map) {
+        if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            && let Some(p) = app.drawing.placed.get_mut(v)
+        {
+            p.cap = (((cx0 + s.x - from.x) * 10.0).round() / 10.0, ((cy0 + s.y - from.y) * 10.0).round() / 10.0);
+        }
+        if response.drag_stopped() || !response.dragged() {
+            app.drawing.cap_drag = None;
+            refresh(app);
         }
     }
     // Dragging a title block text: it follows the pointer, and letting go keeps it there.
@@ -3398,7 +3437,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -3578,6 +3617,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
                     label: None,
+                    cap: (0.0, 0.0),
                     colour: app.drawing.placed.get(parent).is_some_and(|v| v.colour),
                     rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
                         (true, 2 | 3, 1 | 5) => if dx >= 0.0 { 1 } else { 3 },
@@ -3933,7 +3973,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         };
         if app.drawing.caption_sel == Some(b.0) {
             let (top, bottom) = if app.drawing.placed.get(b.0).is_some_and(|v| v.dims) { (13.0, 23.0) } else { (3.0, 13.0) };
-            let r = Rect::from_two_pos(map(pos2(cx - 28.0, cy - b.4 / 2.0 - top)), map(pos2(cx + 28.0, cy - b.4 / 2.0 - bottom)));
+            let (ox, oy) = app.drawing.placed.get(b.0).map_or((0.0, 0.0), |v| v.cap);
+            let r = Rect::from_two_pos(map(pos2(cx + ox - 28.0, cy + oy - b.4 / 2.0 - top)), map(pos2(cx + ox + 28.0, cy + oy - b.4 / 2.0 - bottom)));
             painter.rect_stroke(r, 2.0, Stroke::new(1.5, accent), egui::StrokeKind::Outside);
         }
         if selected || dragging {
