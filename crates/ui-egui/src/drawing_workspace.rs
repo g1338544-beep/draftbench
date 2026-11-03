@@ -4899,7 +4899,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && response.double_clicked()
             && let Some(s) = pointer_sheet
         {
-            app.drawing.col_pick = shape_near(sheet, s, 8.0 / px_per_mm).map(|k| (k, s));
+            app.drawing.col_pick = shape_near(sheet, s, 10.0 / px_per_mm).map(|k| (k, s));
         } else if let Some((key, at)) = app.drawing.col_pick {
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 app.drawing.col_pick = None;
@@ -4969,6 +4969,56 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.drawing.col_pick = None;
                 }
             }
+        }
+    }
+    // The pointer's target is lit before any click: the line, circle or text under it, with its name.
+    {
+        let idle = app.drawing.dim_tool.is_none()
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && app.drawing.sec_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool
+            && app.drawing.base.is_none()
+            && app.drawing.col_pick.is_none()
+            && app.drawing.drag.is_none()
+            && app.drawing.drag_dim.is_none()
+            && app.drawing.cell_drag.is_none()
+            && app.drawing.ft_drag.is_none()
+            && app.drawing.fl_drag.is_none()
+            && app.drawing.grid_drag.is_none()
+            && !response.dragged();
+        if idle
+            && let Some(hp) = response.hover_pos()
+            && let Some(h) = m.to_sheet(hp)
+            && let Some((layer, shape)) = pick_item(sheet, h, 10.0 / px_per_mm)
+        {
+            let accent = Tokens::get().accent;
+            let halo = Stroke::new(8.0, accent.gamma_multiply(0.4));
+            match shape {
+                Shape::Line(a, b) => painter.line_segment([map(*a), map(*b)], halo),
+                Shape::Poly(pts) => {
+                    painter.add(egui::Shape::line(pts.iter().map(|q| map(*q)).collect(), halo));
+                }
+                Shape::Circle(c, r) => {
+                    painter.add(egui::Shape::line(arc_points(*c, *r, 0.0, 360.0).into_iter().map(map).collect(), halo));
+                }
+                Shape::Arc(c, r, a0, a1) => {
+                    painter.add(egui::Shape::line(arc_points(*c, *r, *a0, *a1).into_iter().map(map).collect(), halo));
+                }
+                Shape::Text(p, th, t, _, _) => {
+                    let w = (t.chars().count().max(1) as f32) * 0.6 * th;
+                    let r = Rect::from_two_pos(map(pos2(p.x - w / 2.0 - 0.8, p.y - 0.8)), map(pos2(p.x + w / 2.0 + 0.8, p.y + th * 1.2 + 0.8)));
+                    painter.rect_filled(r, 2.0, accent.gamma_multiply(0.2));
+                    painter.rect_stroke(r, 2.0, Stroke::new(1.5, accent), egui::StrokeKind::Outside);
+                }
+            }
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            let galley = painter.layout_no_wrap(item_name(layer, shape), egui::FontId::proportional(Tokens::get().font_body), Color32::WHITE);
+            let at = hp + vec2(14.0, 16.0);
+            let box_rect = Rect::from_min_size(at, galley.size() + vec2(10.0, 6.0));
+            painter.rect_filled(box_rect, 4.0, Color32::from_rgb(34, 36, 44));
+            painter.galley(at + vec2(5.0, 3.0), galley, Color32::WHITE);
         }
     }
     // Placing a dimension: snap to the drawn geometry, three clicks.
@@ -5929,4 +5979,56 @@ fn line_colour(over: &std::collections::HashMap<LineKey, u8>, sheet: &Sheet, sha
 
 fn line_cols_map(list: &[LineCol]) -> std::collections::HashMap<LineKey, u8> {
     list.iter().map(|(v, k, c)| ((*v, *k), *c)).collect()
+}
+
+/// What a pointer at `c` is over on the sheet: a text (its box) first, else the nearest line, circle or arc within `tol` mm.
+fn pick_item(sheet: &Sheet, c: Pos2, tol: f32) -> Option<(Layer, &Shape)> {
+    for (layer, shape) in sheet.items.iter().rev() {
+        if let Shape::Text(p, h, t, angle, _) = shape {
+            let w = (t.chars().count().max(1) as f32) * 0.6 * h;
+            let hit = if angle.rem_euclid(360.0).abs() < 0.01 {
+                c.x >= p.x - w / 2.0 - tol * 0.5 && c.x <= p.x + w / 2.0 + tol * 0.5 && c.y >= p.y - tol * 0.5 && c.y <= p.y + h * 1.2 + tol * 0.5
+            } else {
+                (c - *p).length() <= w / 2.0 + tol
+            };
+            if hit {
+                return Some((*layer, shape));
+            }
+        }
+    }
+    let mut best: Option<(f32, Layer, &Shape)> = None;
+    for (layer, shape) in &sheet.items {
+        let d = match shape {
+            Shape::Line(a, b) => dist_to_segment(c, (*a, *b)),
+            Shape::Poly(pts) => pts.windows(2).filter_map(|w| Some(dist_to_segment(c, (*w.first()?, *w.get(1)?)))).fold(f32::MAX, f32::min),
+            Shape::Circle(ctr, r) => ((c - *ctr).length() - r).abs(),
+            Shape::Arc(ctr, r, _, _) => ((c - *ctr).length() - r).abs(),
+            Shape::Text(..) => continue,
+        };
+        if d <= tol && best.is_none_or(|(b, _, _)| d < b) {
+            best = Some((d, *layer, shape));
+        }
+    }
+    best.map(|(_, l, sh)| (l, sh))
+}
+
+/// A short name for what `pick_item` found, shown beside the pointer.
+fn item_name(layer: Layer, shape: &Shape) -> String {
+    match shape {
+        Shape::Text(_, _, t, _, _) => format!("Text: {}", t.chars().take(28).collect::<String>()),
+        Shape::Circle(..) | Shape::Arc(..) => match layer {
+            Layer::Center => "Centre circle".to_string(),
+            Layer::Hidden => "Hidden circle".to_string(),
+            _ => "Circle / arc".to_string(),
+        },
+        _ => match layer {
+            Layer::Visible => "Visible line",
+            Layer::Hidden => "Hidden line",
+            Layer::Dim => "Dimension line",
+            Layer::Sheet => "Sheet / title block line",
+            Layer::Center => "Centre line",
+            Layer::Text => "Line",
+        }
+        .to_string(),
+    }
 }
