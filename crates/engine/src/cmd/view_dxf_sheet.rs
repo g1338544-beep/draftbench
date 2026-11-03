@@ -120,7 +120,7 @@ fn manual(
     let mut infos: std::collections::BTreeMap<usize, ViewInfo> = std::collections::BTreeMap::new();
     // Views a cutting line can be drawn on, and the sections to draw: (angles, x, y, centre, scale, lo, hi) and (axis, position, angles, letter).
     let mut frames: Vec<((f64, f64), f64, f64, Vec2, f64, Vec2, Vec2)> = Vec::new();
-    let mut cuts: Vec<(usize, f64, (f64, f64), char)> = Vec::new();
+    let mut cuts: Vec<(usize, f64, (f64, f64), char, Option<[f64; 4]>)> = Vec::new();
     let mut centre_used = false;
     let unit = |v: Vec2| {
         let n = (v.x * v.x + v.y * v.y).sqrt();
@@ -142,7 +142,20 @@ fn manual(
         };
         // A section view: the outline where a plane cuts the bodies, hatched, instead of the
         // projected edges. `at` blank means the middle of the bodies along the axis.
-        let section = item.get("section").and_then(|sec| {
+        // A cutting line drawn by the user on the Top view: x1, y1, x2, y2 in model mm. The section looks at the
+        // vertical plane through it, reading along the line.
+        let section_line: Option<[f64; 4]> = item.get("section").and_then(|sec| sec.get("line")).and_then(Value::as_array).and_then(|a| {
+            let n: Vec<f64> = a.iter().filter_map(Value::as_f64).collect();
+            match n[..] {
+                [x1, y1, x2, y2] if n.iter().all(|v| v.is_finite() && v.abs() < 1e5) && ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt() > 1e-6 => Some([x1, y1, x2, y2]),
+                _ => None,
+            }
+        });
+        let custom = match section_line {
+            Some([x1, y1, x2, y2]) => Some(((-(y2 - y1)).atan2(x2 - x1), 0.0)),
+            None => custom,
+        };
+        let section: Option<(usize, Option<f64>)> = if section_line.is_some() { Some((3, None)) } else { item.get("section").and_then(|sec| {
             let axis = match sec.get("axis").and_then(Value::as_str)? {
                 "x" => 0,
                 "y" => 1,
@@ -150,11 +163,18 @@ fn manual(
                 _ => return None,
             };
             Some((axis, sec.get("at").and_then(Value::as_f64).filter(|v| v.is_finite())))
-        });
+        }) };
         let mut section_at = 0.0;
         let all = if let Some((axis, at)) = section {
             section_at = at.unwrap_or_else(|| middle(scene, axis));
-            let cut = cut_outline(scene, custom.unwrap_or_else(|| view.angles()), axis, section_at);
+            let cut = match section_line {
+                Some([x1, y1, x2, y2]) => {
+                    let len = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt().max(1e-9);
+                    let (nx, ny) = (-(y2 - y1) / len, (x2 - x1) / len);
+                    cut_plane(scene, custom.unwrap_or_else(|| view.angles()), Vec3::new(nx, ny, 0.0), nx * x1 + ny * y1)
+                }
+                None => cut_outline(scene, custom.unwrap_or_else(|| view.angles()), axis, section_at),
+            };
             if cut.is_empty() {
                 return Err(bad(CMD, "the section plane does not cut any visible body"));
             }
@@ -231,7 +251,7 @@ fn manual(
         let letter = char::from(b'A' + cuts.len().min(25) as u8);
         match section {
             None => frames.push((angles, x, y, c, scale, all.lo, all.hi)),
-            Some((axis, _)) => cuts.push((axis, section_at, angles, letter)),
+            Some((axis, _)) => cuts.push((axis, section_at, angles, letter, section_line)),
         }
         if section.is_some() {
             let segments: Vec<(Vec2, Vec2)> = all.lines.iter().map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
@@ -340,6 +360,7 @@ fn manual(
             });
         }
         let caption = match section {
+            Some((axis, _)) if axis > 2 => format!("Section {letter}-{letter}  {}", ratio_label(scale)),
             Some((axis, _)) => format!("Section {letter}-{letter} ({}={})  {}", ["X", "Y", "Z"].get(axis).copied().unwrap_or("?"), trim_mm(section_at), ratio_label(scale)),
             None => format!("{}  {}", if custom.is_some() { "Model view" } else { view_name(view) }, ratio_label(scale)),
         };
@@ -360,7 +381,7 @@ fn manual(
     }
     // The cutting line of each section on the views it crosses: a chain line with arrows toward the
     // direction of sight, and the section's letter at both ends.
-    for (axis, at, sec_angles, letter) in &cuts {
+    for (axis, at, sec_angles, letter, sec_line) in &cuts {
         let sec_cam = Camera { target: Vec3::ZERO, yaw: sec_angles.0, pitch: sec_angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
         let (_, _, back) = sec_cam.basis();
         let e = match axis {
@@ -375,7 +396,16 @@ fn manual(
             let (vx, vy) = (back.dot(right), back.dot(up));
             let to_sheet = |q: Vec2| Vec2::new(x + (q.x - c.x) * scale, y + (q.y - c.y) * scale);
             // `along`: the direction the line runs in the view, `sight`: where the arrows point.
-            let (p1, p2, sight) = if sx.abs() > 0.99 {
+            let (p1, p2, sight) = if let Some([x1, y1, x2, y2]) = sec_line {
+                // A drawn cutting line shows on the Top view (looking straight down).
+                let (_, _, fback) = cam.basis();
+                if fback.z.abs() < 0.99 {
+                    continue;
+                }
+                let proj = |px: f64, py: f64| Vec2::new(Vec3::new(px, py, 0.0).dot(right), Vec3::new(px, py, 0.0).dot(up));
+                let Some(s) = unit(Vec2::new(-vx, -vy)) else { continue };
+                (proj(*x1, *y1), proj(*x2, *y2), s)
+            } else if sx.abs() > 0.99 {
                 let u = at * sx;
                 (Vec2::new(u, lo.y), Vec2::new(u, hi.y), Vec2::new(-vx.signum(), 0.0))
             } else if sy.abs() > 0.99 {
@@ -571,14 +601,21 @@ fn middle(scene: &meshes::Scene, axis: usize) -> f64 {
 }
 
 /// Where the plane `axis = at` cuts the bodies, projected with `view`: loose segments.
-fn cut_outline(scene: &meshes::Scene, (yaw, pitch): (f64, f64), axis: usize, at: f64) -> Vec<(Vec2, Vec2)> {
+fn cut_outline(scene: &meshes::Scene, angles: (f64, f64), axis: usize, at: f64) -> Vec<(Vec2, Vec2)> {
+    let normal = match axis {
+        0 => Vec3::new(1.0, 0.0, 0.0),
+        1 => Vec3::new(0.0, 1.0, 0.0),
+        _ => Vec3::new(0.0, 0.0, 1.0),
+    };
+    cut_plane(scene, angles, normal, at)
+}
+
+/// Where the plane `normal · p = offset` cuts the bodies, projected with `view`: loose segments.
+fn cut_plane(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, offset: f64) -> Vec<(Vec2, Vec2)> {
     let cam = Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
     let (right, up, _) = cam.basis();
-    let along = |v: Vec3| match axis {
-        0 => v.x,
-        1 => v.y,
-        _ => v.z,
-    };
+    let along = |v: Vec3| v.dot(normal);
+    let at = offset;
     let mut out = Vec::new();
     for placed in &scene.placements {
         let Some(mesh) = scene.meshes.get(placed.mesh) else { continue };

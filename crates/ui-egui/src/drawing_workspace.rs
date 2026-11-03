@@ -76,6 +76,8 @@ struct PlacedView {
     dims: bool,
     /// A section cut: the world axis (0 X, 1 Y, 2 Z) and the position (blank = the middle).
     section: Option<(usize, String)>,
+    /// A section along a line drawn on the Top view: x1, y1, x2, y2 in model mm.
+    section_line: Option<[f32; 4]>,
     /// Projected from another view: its index, and whether it sits beside it (shares the y
     /// position) rather than above or below it (shares x).
     align: Option<(usize, bool)>,
@@ -306,6 +308,8 @@ pub struct State {
     mark_tool: bool,
     /// What the Centre Mark tool places: 0 a cross, 1 a centre line along two clicked points (any tilt), 2 a circular centre line (centre, then a point on it).
     mark_mode: u8,
+    /// The Section View tool: the points of the cutting line picked so far.
+    sec_tool: Option<Vec<Pos2>>,
     mark_pts: Vec<Pos2>,
     /// The Erase Centre tool: a click or a dragged frame removes the centre lines and marks it touches.
     erase_tool: bool,
@@ -455,6 +459,7 @@ impl Default for State {
             marks: Vec::new(),
             mark_tool: false,
             mark_mode: 0,
+            sec_tool: None,
             mark_pts: Vec::new(),
             erase_tool: false,
             caption_sel: None,
@@ -526,7 +531,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -725,6 +730,13 @@ impl State {
                     section: v.get("section").and_then(serde_json::Value::as_array).and_then(|a| {
                         let axis = a.first()?.as_u64().filter(|n| *n <= 2)? as usize;
                         Some((axis, a.get(1)?.as_str()?.chars().take(12).collect()))
+                    }),
+                    section_line: v.get("section_line").and_then(serde_json::Value::as_array).and_then(|a| {
+                        let n: Vec<f32> = a.iter().filter_map(|t| t.as_f64().map(|t| t as f32)).collect();
+                        match n[..] {
+                            [x1, y1, x2, y2] if n.iter().all(|t| t.is_finite() && t.abs() < 1e5) => Some([x1, y1, x2, y2]),
+                            _ => None,
+                        }
                     }),
                     custom: v.get("custom").and_then(serde_json::Value::as_array).and_then(|a| {
                         let (y, p) = (a.first()?.as_f64()?, a.get(1)?.as_f64()?);
@@ -1083,6 +1095,9 @@ fn params(st: &State) -> Value {
                 }
                 o["section"] = sec;
             }
+            if let Some(l) = v.section_line {
+                o["section"] = json!({ "line": l });
+            }
             if let Ok(k) = v.scale.trim().parse::<f64>()
                 && k.is_finite()
                 && k > 0.0
@@ -1278,6 +1293,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         dashed: true,
         dims: false,
         section: None,
+        section_line: None,
         align: None,
         custom: None,
         rot: 0,
@@ -1300,6 +1316,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         dashed: app.drawing.base_dashed,
         dims: false,
         section: None,
+        section_line: None,
         align: None,
         custom: None,
         rot,
@@ -1905,6 +1922,13 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
         "drawing.ribbon.centreerase" => {
             app.drawing.erase_tool = !app.drawing.erase_tool;
             app.drawing.mark_tool = false;
+            app.drawing.cline_tool = None;
+            app.drawing.dim_tool = None;
+        }
+        "drawing.ribbon.section" => {
+            app.drawing.sec_tool = if app.drawing.sec_tool.is_some() { None } else { Some(Vec::new()) };
+            app.drawing.mark_tool = false;
+            app.drawing.erase_tool = false;
             app.drawing.cline_tool = None;
             app.drawing.dim_tool = None;
         }
@@ -2988,11 +3012,14 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             if toggled {
                                 cut = !cut;
                                 v.section = cut.then(|| (0, String::new()));
+                                v.section_line = None;
                                 // Look straight at the cut: right for X, front for Y, top for Z.
                                 v.view = 2;
                                 dirty = true;
                             }
-                            if let Some((axis, at)) = &mut v.section {
+                            if v.section_line.is_none()
+                                && let Some((axis, at)) = &mut v.section
+                            {
                                 ui.horizontal(|ui| {
                                     for (i, n) in ["X", "Y", "Z"].iter().enumerate() {
                                         if ui.add(egui::Button::selectable(*axis == i, *n)).clicked() {
@@ -4552,6 +4579,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dashed,
                     dims: false,
                     section: None,
+                    section_line: None,
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
                     label: None,
@@ -4759,6 +4787,55 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     } else {
                         app.drawing.mark_pts.push(q);
                     }
+                }
+            }
+        }
+    }
+    // Section View: click two points on the Top view (hole centres snap); the cutting line runs between them.
+    let mut sec_new: Option<([f32; 4], f32, f32, f32)> = None;
+    let mut sec_msg: Option<String> = None;
+    if let Some(mut picked) = app.drawing.sec_tool.clone() {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
+            app.drawing.sec_tool = None;
+        } else {
+            let tol = 14.0 / px_per_mm;
+            let accent = Tokens::get().accent;
+            let hover = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
+            let pick = |c: Pos2| -> Pos2 { snap_point(sheet, c, tol).unwrap_or(c) };
+            let hint = if picked.is_empty() { "Section View: click the first point of the cutting line on the Top view (Esc ends)" } else { "Section View: click the second point" };
+            painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
+            if let Some(h) = hover {
+                painter.circle_stroke(map(pick(h)), 7.0, Stroke::new(2.0, accent));
+                if let Some(first) = picked.first().copied() {
+                    painter.line_segment([map(first), map(pick(h))], Stroke::new(2.0, accent));
+                }
+            }
+            if response.clicked_by(egui::PointerButton::Primary)
+                && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            {
+                picked.push(pick(c));
+                if let [a, b] = picked[..] {
+                    // The Top view the line is drawn on: the one under the first point, else the first Top view.
+                    let tops: Vec<&(usize, f32, f32, f32, f32)> = sheet
+                        .boxes
+                        .iter()
+                        .filter(|bx| app.drawing.placed.get(bx.0).is_some_and(|v| v.view == 1 && v.rot == 0 && v.section.is_none() && v.custom.is_none()))
+                        .collect();
+                    let top = tops.iter().find(|bx| (a.x - bx.1).abs() <= bx.3 / 2.0 && (a.y - bx.2).abs() <= bx.4 / 2.0).or(tops.first()).copied().copied();
+                    let k = top.and_then(|bx| sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1));
+                    let ctr = top.and_then(|bx| sheet.centres.iter().find(|s| s.0 == bx.0).map(|s| (s.1, s.2)));
+                    match (top, k, ctr) {
+                        (Some(bx), Some(k), Some((cx, cy))) if k > 0.0 && (b - a).length() > 0.5 => {
+                            let model = |q: Pos2| (cx + (q.x - bx.1) / k, cy + (q.y - bx.2) / k);
+                            let (p1, p2) = (model(a), model(b));
+                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, (bx.1 + bx.3 / 2.0 + 70.0).min(sheet.width - 40.0), bx.2));
+                        }
+                        (None, _, _) | (_, None, _) | (_, _, None) => sec_msg = Some("Section View needs a Top view on the sheet: add one first".to_string()),
+                        _ => {}
+                    }
+                    app.drawing.sec_tool = None;
+                } else {
+                    app.drawing.sec_tool = Some(picked);
                 }
             }
         }
@@ -5093,6 +5170,29 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(d) = new_dim {
         app.drawing.dims.push(d);
         refresh(app);
+    }
+    if let Some(msg) = sec_msg {
+        app.set_status(msg, true);
+    }
+    if let Some((line, k, x, y)) = sec_new {
+        app.drawing.placed.push(PlacedView {
+            view: 1,
+            x: f64::from(x),
+            y: f64::from(y),
+            scale: format!("{k}"),
+            dashed: false,
+            dims: false,
+            section: Some((0, String::new())),
+            section_line: Some(line),
+            align: None,
+            custom: None,
+            rot: 0,
+            label: None,
+            cap: (0.0, 0.0),
+            colour: false,
+        });
+        app.drawing.selected = Some(app.drawing.placed.len() - 1);
+        begin(app);
     }
     if proj_placed {
         begin(app);
