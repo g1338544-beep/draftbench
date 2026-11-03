@@ -325,6 +325,8 @@ pub struct State {
     base_shaded: bool,
     /// Centre lines placed between two picked lines (ends on the sheet), and the tool: the lines picked so far.
     clines: Vec<[f32; 4]>,
+    /// Circular centre lines placed by hand: centre x, y and radius (sheet mm).
+    ccircles: Vec<[f32; 3]>,
     /// Rectangles (x0, y0, x1, y1 on the sheet) where centre lines were erased.
     centre_cut: Vec<[f32; 5]>,
     /// A centre line being stretched: its original ends, its ends now, and whether the second end moves.
@@ -469,6 +471,7 @@ impl Default for State {
             base_dashed: true,
             base_shaded: false,
             clines: Vec::new(),
+            ccircles: Vec::new(),
             centre_cut: Vec::new(),
             cl_drag: None,
             erase: None,
@@ -536,6 +539,7 @@ impl State {
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
             "clines": self.clines,
+            "ccircles": self.ccircles,
             "centre_cut": self.centre_cut,
             "dim_decimals": self.dim_decimals,
             "dim_text": self.dim_text, "dim_arrow": self.dim_arrow,
@@ -710,6 +714,7 @@ impl State {
         self.bom.clear();
         self.marks.clear();
         self.clines.clear();
+        self.ccircles.clear();
         self.centre_cut.clear();
         self.erase = None;
         self.shaded.clear();
@@ -803,6 +808,17 @@ impl State {
             self.dim_decimals = n as i32;
         }
         // Erased-centre frames are not restored: they were tied to where the views sat, and hid centre lines of views placed later.
+        if let Some(list) = d.get("ccircles").and_then(serde_json::Value::as_array) {
+            for m in list.iter().take(200) {
+                let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
+                if let [x, y, r] = n[..]
+                    && [x, y, r].iter().all(|t| t.is_finite() && t.abs() < 1e5)
+                    && r > 0.05
+                {
+                    self.ccircles.push([x as f32, y as f32, r as f32]);
+                }
+            }
+        }
         if let Some(list) = d.get("clines").and_then(serde_json::Value::as_array) {
             for m in list.iter().take(400) {
                 let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
@@ -1132,6 +1148,7 @@ fn params(st: &State) -> Value {
         "free_texts": st.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
         "marks": st.marks,
         "clines": st.clines,
+        "ccircles": st.ccircles,
         "centre_cut": st.centre_cut,
         "dim_decimals": st.dim_decimals,
         "dim_text_height": st.dim_text.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (1.0..=15.0).contains(h)),
@@ -1328,7 +1345,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
     app.drawing.placed.pop();
     let own = p.get("placements").and_then(Value::as_array).and_then(|a| a.last()).cloned()?;
     p["placements"] = json!([own]);
-    for key in ["dimension_items", "clines", "marks", "centre_cut", "bom"] {
+    for key in ["dimension_items", "clines", "ccircles", "marks", "centre_cut", "bom"] {
         p[key] = json!([]);
     }
     p["hole_table"] = json!(false);
@@ -1689,6 +1706,7 @@ fn erase_centre(app: &mut SolveApp, mut r: [f32; 4]) {
     }
     app.drawing.marks.retain(|m| !(m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]));
     app.drawing.clines.retain(|c| !segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r));
+    app.drawing.ccircles.retain(|c| !ring_in_rect(pos2(c[0], c[1]), c[2], r));
     if app.drawing.centre_cut.len() < 400 {
         app.drawing.centre_cut.push([r[0], r[1], r[2], r[3], 0.0]);
     }
@@ -1777,10 +1795,19 @@ fn erase_selection(app: &mut SolveApp, r: [f32; 4]) {
     app.drawing.dirty_marks = true;
 }
 
+/// Whether the ring of radius `rad` around `c` passes through the frame `r`.
+fn ring_in_rect(c: Pos2, rad: f32, r: [f32; 4]) -> bool {
+    let nx = c.x.clamp(r[0], r[2]);
+    let ny = c.y.clamp(r[1], r[3]);
+    let near = ((nx - c.x).powi(2) + (ny - c.y).powi(2)).sqrt();
+    let far = [(r[0], r[1]), (r[0], r[3]), (r[2], r[1]), (r[2], r[3])].iter().map(|(x, y)| ((x - c.x).powi(2) + (y - c.y).powi(2)).sqrt()).fold(0.0_f32, f32::max);
+    near <= rad && rad <= far
+}
+
 /// How many centre lines, marks, free lines and free texts the frame `r` holds.
 fn centre_in_box(app: &SolveApp, r: [f32; 4]) -> usize {
     let (fl, ft, fc) = free_in_box(app, r);
-    fl.len() + ft.len() + fc.len() + centre_segments(app, r).len() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
+    fl.len() + ft.len() + fc.len() + app.drawing.ccircles.iter().filter(|c| ring_in_rect(pos2(c[0], c[1]), c[2], r)).count() + centre_segments(app, r).len() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
 }
 
 /// Erase exactly one centre line (its ends), leaving any line that crosses it.
@@ -4451,7 +4478,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if *layer == Layer::Hidden {
                     painter.extend(egui::Shape::dashed_line(&[map(*a), map(*b)], s, 8.0, 5.0));
                 } else if *layer == Layer::Center {
-                    painter.extend(egui::Shape::dashed_line(&[map(*a), map(*b)], s, 14.0, 4.0));
+                    painter.extend(chain_shapes(&[map(*a), map(*b)], s, px_per_mm));
                 } else {
                     painter.line_segment([map(*a), map(*b)], s);
                 }
@@ -4467,7 +4494,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             Shape::Circle(c, r) => {
                 let pts: Vec<Pos2> = arc_points(*c, *r, 0.0, 360.0).into_iter().map(map).collect();
                 if *layer == Layer::Center {
-                    painter.extend(egui::Shape::dashed_line(&pts, s, 14.0, 4.0));
+                    painter.extend(chain_shapes(&pts, s, px_per_mm));
                 } else if *layer == Layer::Hidden {
                     painter.extend(egui::Shape::dashed_line(&pts, s, 8.0, 5.0));
                 } else {
@@ -4747,14 +4774,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             if let Some((ctr, r)) = circumcircle(a, b, cc)
                                 && r > 0.05
                                 && r < 5000.0
-                                && app.drawing.clines.len() + 48 <= 400
+                                && app.drawing.ccircles.len() < 200
                             {
-                                for k in 0..48usize {
-                                    let (t0, t1) = (k as f32 / 48.0 * std::f32::consts::TAU, (k + 1) as f32 / 48.0 * std::f32::consts::TAU);
-                                    let pa = ctr + vec2(t0.cos(), t0.sin()) * r;
-                                    let pb = ctr + vec2(t1.cos(), t1.sin()) * r;
-                                    app.drawing.clines.push([pa.x, pa.y, pb.x, pb.y]);
-                                }
+                                app.drawing.ccircles.push([ctr.x, ctr.y, r]);
                                 app.drawing.dirty_marks = true;
                             }
                         }
@@ -4770,15 +4792,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     app.drawing.clines.push([a.x, a.y, b.x, b.y]);
                                 }
                             } else {
-                                // 48 chords make the circle; the centre linetype dashes each one.
-                                const N: usize = 48;
-                                if app.drawing.clines.len() + N <= 400 {
-                                    for k in 0..N {
-                                        let (t0, t1) = (k as f32 / N as f32 * std::f32::consts::TAU, (k + 1) as f32 / N as f32 * std::f32::consts::TAU);
-                                        let pa = first + vec2(t0.cos(), t0.sin()) * len;
-                                        let pb = first + vec2(t1.cos(), t1.sin()) * len;
-                                        app.drawing.clines.push([pa.x, pa.y, pb.x, pb.y]);
-                                    }
+                                if app.drawing.ccircles.len() < 200 {
+                                    app.drawing.ccircles.push([first.x, first.y, len]);
                                 }
                             }
                             app.drawing.dirty_marks = true;
@@ -5271,6 +5286,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         mk[1] += fy;
                     }
                 }
+                for c in app.drawing.ccircles.iter_mut() {
+                    if inside(c[0], c[1]) {
+                        c[0] += fx;
+                        c[1] += fy;
+                    }
+                }
                 for c in app.drawing.clines.iter_mut() {
                     if inside((c[0] + c[2]) / 2.0, (c[1] + c[3]) / 2.0) {
                         c[0] += fx;
@@ -5696,4 +5717,36 @@ fn circumcircle(a: Pos2, b: Pos2, c: Pos2) -> Option<(Pos2, f32)> {
     let ctr = pos2(x, y);
     let r = (a - ctr).length();
     (x.is_finite() && y.is_finite() && r.is_finite()).then_some((ctr, r))
+}
+
+/// A chain (centre) line along a polyline: a long dash, a gap, a short dash, a gap, as drawn on paper.
+/// `unit` is one millimetre of the sheet on screen.
+fn chain_shapes(pts: &[Pos2], stroke: Stroke, unit: f32) -> Vec<egui::Shape> {
+    let pattern = [6.0 * unit, 1.2 * unit, 1.0 * unit, 1.2 * unit].map(|v: f32| v.max(1.0));
+    let mut out = Vec::new();
+    let (mut k, mut left) = (0usize, pattern[0]);
+    for w in pts.windows(2) {
+        let (Some(a), Some(b)) = (w.first().copied(), w.get(1).copied()) else { continue };
+        let total = (b - a).length();
+        if !total.is_finite() || total < 1e-3 {
+            continue;
+        }
+        let dir = (b - a) / total;
+        let mut at = 0.0_f32;
+        let mut guard = 0;
+        while at < total && guard < 20_000 {
+            guard += 1;
+            let step = left.min(total - at);
+            if k % 2 == 0 {
+                out.push(egui::Shape::line_segment([a + dir * at, a + dir * (at + step)], stroke));
+            }
+            at += step;
+            left -= step;
+            if left <= 1e-4 {
+                k = (k + 1) % 4;
+                left = pattern.get(k).copied().unwrap_or(1.0);
+            }
+        }
+    }
+    out
 }

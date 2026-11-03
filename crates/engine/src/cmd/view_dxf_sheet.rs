@@ -1039,6 +1039,18 @@ fn finish(
             }
         }
     }
+    if let Some(list) = p.get("ccircles").and_then(Value::as_array) {
+        for m in list.iter().take(200) {
+            let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+            if let [x, y, r] = n[..]
+                && [x, y, r].iter().all(|v| v.is_finite() && v.abs() < 1e5)
+                && r > 0.05
+            {
+                entities.push(DxfEntity { layer: "CENTER".into(), shape: DxfShape::Circle { c: Vec2::new(x, y), r } });
+                centre = true;
+            }
+        }
+    }
     if let Some(marks) = p.get("marks").and_then(Value::as_array) {
         for m in marks.iter().take(400) {
             let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
