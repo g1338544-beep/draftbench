@@ -3597,7 +3597,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if let (Some((_, Some(pv))), Some(_)) = (&app.drawing.proj_preview, found)
                 && app.drawing.proj_want.is_some()
             {
-                paint_preview(&painter, &m, pv, snap_to_front(&app.drawing.placed, view, at));
+                paint_preview(&painter, &m, pv, at);
             }
             painter.line_segment([map(pos2(b.1, b.2)), map(at)], Stroke::new(1.0, Tokens::get().accent));
             painter.text(map(at) + vec2(14.0, -14.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(Tokens::get().font_body), Tokens::get().accent);

@@ -612,6 +612,259 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
     head.s + &o.s
 }
 
+/// Points along a shape as a polyline, for the release 12 writer, which has no ELLIPSE or SPLINE.
+fn flatten(shape: &DxfShape) -> Vec<Vec2> {
+    match shape {
+        DxfShape::Ellipse { c, major, ratio, t0, t1 } => {
+            let minor = major.perp() * *ratio;
+            let sweep = if (t1 - t0 - TAU).abs() < 1e-12 { TAU } else { (t1 - t0).rem_euclid(TAU) };
+            (0..=96)
+                .map(|i| {
+                    let t = t0 + sweep * f64::from(i) / 96.0;
+                    *c + *major * t.cos() + minor * t.sin()
+                })
+                .collect()
+        }
+        DxfShape::Spline { degree, knots, ctrl, weights } => {
+            let d = usize::from(*degree);
+            let bezier = ctrl.len() == d + 1
+                && knots.len() == 2 * (d + 1)
+                && knots.iter().take(d + 1).all(|k| *k == 0.0)
+                && knots.iter().skip(d + 1).all(|k| *k == 1.0);
+            if !bezier {
+                return ctrl.clone();
+            }
+            let w: Vec<f64> = (0..ctrl.len()).map(|i| weights.as_ref().and_then(|w| w.get(i)).copied().unwrap_or(1.0)).collect();
+            (0..=48)
+                .map(|i| {
+                    let t = f64::from(i) / 48.0;
+                    // de Casteljau on homogeneous points (x·w, y·w, w).
+                    let mut q: Vec<(f64, f64, f64)> = ctrl.iter().zip(&w).map(|(p, w)| (p.x * w, p.y * w, *w)).collect();
+                    for level in 1..q.len() {
+                        for j in 0..q.len() - level {
+                            if let (Some(a), Some(b)) = (q.get(j).copied(), q.get(j + 1).copied())
+                                && let Some(slot) = q.get_mut(j)
+                            {
+                                *slot = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t);
+                            }
+                        }
+                    }
+                    match q.first() {
+                        Some(&(x, y, h)) if h.abs() > 1e-12 => Vec2::new(x / h, y / h),
+                        _ => Vec2::ZERO,
+                    }
+                })
+                .collect()
+        }
+        DxfShape::Polyline { points } => points.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// The same drawing as AutoCAD release 12 (`AC1009`) writes it: no handles, subclasses, blocks or
+/// objects, only the header, the tables and the entities. Every AutoCAD (and nearly every other
+/// CAD program) opens it without a report; ellipses and splines become polylines. It carries the
+/// active viewport framed on the drawing, so the lines are in view on opening.
+pub fn write_dxf_r12(layers: &[DxfLayer], entities: &[DxfEntity]) -> String {
+    let mut pts = Vec::new();
+    for e in entities {
+        e.shape.sample(&mut pts);
+    }
+    pts.retain(|p| p.is_finite());
+    let (lo, hi) = pts
+        .iter()
+        .fold(None, |acc: Option<(Vec2, Vec2)>, p| {
+            Some(acc.map_or((*p, *p), |(lo, hi)| (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)))))
+        })
+        .unwrap_or((Vec2::ZERO, Vec2::ZERO));
+    let mut layer_list = vec![DxfLayer::new("0", 7)];
+    for l in layers {
+        if !layer_list.iter().any(|x| x.name == l.name) {
+            layer_list.push(l.clone());
+        }
+    }
+    let name_of = |l: &str| if l.trim().is_empty() { "0".to_string() } else { l.to_string() };
+    // A layer an entity names but the list lacks is added, so every name resolves.
+    for e in entities {
+        let n = name_of(&e.layer);
+        if !layer_list.iter().any(|x| x.name == n) {
+            layer_list.push(DxfLayer::new(n, 7));
+        }
+    }
+    let mut o = Out { s: String::new(), next: 0 };
+    let (w, h) = ((hi.x - lo.x).max(1.0), (hi.y - lo.y).max(1.0));
+    let centre = Vec2::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0);
+
+    o.code(0, "SECTION");
+    o.code(2, "HEADER");
+    o.code(9, "$ACADVER");
+    o.code(1, "AC1009");
+    o.code(9, "$EXTMIN");
+    o.point(10, lo);
+    o.code(9, "$EXTMAX");
+    o.point(10, hi);
+    o.code(9, "$LIMMIN");
+    o.num(10, lo.x);
+    o.num(20, lo.y);
+    o.code(9, "$LIMMAX");
+    o.num(10, hi.x);
+    o.num(20, hi.y);
+    o.code(0, "ENDSEC");
+
+    o.code(0, "SECTION");
+    o.code(2, "TABLES");
+    o.code(0, "TABLE");
+    o.code(2, "VPORT");
+    o.code(70, 1);
+    o.code(0, "VPORT");
+    o.code(2, "*ACTIVE");
+    o.code(70, 0);
+    o.num(10, 0.0);
+    o.num(20, 0.0);
+    o.num(11, 1.0);
+    o.num(21, 1.0);
+    o.num(12, centre.x);
+    o.num(22, centre.y);
+    o.num(13, 0.0);
+    o.num(23, 0.0);
+    o.num(14, 10.0);
+    o.num(24, 10.0);
+    o.num(15, 10.0);
+    o.num(25, 10.0);
+    o.num(16, 0.0);
+    o.num(26, 0.0);
+    o.num(36, 1.0);
+    o.num(17, 0.0);
+    o.num(27, 0.0);
+    o.num(37, 0.0);
+    o.num(40, h * 1.1);
+    o.num(41, (w / h).clamp(0.1, 10.0));
+    o.num(42, 50.0);
+    o.num(43, 0.0);
+    o.num(44, 0.0);
+    o.num(50, 0.0);
+    o.num(51, 0.0);
+    o.code(71, 0);
+    o.code(72, 100);
+    o.code(73, 1);
+    o.code(74, 3);
+    o.code(75, 0);
+    o.code(76, 0);
+    o.code(77, 0);
+    o.code(78, 0);
+    o.code(0, "ENDTAB");
+
+    let mut linetypes: Vec<(&str, &str, &[f64])> = vec![("CONTINUOUS", "Solid line", &[]), ("DASHED", "Dashed __ __ __ __ __ __ __ __ __ __", &[12.7, -6.35])];
+    if layer_list.iter().any(|l| l.linetype == DxfLinetype::Hidden) {
+        linetypes.push(("HIDDEN", "Hidden edges", &[2.0, -1.0]));
+    }
+    if layer_list.iter().any(|l| l.linetype == DxfLinetype::Center) {
+        linetypes.push(("CENTER", "Center ____ _ ____ _ ____", &[6.0, -1.5, 1.0, -1.5]));
+    }
+    o.code(0, "TABLE");
+    o.code(2, "LTYPE");
+    o.code(70, linetypes.len());
+    for (name, description, pattern) in linetypes {
+        o.code(0, "LTYPE");
+        o.code(2, name);
+        o.code(70, 0);
+        o.code(3, description);
+        o.code(72, 65);
+        o.code(73, pattern.len());
+        o.num(40, pattern.iter().map(|d| d.abs()).sum());
+        for d in pattern {
+            o.num(49, *d);
+        }
+    }
+    o.code(0, "ENDTAB");
+
+    o.code(0, "TABLE");
+    o.code(2, "LAYER");
+    o.code(70, layer_list.len());
+    for l in &layer_list {
+        o.code(0, "LAYER");
+        o.code(2, &l.name);
+        o.code(70, 0);
+        o.code(62, if l.color == 0 { 7 } else { l.color });
+        o.code(6, l.linetype.name().to_uppercase());
+    }
+    o.code(0, "ENDTAB");
+
+    o.code(0, "TABLE");
+    o.code(2, "STYLE");
+    o.code(70, 1);
+    o.code(0, "STYLE");
+    o.code(2, "STANDARD");
+    o.code(70, 0);
+    o.num(40, 0.0);
+    o.num(41, 1.0);
+    o.num(50, 0.0);
+    o.code(71, 0);
+    o.num(42, 2.5);
+    o.code(3, "txt");
+    o.code(4, "");
+    o.code(0, "ENDTAB");
+    o.code(0, "ENDSEC");
+
+    o.code(0, "SECTION");
+    o.code(2, "ENTITIES");
+    for e in entities {
+        let layer = name_of(&e.layer);
+        match &e.shape {
+            DxfShape::Line(a, b) => {
+                o.code(0, "LINE");
+                o.code(8, &layer);
+                o.point(10, *a);
+                o.point(11, *b);
+            }
+            DxfShape::Circle { c, r } => {
+                o.code(0, "CIRCLE");
+                o.code(8, &layer);
+                o.point(10, *c);
+                o.num(40, *r);
+            }
+            DxfShape::Arc { c, r, a0, a1 } => {
+                o.code(0, "ARC");
+                o.code(8, &layer);
+                o.point(10, *c);
+                o.num(40, *r);
+                o.num(50, *a0);
+                o.num(51, *a1);
+            }
+            DxfShape::Text { at, height, angle_deg, text } => {
+                o.code(0, "TEXT");
+                o.code(8, &layer);
+                o.point(10, *at);
+                o.num(40, *height);
+                o.code(1, text_value(text));
+                o.num(50, *angle_deg);
+                o.code(72, 1);
+                o.point(11, *at);
+            }
+            shape => {
+                let points = flatten(shape);
+                if points.len() >= 2 {
+                    o.code(0, "POLYLINE");
+                    o.code(8, &layer);
+                    o.code(66, 1);
+                    o.point(10, Vec2::ZERO);
+                    o.code(70, 128);
+                    for p in &points {
+                        o.code(0, "VERTEX");
+                        o.code(8, &layer);
+                        o.point(10, *p);
+                    }
+                    o.code(0, "SEQEND");
+                    o.code(8, &layer);
+                }
+            }
+        }
+    }
+    o.code(0, "ENDSEC");
+    o.code(0, "EOF");
+    o.s
+}
+
 #[cfg(test)]
 mod tests {
     use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI};

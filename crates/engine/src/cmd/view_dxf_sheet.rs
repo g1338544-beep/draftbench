@@ -955,7 +955,7 @@ fn finish(
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let b = build(s, p)?;
-    let dxf = solidcraft_io::write_dxf_drawing(&b.layers, &b.entities);
+    let dxf = solidcraft_io::write_dxf_r12(&b.layers, &b.entities);
     let mut result = b.summary;
     if let Some(path) = b.path {
         solidcraft_io::vfs::check(&path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
