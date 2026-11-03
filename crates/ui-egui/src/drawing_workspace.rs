@@ -78,6 +78,8 @@ struct PlacedView {
     section: Option<(usize, String)>,
     /// A section along a line drawn on the Top view: x1, y1, x2, y2 in model mm.
     section_line: Option<[f32; 4]>,
+    /// A detail view: a circle (u, v, radius in the source view's mm) shown larger.
+    detail: Option<[f32; 3]>,
     /// Projected from another view: its index, and whether it sits beside it (shares the y
     /// position) rather than above or below it (shares x).
     align: Option<(usize, bool)>,
@@ -310,6 +312,8 @@ pub struct State {
     mark_mode: u8,
     /// The Section View tool: the points of the cutting line picked so far.
     sec_tool: Option<Vec<Pos2>>,
+    /// The Detail View tool: the centre picked so far.
+    det_tool: Option<Vec<Pos2>>,
     mark_pts: Vec<Pos2>,
     /// The Erase Centre tool: a click or a dragged frame removes the centre lines and marks it touches.
     erase_tool: bool,
@@ -466,6 +470,7 @@ impl Default for State {
             mark_tool: false,
             mark_mode: 0,
             sec_tool: None,
+            det_tool: None,
             mark_pts: Vec::new(),
             erase_tool: false,
             caption_sel: None,
@@ -540,7 +545,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -744,6 +749,13 @@ impl State {
                     section: v.get("section").and_then(serde_json::Value::as_array).and_then(|a| {
                         let axis = a.first()?.as_u64().filter(|n| *n <= 2)? as usize;
                         Some((axis, a.get(1)?.as_str()?.chars().take(12).collect()))
+                    }),
+                    detail: v.get("detail").and_then(serde_json::Value::as_array).and_then(|a| {
+                        let n: Vec<f32> = a.iter().filter_map(|t| t.as_f64().map(|t| t as f32)).collect();
+                        match n[..] {
+                            [u, v, r] if n.iter().all(|t| t.is_finite() && t.abs() < 1e5) && r > 0.0 => Some([u, v, r]),
+                            _ => None,
+                        }
                     }),
                     section_line: v.get("section_line").and_then(serde_json::Value::as_array).and_then(|a| {
                         let n: Vec<f32> = a.iter().filter_map(|t| t.as_f64().map(|t| t as f32)).collect();
@@ -1151,6 +1163,10 @@ fn params(st: &State) -> Value {
             if let Some(l) = v.section_line {
                 o["section"] = json!({ "line": l });
             }
+            if let Some(d) = v.detail {
+                o["detail"] = json!(d);
+                o["center"] = json!(false);
+            }
             if let Ok(k) = v.scale.trim().parse::<f64>()
                 && k.is_finite()
                 && k > 0.0
@@ -1348,6 +1364,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         dims: false,
         section: None,
         section_line: None,
+        detail: None,
         align: None,
         custom: None,
         rot: 0,
@@ -1371,6 +1388,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         dims: false,
         section: None,
         section_line: None,
+        detail: None,
         align: None,
         custom: None,
         rot,
@@ -1989,8 +2007,17 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             app.drawing.cline_tool = None;
             app.drawing.dim_tool = None;
         }
+        "drawing.ribbon.detail" => {
+            app.drawing.det_tool = if app.drawing.det_tool.is_some() { None } else { Some(Vec::new()) };
+            app.drawing.sec_tool = None;
+            app.drawing.mark_tool = false;
+            app.drawing.erase_tool = false;
+            app.drawing.cline_tool = None;
+            app.drawing.dim_tool = None;
+        }
         "drawing.ribbon.section" => {
             app.drawing.sec_tool = if app.drawing.sec_tool.is_some() { None } else { Some(Vec::new()) };
+            app.drawing.det_tool = None;
             app.drawing.mark_tool = false;
             app.drawing.erase_tool = false;
             app.drawing.cline_tool = None;
@@ -4648,6 +4675,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dims: false,
                     section: None,
                     section_line: None,
+                    detail: None,
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
                     label: None,
@@ -4847,8 +4875,51 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Detail View: click the centre, then a point on the circle; an enlarged view of what lies inside is added.
+    let mut sec_msg_detail: Option<String> = None;
+    let mut det_new: Option<([f32; 3], f32, f32, f32, usize)> = None;
+    if let Some(mut picked) = app.drawing.det_tool.clone() {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
+            app.drawing.det_tool = None;
+        } else {
+            let accent = Tokens::get().accent;
+            let hover = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
+            let hint = if picked.is_empty() { "Detail View: click the centre of the detail on a view (Esc ends)" } else { "Detail View: click a point on the circle" };
+            painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
+            if let (Some(h), Some(first)) = (hover, picked.first().copied()) {
+                painter.circle_stroke(map(first), (h - first).length() * px_per_mm, Stroke::new(2.0, accent));
+            }
+            if response.clicked_by(egui::PointerButton::Primary)
+                && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            {
+                picked.push(c);
+                if let [a, b] = picked[..] {
+                    let views: Vec<&(usize, f32, f32, f32, f32)> = sheet
+                        .boxes
+                        .iter()
+                        .filter(|bx| app.drawing.placed.get(bx.0).is_some_and(|v| v.view < 6 && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none()))
+                        .collect();
+                    let src = views.iter().find(|bx| (a.x - bx.1).abs() <= bx.3 / 2.0 && (a.y - bx.2).abs() <= bx.4 / 2.0).copied().copied();
+                    let k = src.and_then(|bx| sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1));
+                    let ctr = src.and_then(|bx| sheet.centres.iter().find(|s| s.0 == bx.0).map(|s| (s.1, s.2)));
+                    match (src, k, ctr) {
+                        (Some(bx), Some(k), Some((cx, cy))) if k > 0.0 && (b - a).length() > 0.5 => {
+                            let (u, v) = (cx + (a.x - bx.1) / k, cy + (a.y - bx.2) / k);
+                            let r = (b - a).length() / k;
+                            let view = app.drawing.placed.get(bx.0).map_or(1, |p| p.view);
+                            det_new = Some(([u, v, r], k, (bx.1 + bx.3 / 2.0 + 60.0).min(sheet.width - 50.0), (bx.2 - bx.4 / 2.0 - 50.0).max(60.0), view));
+                        }
+                        _ => sec_msg_detail = Some("Detail View: click the centre inside a view, then a point on the circle".to_string()),
+                    }
+                    app.drawing.det_tool = None;
+                } else {
+                    app.drawing.det_tool = Some(picked);
+                }
+            }
+        }
+    }
     // Section View: click two points on the Top view (hole centres snap); the cutting line runs between them.
-    let mut sec_new: Option<([f32; 4], f32, f32, f32)> = None;
+    let mut sec_new: Option<([f32; 4], f32, f32, f32, usize)> = None;
     let mut sec_msg: Option<String> = None;
     if let Some(mut picked) = app.drawing.sec_tool.clone() {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
@@ -4858,7 +4929,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let accent = Tokens::get().accent;
             let hover = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
             let pick = |c: Pos2| -> Pos2 { snap_point(sheet, c, tol).unwrap_or(c) };
-            let hint = if picked.is_empty() { "Section View: click the first point of the cutting line on the Top view (Esc ends)" } else { "Section View: click the second point" };
+            let hint = if picked.is_empty() { "Section View: click the first point of the cutting line on any view (hole centres snap, Esc ends)" } else { "Section View: click the second point" };
             painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
             if let Some(h) = hover {
                 painter.circle_stroke(map(pick(h)), 7.0, Stroke::new(2.0, accent));
@@ -4871,11 +4942,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             {
                 picked.push(pick(c));
                 if let [a, b] = picked[..] {
-                    // The Top view the line is drawn on: the one under the first point, else the first Top view.
+                    // The view the line is drawn on: the one under the first point, else the first plain view.
                     let tops: Vec<&(usize, f32, f32, f32, f32)> = sheet
                         .boxes
                         .iter()
-                        .filter(|bx| app.drawing.placed.get(bx.0).is_some_and(|v| v.view == 1 && v.rot == 0 && v.section.is_none() && v.custom.is_none()))
+                        .filter(|bx| app.drawing.placed.get(bx.0).is_some_and(|v| v.view < 6 && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none()))
                         .collect();
                     let top = tops.iter().find(|bx| (a.x - bx.1).abs() <= bx.3 / 2.0 && (a.y - bx.2).abs() <= bx.4 / 2.0).or(tops.first()).copied().copied();
                     let k = top.and_then(|bx| sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1));
@@ -4884,9 +4955,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         (Some(bx), Some(k), Some((cx, cy))) if k > 0.0 && (b - a).length() > 0.5 => {
                             let model = |q: Pos2| (cx + (q.x - bx.1) / k, cy + (q.y - bx.2) / k);
                             let (p1, p2) = (model(a), model(b));
-                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, (bx.1 + bx.3 / 2.0 + 70.0).min(sheet.width - 40.0), bx.2));
+                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, (bx.1 + bx.3 / 2.0 + 70.0).min(sheet.width - 40.0), bx.2, app.drawing.placed.get(bx.0).map_or(1, |v| v.view)));
                         }
-                        (None, _, _) | (_, None, _) | (_, _, None) => sec_msg = Some("Section View needs a Top view on the sheet: add one first".to_string()),
+                        (None, _, _) | (_, None, _) | (_, _, None) => sec_msg = Some("Section View needs a view on the sheet to cut: add one first".to_string()),
                         _ => {}
                     }
                     app.drawing.sec_tool = None;
@@ -4901,7 +4972,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let idle = app.drawing.dim_tool.is_none()
             && app.drawing.proj_tool.is_none()
             && app.drawing.cline_tool.is_none()
-            && app.drawing.sec_tool.is_none()
+            && app.drawing.sec_tool.is_none() && app.drawing.det_tool.is_none()
             && !app.drawing.mark_tool
             && !app.drawing.erase_tool
             && app.drawing.base.is_none()
@@ -4989,7 +5060,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let idle = app.drawing.dim_tool.is_none()
             && app.drawing.proj_tool.is_none()
             && app.drawing.cline_tool.is_none()
-            && app.drawing.sec_tool.is_none()
+            && app.drawing.sec_tool.is_none() && app.drawing.det_tool.is_none()
             && !app.drawing.mark_tool
             && !app.drawing.erase_tool
             && app.drawing.base.is_none()
@@ -5367,12 +5438,33 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.drawing.dims.push(d);
         refresh(app);
     }
-    if let Some(msg) = sec_msg {
+    if let Some(msg) = sec_msg.or(sec_msg_detail) {
         app.set_status(msg, true);
     }
-    if let Some((line, k, x, y)) = sec_new {
+    if let Some((d, k, x, y, from)) = det_new {
         app.drawing.placed.push(PlacedView {
-            view: 1,
+            view: from,
+            x: f64::from(x),
+            y: f64::from(y),
+            scale: format!("{}", k * 2.0),
+            dashed: false,
+            dims: false,
+            section: None,
+            section_line: None,
+            detail: Some(d),
+            align: None,
+            custom: None,
+            rot: 0,
+            label: None,
+            cap: (0.0, 0.0),
+            colour: false,
+        });
+        app.drawing.selected = Some(app.drawing.placed.len() - 1);
+        begin(app);
+    }
+    if let Some((line, k, x, y, from)) = sec_new {
+        app.drawing.placed.push(PlacedView {
+            view: from,
             x: f64::from(x),
             y: f64::from(y),
             scale: format!("{k}"),
@@ -5380,6 +5472,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             dims: false,
             section: Some((0, String::new())),
             section_line: Some(line),
+            detail: None,
             align: None,
             custom: None,
             rot: 0,

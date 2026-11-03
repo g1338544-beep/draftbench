@@ -120,8 +120,10 @@ fn manual(
     let mut infos: std::collections::BTreeMap<usize, ViewInfo> = std::collections::BTreeMap::new();
     // Views a cutting line can be drawn on, and the sections to draw: (angles, x, y, centre, scale, lo, hi) and (axis, position, angles, letter).
     let mut frames: Vec<((f64, f64), f64, f64, Vec2, f64, Vec2, Vec2)> = Vec::new();
-    let mut cuts: Vec<(usize, f64, (f64, f64), char, Option<[f64; 4]>)> = Vec::new();
+    let mut cuts: Vec<(usize, f64, (f64, f64), char, Option<([f64; 4], (f64, f64))>)> = Vec::new();
     let mut centre_used = false;
+    // Detail views: (circle u, v, radius, the view's angles, letter) so the circle and letter are drawn on the view it comes from.
+    let mut details: Vec<([f64; 3], (f64, f64), char)> = Vec::new();
     let unit = |v: Vec2| {
         let n = (v.x * v.x + v.y * v.y).sqrt();
         if n > 1e-9 { Some(Vec2::new(v.x / n, v.y / n)) } else { None }
@@ -151,8 +153,20 @@ fn manual(
                 _ => None,
             }
         });
-        let custom = match section_line {
-            Some([x1, y1, x2, y2]) => Some(((-(y2 - y1)).atan2(x2 - x1), 0.0)),
+        // The line is drawn on the view named by the item (u, v along that view's right and up): the cut plane
+        // holds the line and the view's depth; the section looks along `back` = line direction x view's back.
+        let line_plane = section_line.and_then(|[x1, y1, x2, y2]| {
+            let src = Camera { target: Vec3::ZERO, yaw: view.angles().0, pitch: view.angles().1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+            let (r, u, b) = src.basis();
+            let d3 = Vec3::new(r.x * (x2 - x1) + u.x * (y2 - y1), r.y * (x2 - x1) + u.y * (y2 - y1), r.z * (x2 - x1) + u.z * (y2 - y1)).normalized()?;
+            let back = d3.cross(b).normalized()?;
+            let p0 = Vec3::new(r.x * x1 + u.x * y1, r.y * x1 + u.y * y1, r.z * x1 + u.z * y1);
+            let pitch = back.z.clamp(-1.0, 1.0).asin();
+            let yaw = if back.z.abs() > 0.9999 { (-d3.y).atan2(d3.x) } else { (-back.x).atan2(-back.y) };
+            Some((back, back.dot(p0), (yaw, pitch)))
+        });
+        let custom = match line_plane {
+            Some((_, _, angles)) => Some(angles),
             None => custom,
         };
         let section: Option<(usize, Option<f64>)> = if section_line.is_some() { Some((3, None)) } else { item.get("section").and_then(|sec| {
@@ -167,12 +181,8 @@ fn manual(
         let mut section_at = 0.0;
         let all = if let Some((axis, at)) = section {
             section_at = at.unwrap_or_else(|| middle(scene, axis));
-            let cut = match section_line {
-                Some([x1, y1, x2, y2]) => {
-                    let len = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt().max(1e-9);
-                    let (nx, ny) = (-(y2 - y1) / len, (x2 - x1) / len);
-                    cut_plane(scene, custom.unwrap_or_else(|| view.angles()), Vec3::new(nx, ny, 0.0), nx * x1 + ny * y1)
-                }
+            let cut = match line_plane {
+                Some((normal, offset, angles)) => cut_plane(scene, angles, normal, offset),
                 None => cut_outline(scene, custom.unwrap_or_else(|| view.angles()), axis, section_at),
             };
             if cut.is_empty() {
@@ -188,6 +198,22 @@ fn manual(
             std::rc::Rc::new(Projected { lines: cut.into_iter().map(|(a, b)| (a, b, false)).collect(), lo, hi })
         } else {
             view_lines(scene, parts, view, custom, key)?
+        };
+        // A detail view: the part of this view inside a circle (u, v, radius in the view's own mm), drawn larger.
+        let detail: Option<[f64; 3]> = if section.is_some() {
+            None
+        } else {
+            item.get("detail").and_then(Value::as_array).and_then(|a| {
+                let n: Vec<f64> = a.iter().filter_map(Value::as_f64).collect();
+                match n[..] {
+                    [u, v, r] if [u, v, r].iter().all(|x| x.is_finite() && x.abs() < 1e5) && r > 1e-6 => Some([u, v, r]),
+                    _ => None,
+                }
+            })
+        };
+        let all = match detail {
+            Some([u, v, r]) => std::rc::Rc::new(Projected { lines: clip_disk(&all.lines, Vec2::new(u, v), r), lo: Vec2::new(u - r, v - r), hi: Vec2::new(u + r, v + r) }),
+            None => all,
         };
         if all.lo.x > all.hi.x {
             continue;
@@ -248,16 +274,21 @@ fn manual(
             }
         }
         let angles = custom.unwrap_or_else(|| view.angles());
-        let letter = char::from(b'A' + cuts.len().min(25) as u8);
+        let letter = char::from(b'A' + list.iter().take(index).filter(|it| it.get("section").is_some() || it.get("detail").is_some()).count().min(25) as u8);
         match section {
-            None => frames.push((angles, x, y, c, scale, all.lo, all.hi)),
-            Some((axis, _)) => cuts.push((axis, section_at, angles, letter, section_line)),
+            None => {
+                if let Some(d) = detail {
+                    details.push((d, view.angles(), letter));
+                }
+                frames.push((angles, x, y, c, scale, all.lo, all.hi));
+            }
+            Some((axis, _)) => cuts.push((axis, section_at, angles, letter, section_line.map(|l| (l, view.angles())))),
         }
         if section.is_some() {
             let segments: Vec<(Vec2, Vec2)> = all.lines.iter().map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
             hatch(&segments, 3.0, &mut entities);
         }
-        let centres_on = section.is_none() && quarter == 0 && item.get("center").and_then(Value::as_bool).unwrap_or(true);
+        let centres_on = section.is_none() && detail.is_none() && quarter == 0 && item.get("center").and_then(Value::as_bool).unwrap_or(true);
         if centres_on && view != StandardView::Iso {
             let here = circles(&all.lines, true);
             // Hole axes carry over to the view projected from this one (and back): a circle in one
@@ -304,7 +335,7 @@ fn manual(
                 }
             }
         }
-        if section.is_none() && item.get("center").and_then(Value::as_bool).unwrap_or(true) {
+        if section.is_none() && detail.is_none() && item.get("center").and_then(Value::as_bool).unwrap_or(true) {
             let mode = str_(p, "centre_mode").unwrap_or("lines");
             let found = circles(&all.lines, dashed);
             for (c, r) in &found {
@@ -362,6 +393,7 @@ fn manual(
         let caption = match section {
             Some((axis, _)) if axis > 2 => format!("Section {letter}-{letter}  {}", ratio_label(scale)),
             Some((axis, _)) => format!("Section {letter}-{letter} ({}={})  {}", ["X", "Y", "Z"].get(axis).copied().unwrap_or("?"), trim_mm(section_at), ratio_label(scale)),
+            None if detail.is_some() => format!("DETAIL {letter}  {}", ratio_label(scale)),
             None => format!("{}  {}", if custom.is_some() { "Model view" } else { view_name(view) }, ratio_label(scale)),
         };
         // The user's own caption replaces it; an empty one hides it.
@@ -378,6 +410,22 @@ fn manual(
         scales.insert(index, scale);
         boxes.push(json!({"index": index, "view": name, "x": x, "y": y, "w": w * scale, "h": h * scale, "scale": scale, "cx": c.x, "cy": c.y}));
         names.push(view_name(view).to_string());
+    }
+    // Each detail's circle and letter on the views it was taken from.
+    for ([u, v, r], from, letter) in &details {
+        for (angles, x, y, c, scale, _, _) in &frames {
+            if (angles.0 - from.0).abs() > 1e-6 || (angles.1 - from.1).abs() > 1e-6 {
+                continue;
+            }
+            let at = Vec2::new(x + (u - c.x) * scale, y + (v - c.y) * scale);
+            let rs = r * scale;
+            if !(rs.is_finite() && rs > 0.3) {
+                continue;
+            }
+            entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Circle { c: at, r: rs } });
+            let off = rs * std::f64::consts::FRAC_1_SQRT_2 + 1.5;
+            text("TEXT", Vec2::new(at.x + off, at.y + off), th, letter.to_string(), &mut entities);
+        }
     }
     // The cutting line of each section on the views it crosses: a chain line with arrows toward the
     // direction of sight, and the section's letter at both ends.
@@ -396,15 +444,13 @@ fn manual(
             let (vx, vy) = (back.dot(right), back.dot(up));
             let to_sheet = |q: Vec2| Vec2::new(x + (q.x - c.x) * scale, y + (q.y - c.y) * scale);
             // `along`: the direction the line runs in the view, `sight`: where the arrows point.
-            let (p1, p2, sight) = if let Some([x1, y1, x2, y2]) = sec_line {
-                // A drawn cutting line shows on the Top view (looking straight down).
-                let (_, _, fback) = cam.basis();
-                if fback.z.abs() < 0.99 {
+            let (p1, p2, sight) = if let Some(([x1, y1, x2, y2], from)) = sec_line {
+                // A drawn cutting line shows on the views it was drawn on (same direction of sight), at the same spot.
+                if (angles.0 - from.0).abs() > 1e-6 || (angles.1 - from.1).abs() > 1e-6 {
                     continue;
                 }
-                let proj = |px: f64, py: f64| Vec2::new(Vec3::new(px, py, 0.0).dot(right), Vec3::new(px, py, 0.0).dot(up));
                 let Some(s) = unit(Vec2::new(-vx, -vy)) else { continue };
-                (proj(*x1, *y1), proj(*x2, *y2), s)
+                (Vec2::new(*x1, *y1), Vec2::new(*x2, *y2), s)
             } else if sx.abs() > 0.99 {
                 let u = at * sx;
                 (Vec2::new(u, lo.y), Vec2::new(u, hi.y), Vec2::new(-vx.signum(), 0.0))
@@ -422,6 +468,9 @@ fn manual(
             let (a, b) = (Vec2::new(a.x - dir.x * 6.0, a.y - dir.y * 6.0), Vec2::new(b.x + dir.x * 6.0, b.y + dir.y * 6.0));
             line("CENTER", a, b, &mut entities);
             centre_used = true;
+            // Heavy stubs at both ends, as on a drawing sheet: the cutting line's ends are drawn thick.
+            line("VISIBLE", a, Vec2::new(a.x + dir.x * 8.0, a.y + dir.y * 8.0), &mut entities);
+            line("VISIBLE", b, Vec2::new(b.x - dir.x * 8.0, b.y - dir.y * 8.0), &mut entities);
             for end in [a, b] {
                 let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
                 line("DIM", end, tip, &mut entities);
@@ -1331,6 +1380,31 @@ fn paper_label(p: &Value, size: (f64, f64)) -> String {
 /// Text height on the sheet in mm (the template's text size): 2…10, default 3.5.
 fn text_height(p: &Value) -> f64 {
     p.get("text_height").and_then(Value::as_f64).filter(|h| (2.0..=10.0).contains(h)).unwrap_or(TEXT_H)
+}
+
+/// The parts of the segments inside the disc of centre `c` and radius `r`.
+fn clip_disk(lines: &[(Vec2, Vec2, bool)], c: Vec2, r: f64) -> Vec<(Vec2, Vec2, bool)> {
+    let mut out = Vec::new();
+    for (a, b, hidden) in lines.iter().take(400_000) {
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let (fx, fy) = (a.x - c.x, a.y - c.y);
+        let qa = dx * dx + dy * dy;
+        if !(qa > 1e-18) {
+            continue;
+        }
+        let qb = 2.0 * (fx * dx + fy * dy);
+        let qc = fx * fx + fy * fy - r * r;
+        let disc = qb * qb - 4.0 * qa * qc;
+        if disc < 0.0 {
+            continue;
+        }
+        let root = disc.sqrt();
+        let (t0, t1) = (((-qb - root) / (2.0 * qa)).max(0.0), ((-qb + root) / (2.0 * qa)).min(1.0));
+        if t1 - t0 > 1e-9 {
+            out.push((Vec2::new(a.x + dx * t0, a.y + dy * t0), Vec2::new(a.x + dx * t1, a.y + dy * t1), *hidden));
+        }
+    }
+    out
 }
 
 /// The circles a view's edges draw: closed loops of equal chords whose corners lie on one circle,
