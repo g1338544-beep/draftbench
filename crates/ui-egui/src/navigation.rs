@@ -389,7 +389,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.viewport.orbit_free = None;
         // Spread zooms in: the camera distance shrinks by the pinch factor.
         let f = f64::from(pinch).powf(-crate::prefs::zoom_sign(app));
-        let anchor = zoom_anchor(app, rect, hover, caps.orbit);
+        // Fingers on a touch screen zoom about the point between them.
+        let pinch_at = fingers.as_ref().map(|t| t.center_pos).filter(|c| c.x.is_finite() && c.y.is_finite()).or(hover);
+        let anchor = zoom_anchor(app, rect, pinch_at, caps.orbit);
         if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
             let mut params = json!({"motion":"zoom", "factor":f.clamp(0.05,20.0)});
             if let Some(anchor) = anchor {
@@ -450,7 +452,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         // still selects, and Ctrl on geometry still drags it without snapping.
         let ctrl_orbit = (mods.ctrl || mods.command) && !mods.shift && !mods.alt && empty_space(app);
         let touch_orbit = touch_start && app.tool.is_none() && app.dialog.is_none() && !mods.shift && empty_space(app);
-        app.viewport.primary_nav = preset.or(ctrl_orbit.then_some(NavMode::Orbit)).or(touch_orbit.then_some(NavMode::Orbit));
+        // One finger on empty space turns a 3D view and drags a flat page (nothing to orbit there).
+        let touch_mode = if caps.orbit { NavMode::Orbit } else { NavMode::Pan };
+        app.viewport.primary_nav = preset.or(ctrl_orbit.then_some(NavMode::Orbit)).or(touch_orbit.then_some(touch_mode));
     } else if !primary_down && !primary_released {
         app.viewport.primary_nav = None;
     }
