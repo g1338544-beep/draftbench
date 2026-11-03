@@ -59,6 +59,7 @@ pub(crate) mod motion;
 mod parts;
 mod script;
 mod remove_params;
+mod resize_face;
 mod section;
 pub(crate) use measure_sel::measure_items;
 #[cfg(test)]
@@ -288,6 +289,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(motion::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
+    v.extend(resize_face::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(layers::COMMANDS.iter());
