@@ -3467,12 +3467,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             v.dashed = base_dashed;
             v.colour = base_shaded;
         }
-        // The next click offers a standard view not on the sheet yet, so it does not land on the same one.
-        if view < 7 {
-            let used: Vec<usize> = app.drawing.placed.iter().filter(|v| v.rot == 0 && v.section.is_none() && v.custom.is_none()).map(|v| v.view).collect();
-            if let Some(next) = (1..7).map(|k| (view + k) % 7).find(|c| !used.contains(c)) {
-                app.drawing.base = Some((next, scale));
-            }
+        // Like a drawing package's base view: right after it is placed, the projected-view tool
+        // starts from it, so the next click places a view tied to it (on its hinge line).
+        if view < 6 && !app.drawing.placed.is_empty() {
+            app.drawing.proj_tool = Some(app.drawing.placed.len() - 1);
+            app.drawing.base = None;
         }
         refresh(app);
         return;
