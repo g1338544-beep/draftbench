@@ -862,6 +862,21 @@ fn finish(
     if !block_on {
         entities.truncate(text_from);
     }
+    // Texts the user put anywhere on the sheet: x, y, size factor, font and the words.
+    if let Some(list) = p.get("free_texts").and_then(Value::as_array) {
+        for t in list.iter().take(100) {
+            let num = |k: &str| t.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e5);
+            let (Some(x), Some(y)) = (num("x"), num("y")) else { continue };
+            let k = num("k").unwrap_or(1.0).clamp(0.2, 8.0);
+            let font = t.get("font").and_then(Value::as_u64).filter(|f| *f <= 4).unwrap_or(0);
+            let body: String = t.get("text").and_then(Value::as_str).unwrap_or("").chars().take(120).collect();
+            if body.trim().is_empty() {
+                continue;
+            }
+            let body = if font > 0 { format!("\u{1}{font}{body}") } else { body };
+            text("TEXT", Vec2::new(x, y), th * k, body, &mut entities);
+        }
+    }
     // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go; a fifth
     // number of 1 means one exact line (its two ends) and nothing else.
     if let Some(cuts) = p.get("centre_cut").and_then(Value::as_array) {

@@ -278,6 +278,13 @@ pub struct State {
     cell_edit: Option<usize>,
     /// A title block line picked to move or delete (see `grid_hit`).
     sel_grid: Option<u8>,
+    /// Texts placed anywhere on the sheet, the one picked, the one being dragged (index, pointer at start, x, y), and the one in the text window.
+    texts: Vec<FreeText>,
+    ft_sel: Option<usize>,
+    ft_drag: Option<(usize, Pos2, f32, f32)>,
+    ft_edit: Option<usize>,
+    /// Right-click on a free text: where, which.
+    free_menu: Option<(Pos2, usize)>,
     /// Right-click on the title block: the point, the line and the cell under it.
     block_menu: Option<(Pos2, Option<u8>, Option<usize>)>,
     placed: Vec<PlacedView>,
@@ -416,6 +423,11 @@ impl Default for State {
             cells: vec![String::new(); MAX_CELLS],
             cell_edit: None,
             sel_grid: None,
+            texts: Vec::new(),
+            ft_sel: None,
+            ft_drag: None,
+            ft_edit: None,
+            free_menu: None,
             block_menu: None,
             placed: Vec::new(),
             dims: Vec::new(),
@@ -500,7 +512,7 @@ impl State {
             "dim_decimals": self.dim_decimals,
             "dim_text": self.dim_text, "dim_arrow": self.dim_arrow,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch, v.ratio, v.bg, v.style, v.zoom])).collect::<Vec<_>>(),
-            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells,
+            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
             "paper": self.paper, "landscape": self.landscape,
         })
     }
@@ -775,6 +787,26 @@ impl State {
         if let Some(c) = d.get("cells").and_then(serde_json::Value::as_array) {
             load_cells(&mut self.cells, c);
         }
+        self.texts = d
+            .get("texts")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .take(MAX_FREE_TEXTS)
+                    .filter_map(|t| {
+                        let f = |k: &str| t.get(k).and_then(serde_json::Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e5);
+                        Some(FreeText {
+                            x: f("x")? as f32,
+                            y: f("y")? as f32,
+                            k: f("k").unwrap_or(1.0).clamp(0.2, 8.0) as f32,
+                            font: t.get("font").and_then(serde_json::Value::as_u64).filter(|n| *n <= 4).unwrap_or(0) as u8,
+                            text: t.get("text").and_then(serde_json::Value::as_str)?.chars().take(120).collect(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.ft_sel = None;
         if let Some(n) = d.get("paper").and_then(serde_json::Value::as_u64).filter(|n| *n <= 5) {
             self.paper = n as usize;
         }
@@ -936,7 +968,7 @@ fn add_page(app: &mut SolveApp) {
     }
     st.pages = st.all_pages();
     let n = st.pages.len() + 1;
-    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": st.cells, "paper": st.paper, "landscape": st.landscape}));
+    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": st.cells, "texts": [], "paper": st.paper, "landscape": st.landscape}));
     switch_page(app, n - 1);
 }
 
@@ -1032,6 +1064,7 @@ fn params(st: &State) -> Value {
         "centre_extra": st.centre_extra.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..=50.0).contains(h)).unwrap_or(3.0),
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
         "block_cells": st.cells,
+        "free_texts": st.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
         "marks": st.marks,
         "clines": st.clines,
         "centre_cut": st.centre_cut,
@@ -1816,6 +1849,126 @@ fn join_cell(dx: f32, dy: f32, k: f32, font: u8, body: &str) -> String {
     }
 }
 
+/// A text placed anywhere on the sheet: where (the middle of its baseline), size factor, font and words.
+#[derive(Clone)]
+struct FreeText {
+    x: f32,
+    y: f32,
+    k: f32,
+    font: u8,
+    text: String,
+}
+
+const MAX_FREE_TEXTS: usize = 100;
+
+fn ui_text_height(st: &State) -> f32 {
+    st.text_height.trim().parse::<f32>().ok().filter(|h| h.is_finite() && (2.0..=10.0).contains(h)).unwrap_or(3.5)
+}
+
+/// The box a text covers on the sheet (an estimate: 0.6 heights for each letter).
+fn text_box(at: Pos2, th: f32, chars: usize) -> Rect {
+    let w = chars.max(3) as f32 * 0.6 * th;
+    Rect::from_min_max(pos2(at.x - w / 2.0 - 1.0, at.y - 1.5), pos2(at.x + w / 2.0 + 1.0, at.y + th * 1.3))
+}
+
+/// The free text under a sheet point (the one drawn last wins).
+fn free_text_hit(texts: &[FreeText], th: f32, s: Pos2) -> Option<usize> {
+    texts.iter().enumerate().rev().find(|(_, t)| text_box(pos2(t.x, t.y), th * t.k, t.text.chars().count()).contains(s)).map(|(i, _)| i)
+}
+
+/// A title block text that was moved off its cell: it is still picked where it is now.
+fn moved_cell_hit(g: &BlockGeo, cells: &[String], th: f32, s: Pos2) -> Option<usize> {
+    (0..cells.len().min(MAX_CELLS)).rev().find(|&i| {
+        let (dx, dy, k, _, body) = split_cell(cells.get(i).map_or("", String::as_str));
+        if dx == 0.0 && dy == 0.0 {
+            return false;
+        }
+        let at = cell_centre(g, i).0 + vec2(dx, dy);
+        let size = th * k * if i == 0 { 1.4 } else { 1.0 };
+        text_box(at, size, if body.trim().is_empty() { 10 } else { body.chars().count() }).contains(s)
+    })
+}
+
+/// A new free text from the copied text (`{dx;dy;k;font}words`) at a sheet point.
+fn paste_free_text(st: &mut State, at: Pos2) -> bool {
+    if st.texts.len() >= MAX_FREE_TEXTS {
+        return false;
+    }
+    let Some(clip) = st.cell_clip.clone() else { return false };
+    let (_, _, k, font, body) = split_cell(&clip);
+    let text: String = if body.trim().is_empty() { "Text".into() } else { body.chars().take(120).collect() };
+    st.texts.push(FreeText { x: at.x, y: at.y, k, font, text });
+    st.ft_sel = Some(st.texts.len() - 1);
+    true
+}
+
+/// The window of a text placed on the sheet: its words, size, font; copy, duplicate, delete.
+fn free_text_window(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let Some(i) = app.drawing.ft_edit else { return };
+    let Some(before) = app.drawing.texts.get(i).cloned() else {
+        app.drawing.ft_edit = None;
+        return;
+    };
+    let mut t = before.clone();
+    let (mut dup, mut del, mut copy) = (false, false, false);
+    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_free_text"), "text", "Text on the sheet").show_body(ui.ctx(), |ui| {
+        ui.label("Text");
+        crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_free_text", i)), &mut t.text, "", false, 120);
+        ui.label("Size");
+        ui.horizontal(|ui| {
+            if ui.small_button("A−").clicked() {
+                t.k = (t.k / 1.15).max(0.2);
+            }
+            if ui.small_button("A+").clicked() {
+                t.k = (t.k * 1.15).min(8.0);
+            }
+            ui.label(format!("{:.0}%", t.k * 100.0));
+        });
+        ui.label("Font");
+        ui.horizontal_wrapped(|ui| {
+            for (n, name) in ["Normal", "Medium", "Semibold", "Bold", "Mono"].iter().enumerate() {
+                if ui.add(egui::Button::selectable(t.font as usize == n, *name)).clicked() {
+                    t.font = n as u8;
+                }
+            }
+        });
+        ui.small("Drag the text on the sheet to move it.");
+        ui.horizontal(|ui| {
+            copy = crate::ui_kit::button(ui, "Copy", crate::ui_kit::Button::Small).clicked();
+            dup = crate::ui_kit::button(ui, "Duplicate", crate::ui_kit::Button::Small).clicked();
+            del = crate::ui_kit::button(ui, "Delete", crate::ui_kit::Button::Small).clicked();
+        });
+    });
+    if copy {
+        ui.ctx().copy_text(t.text.clone());
+        app.drawing.cell_clip = Some(join_cell(0.0, 0.0, t.k, t.font, &t.text));
+    }
+    if del {
+        if i < app.drawing.texts.len() {
+            app.drawing.texts.remove(i);
+        }
+        app.drawing.ft_edit = None;
+        app.drawing.ft_sel = None;
+        refresh(app);
+        return;
+    }
+    let changed = t.text != before.text || t.k != before.k || t.font != before.font;
+    if changed && let Some(slot) = app.drawing.texts.get_mut(i) {
+        *slot = t.clone();
+        refresh(app);
+    }
+    if dup && app.drawing.texts.len() < MAX_FREE_TEXTS {
+        app.drawing.texts.push(FreeText { x: t.x + 6.0, y: t.y - 6.0, ..t });
+        let n = app.drawing.texts.len() - 1;
+        app.drawing.ft_edit = Some(n);
+        app.drawing.ft_sel = Some(n);
+        refresh(app);
+    }
+    if closed {
+        app.drawing.ft_edit = None;
+    }
+}
+
 /// Cells in a title block (the title, then the body rows from the top, left to right).
 const MAX_CELLS: usize = 32;
 
@@ -2076,7 +2229,8 @@ fn open_cell(app: &mut SolveApp, s: Pos2) -> bool {
         return false;
     }
     let g = block_geo(&app.drawing, width);
-    let Some(index) = cell_at(&g, s) else { return false };
+    let th = ui_text_height(&app.drawing);
+    let Some(index) = moved_cell_hit(&g, &app.drawing.cells, th, s).or_else(|| cell_at(&g, s)) else { return false };
     let (dx, dy, k, font, body) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
     if body.trim().is_empty() {
         // Start from the text shown there.
@@ -3168,6 +3322,25 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.sel_dim = None;
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = pointer
+            && let Some(i) = free_text_hit(&app.drawing.texts, ui_text_height(&app.drawing), s)
+        {
+            // A text placed on the sheet: drag it anywhere.
+            let (x0, y0) = app.drawing.texts.get(i).map_or((0.0, 0.0), |t| (t.x, t.y));
+            app.drawing.ft_drag = Some((i, s, x0, y0));
+            app.drawing.ft_sel = Some(i);
+            app.drawing.selected = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = pointer
+            && let Some(index) = moved_cell_hit(&block_geo(&app.drawing, sheet.width), &app.drawing.cells, ui_text_height(&app.drawing), s)
+        {
+            // A title block text moved off its cell: still draggable where it is.
+            let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
+            app.drawing.cell_drag = Some((index, s, dx, dy));
+            app.drawing.selected = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+            && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && let Some(v) = cap_hit(s).filter(|v| app.drawing.placed.get(*v).is_some_and(|p| p.label.as_deref() != Some("")))
         {
@@ -3257,6 +3430,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 app.drawing.sel_centre = Some((la, lb));
             }
+        }
+    }
+    // Dragging a text placed on the sheet: it follows the pointer.
+    if let (Some((i, from, x0, y0)), Some(m)) = (app.drawing.ft_drag, &map) {
+        if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            && let Some(t) = app.drawing.texts.get_mut(i)
+        {
+            t.x = ((x0 + s.x - from.x) * 10.0).round() / 10.0;
+            t.y = ((y0 + s.y - from.y) * 10.0).round() / 10.0;
+        }
+        if response.drag_stopped() || !response.dragged() {
+            app.drawing.ft_drag = None;
+            refresh(app);
         }
     }
     // Dragging a view caption: it follows the pointer, and letting go keeps it there.
@@ -3470,8 +3656,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref())
         && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
     {
-        open_cell(app, s);
+        if let Some(i) = free_text_hit(&app.drawing.texts, ui_text_height(&app.drawing), s) {
+            app.drawing.ft_edit = Some(i);
+            app.drawing.ft_sel = Some(i);
+        } else {
+            open_cell(app, s);
+        }
     }
+    free_text_window(app, ui);
     if let Some(i) = app.drawing.cell_edit {
         let mut changed = false;
         let mut reset = false;
@@ -3571,13 +3763,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             let v = under(s);
             let g = block_geo(&app.drawing, sheet.width);
-            let (line, cell) = (grid_hit(&g, s, 12.0 / m.px_per_mm().max(1e-3) * 0.5), cell_at(&g, s));
-            if v.is_none() && app.drawing.block_on && (line.is_some() || cell.is_some()) {
+            let th = ui_text_height(&app.drawing);
+            let moved = if app.drawing.block_on { moved_cell_hit(&g, &app.drawing.cells, th, s) } else { None };
+            let (line, cell) = (grid_hit(&g, s, 12.0 / m.px_per_mm().max(1e-3) * 0.5), moved.or_else(|| cell_at(&g, s)));
+            if let Some(i) = free_text_hit(&app.drawing.texts, th, s) {
+                // Right-click on a text placed on the sheet: Copy, Duplicate, Edit, Delete.
+                app.drawing.free_menu = Some((s, i));
+                app.drawing.ft_sel = Some(i);
+                app.drawing.block_menu = None;
+                app.drawing.menu_at = None;
+            } else if v.is_none() && app.drawing.block_on && (line.is_some() || cell.is_some()) {
+                app.drawing.free_menu = None;
                 // Right-click on the title block: a menu with Copy, Paste and the lines.
                 app.drawing.block_menu = Some((s, line, cell));
                 app.drawing.menu_at = None;
             } else {
                 app.drawing.block_menu = None;
+                app.drawing.free_menu = None;
                 if v.is_some() {
                     app.drawing.selected = v;
                 }
@@ -3611,6 +3813,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if line.is_some_and(|w| w != 100 && w != 101) && crate::ui_kit::list_picker(ui, "Delete this line", "Delete this line", false).clicked() {
                 block_act = Some(5);
+                ui.close();
+            }
+            if has_clip && crate::ui_kit::list_picker(ui, "Paste as new text here", "Paste as new text here", false).clicked() {
+                block_act = Some(9);
                 ui.close();
             }
             if crate::ui_kit::list_picker(ui, "Add column here", "Add column here", false).clicked() {
@@ -3674,6 +3880,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (6, _) => add_column(&mut app.drawing, Some((s.x - g.x0) / g.bw)),
                 (7, _) => add_row(&mut app.drawing),
                 (8, _) => remove_bottom_row(&mut app.drawing),
+                (9, _) => paste_free_text(&mut app.drawing, s),
                 _ => false,
             };
             app.drawing.block_menu = None;
@@ -3681,6 +3888,55 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if changed {
                 refresh(app);
             }
+        }
+    }
+    // Menu of a text placed on the sheet.
+    let mut free_act: Option<u8> = None;
+    if let Some((_, i)) = app.drawing.free_menu {
+        crate::ui_kit::Menu::context(&response, |ui| {
+            for (n, label) in [(1u8, "Copy text"), (2, "Duplicate"), (3, "Edit text…"), (4, "Delete text")] {
+                if crate::ui_kit::list_picker(ui, label, label, false).clicked() {
+                    free_act = Some(n);
+                    ui.close();
+                }
+            }
+        });
+        if let Some(act) = free_act {
+            app.drawing.free_menu = None;
+            let t = app.drawing.texts.get(i).cloned();
+            match (act, t) {
+                (1, Some(t)) => {
+                    ui.ctx().copy_text(t.text.clone());
+                    app.drawing.cell_clip = Some(join_cell(0.0, 0.0, t.k, t.font, &t.text));
+                }
+                (2, Some(t)) if app.drawing.texts.len() < MAX_FREE_TEXTS => {
+                    app.drawing.texts.push(FreeText { x: t.x + 6.0, y: t.y - 6.0, ..t });
+                    app.drawing.ft_sel = Some(app.drawing.texts.len() - 1);
+                    refresh(app);
+                }
+                (3, Some(_)) => app.drawing.ft_edit = Some(i),
+                (4, Some(_)) => {
+                    app.drawing.texts.remove(i);
+                    app.drawing.ft_sel = None;
+                    app.drawing.ft_edit = None;
+                    refresh(app);
+                }
+                _ => {}
+            }
+        }
+    }
+    // A picked text placed on the sheet: Delete takes it away; a click elsewhere lets it go.
+    if let Some(i) = app.drawing.ft_sel {
+        if !ui.ctx().egui_wants_keyboard_input() && app.drawing.ft_edit.is_none() && ui.input(|inp| inp.key_pressed(egui::Key::Delete) || inp.key_pressed(egui::Key::Backspace)) {
+            if i < app.drawing.texts.len() {
+                app.drawing.texts.remove(i);
+                refresh(app);
+            }
+            app.drawing.ft_sel = None;
+        } else if response.clicked() || ui.input(|inp| inp.key_pressed(egui::Key::Escape)) {
+            let th = ui_text_height(&app.drawing);
+            let over = response.interact_pointer_pos().and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q))).and_then(|s| free_text_hit(&app.drawing.texts, th, s));
+            app.drawing.ft_sel = over;
         }
     }
     // A picked title block line: Delete takes it away.
@@ -3697,9 +3953,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.drawing.sel_grid = None;
     }
     let mut menu_add: Option<(usize, Pos2)> = None;
+    let mut menu_text: Option<(bool, Pos2)> = None;
     let mut menu_remove: Option<usize> = None;
     let mut menu_scale: Option<usize> = None;
     let mut menu_proj: Option<usize> = None;
+    let app_has_clip = app.drawing.cell_clip.is_some();
     if let Some((target, at)) = app.drawing.menu_at {
         crate::ui_kit::Menu::context(&response, |ui| {
             for (i, (_, label)) in VIEWS.iter().enumerate() {
@@ -3707,6 +3965,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     menu_add = Some((i, at));
                     ui.close();
                 }
+            }
+            ui.separator();
+            if crate::ui_kit::list_picker(ui, "Add text here", "Add text here", false).clicked() {
+                menu_text = Some((false, at));
+                ui.close();
+            }
+            if app_has_clip && crate::ui_kit::list_picker(ui, "Paste text here", "Paste text here", false).clicked() {
+                menu_text = Some((true, at));
+                ui.close();
             }
             if let Some(v) = target {
                 ui.separator();
@@ -3724,6 +3991,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
+    }
+    if let Some((paste, at)) = menu_text {
+        if paste {
+            paste_free_text(&mut app.drawing, at);
+        } else if app.drawing.texts.len() < MAX_FREE_TEXTS {
+            app.drawing.texts.push(FreeText { x: at.x, y: at.y, k: 1.0, font: 0, text: "Text".into() });
+            let n = app.drawing.texts.len() - 1;
+            app.drawing.ft_sel = Some(n);
+            app.drawing.ft_edit = Some(n);
+        }
+        refresh(app);
     }
     if let Some((view, at)) = menu_add {
         add_view(app, view);
@@ -3806,7 +4084,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.ft_drag.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -4321,6 +4599,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 painter.text(screen.left_top() + vec2(4.0, -4.0), egui::Align2::LEFT_BOTTOM, format!("{n} centre lines/marks selected: press Delete to remove"), egui::FontId::proportional(Tokens::get().font_body), accent);
             }
         }
+    }
+    if let Some(i) = app.drawing.ft_sel
+        && let Some(t) = app.drawing.texts.get(i)
+    {
+        let r = text_box(pos2(t.x, t.y), ui_text_height(&app.drawing) * t.k, t.text.chars().count());
+        painter.rect_stroke(Rect::from_two_pos(map(r.min), map(r.max)), 2.0, Stroke::new(1.5, Tokens::get().accent), egui::StrokeKind::Inside);
     }
     if let Some((index, _, _, _)) = app.drawing.cell_drag {
         let g = block_geo(&app.drawing, sheet.width);
