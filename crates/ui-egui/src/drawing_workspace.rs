@@ -4996,7 +4996,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let accent = Tokens::get().accent;
             let halo = Stroke::new(8.0, accent.gamma_multiply(0.4));
             match shape {
-                Shape::Line(a, b) => painter.line_segment([map(*a), map(*b)], halo),
+                Shape::Line(a, b) => {
+                    painter.line_segment([map(*a), map(*b)], halo);
+                }
                 Shape::Poly(pts) => {
                     painter.add(egui::Shape::line(pts.iter().map(|q| map(*q)).collect(), halo));
                 }
