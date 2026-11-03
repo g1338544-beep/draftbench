@@ -285,6 +285,12 @@ pub struct State {
     ft_edit: Option<usize>,
     /// Right-click on a free text: where, which.
     free_menu: Option<(Pos2, usize)>,
+    /// Lines drawn freely in the title block, the one picked, the one being dragged (index, part, pointer at start, line then), the copied one's vector and the menu on one.
+    flines: Vec<[f32; 4]>,
+    fl_sel: Option<usize>,
+    fl_drag: Option<(usize, u8, Pos2, [f32; 4])>,
+    fl_clip: Option<[f32; 2]>,
+    fl_menu: Option<(Pos2, usize)>,
     /// Right-click on the title block: the point, the line and the cell under it.
     block_menu: Option<(Pos2, Option<u8>, Option<usize>)>,
     placed: Vec<PlacedView>,
@@ -428,6 +434,11 @@ impl Default for State {
             ft_drag: None,
             ft_edit: None,
             free_menu: None,
+            flines: Vec::new(),
+            fl_sel: None,
+            fl_drag: None,
+            fl_clip: None,
+            fl_menu: None,
             block_menu: None,
             placed: Vec::new(),
             dims: Vec::new(),
@@ -546,7 +557,7 @@ impl State {
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
             "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
-            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "cells": self.cells, "designs": designs,
+            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
         })
     }
 
@@ -613,6 +624,16 @@ impl State {
             && let (Some(a), Some(b)) = (v.get("col1").and_then(serde_json::Value::as_str), v.get("col2").and_then(serde_json::Value::as_str))
         {
             self.cols = format!("{},{}", a.trim(), b.trim());
+        }
+        if let Some(a) = v.get("flines").and_then(serde_json::Value::as_array) {
+            self.flines = a
+                .iter()
+                .take(MAX_FREE_LINES)
+                .filter_map(|l| {
+                    let n: Vec<f32> = l.as_array()?.iter().filter_map(serde_json::Value::as_f64).filter(|x| x.is_finite() && x.abs() < 1e5).map(|x| x as f32).collect();
+                    if let [a, b, c, d] = n[..] { Some([a, b, c, d]) } else { None }
+                })
+                .collect();
         }
         if let Some(n) = v.get("body_rows").and_then(serde_json::Value::as_u64).filter(|n| (1..=5).contains(n)) {
             self.body_rows = n as usize;
@@ -1089,6 +1110,7 @@ fn params(st: &State) -> Value {
         p["block_h"] = json!(k);
     }
     p["cols"] = json!(parse_cols(&st.cols));
+    p["free_lines"] = json!(st.flines);
     p["body_rows"] = json!(st.body_rows.clamp(1, 5));
     for (key, text) in [("margin", &st.margin), ("block_w", &st.block_w)] {
         if let Ok(k) = text.trim().parse::<f64>()
@@ -1847,6 +1869,30 @@ fn join_cell(dx: f32, dy: f32, k: f32, font: u8, body: &str) -> String {
         let r = |v: f32| (v * 10.0).round() / 10.0;
         format!("{{{};{};{:.2};{font}}}{body}", r(dx), r(dy), k)
     }
+}
+
+/// A free line of the title block, as (u1, v1, u2, v2) in mm from the block's lower left corner.
+const MAX_FREE_LINES: usize = 60;
+
+fn fline_abs(g: &BlockGeo, l: &[f32; 4]) -> (Pos2, Pos2) {
+    (pos2(g.x0 + l[0], g.margin + l[1]), pos2(g.x0 + l[2], g.margin + l[3]))
+}
+
+/// The free line under a point and which part of it: 0 the line, 1 its start, 2 its end (the ends only
+/// of the picked line).
+fn fline_hit(g: &BlockGeo, lines: &[[f32; 4]], sel: Option<usize>, s: Pos2, tol: f32) -> Option<(usize, u8)> {
+    if let Some(i) = sel
+        && let Some(l) = lines.get(i)
+    {
+        let (a, b) = fline_abs(g, l);
+        if (s - a).length() <= tol * 1.5 {
+            return Some((i, 1));
+        }
+        if (s - b).length() <= tol * 1.5 {
+            return Some((i, 2));
+        }
+    }
+    lines.iter().enumerate().rev().find(|(_, l)| dist_to_segment(s, fline_abs(g, l)) <= tol).map(|(i, _)| (i, 0))
 }
 
 /// A text placed anywhere on the sheet: where (the middle of its baseline), size factor, font and words.
@@ -3351,6 +3397,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.selected = None;
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
             && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = pointer
+            && hit(s).is_none()
+            && let Some((i, part)) = fline_hit(&block_geo(&app.drawing, sheet.width), &app.drawing.flines, app.drawing.fl_sel, s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
+        {
+            // A free line of the title block: drag it (or, picked, one of its ends).
+            let orig = app.drawing.flines.get(i).copied().unwrap_or([0.0; 4]);
+            app.drawing.fl_drag = Some((i, part, s, orig));
+            app.drawing.fl_sel = Some(i);
+            app.drawing.selected = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
+            && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
             && let Some(which) = grid_hit(&block_geo(&app.drawing, sheet.width), s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
@@ -3430,6 +3487,36 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 app.drawing.sel_centre = Some((la, lb));
             }
+        }
+    }
+    // Dragging a free line of the title block: all of it, or one end.
+    if let (Some((i, part, from, orig)), Some(m)) = (app.drawing.fl_drag, &map) {
+        if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            && let Some(l) = app.drawing.flines.get_mut(i)
+        {
+            let (dx, dy) = (s.x - from.x, s.y - from.y);
+            let mut n = orig;
+            match part {
+                1 => {
+                    n[0] += dx;
+                    n[1] += dy;
+                }
+                2 => {
+                    n[2] += dx;
+                    n[3] += dy;
+                }
+                _ => {
+                    n[0] += dx;
+                    n[1] += dy;
+                    n[2] += dx;
+                    n[3] += dy;
+                }
+            }
+            *l = n.map(|v| (v * 10.0).round() / 10.0);
+        }
+        if response.drag_stopped() || !response.dragged() {
+            app.drawing.fl_drag = None;
+            refresh(app);
         }
     }
     // Dragging a text placed on the sheet: it follows the pointer.
@@ -3766,7 +3853,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let th = ui_text_height(&app.drawing);
             let moved = if app.drawing.block_on { moved_cell_hit(&g, &app.drawing.cells, th, s) } else { None };
             let (line, cell) = (grid_hit(&g, s, 12.0 / m.px_per_mm().max(1e-3) * 0.5), moved.or_else(|| cell_at(&g, s)));
-            if let Some(i) = free_text_hit(&app.drawing.texts, th, s) {
+            app.drawing.fl_menu = None;
+            let tol = 12.0 / m.px_per_mm().max(1e-3) * 0.5;
+            let free_line = if app.drawing.block_on { fline_hit(&g, &app.drawing.flines, None, s, tol) } else { None };
+            if free_text_hit(&app.drawing.texts, th, s).is_none()
+                && let Some((i, _)) = free_line
+            {
+                // Right-click on a free line of the title block: Copy, Duplicate, Delete.
+                app.drawing.fl_menu = Some((s, i));
+                app.drawing.fl_sel = Some(i);
+                app.drawing.free_menu = None;
+                app.drawing.block_menu = None;
+                app.drawing.menu_at = None;
+            } else if let Some(i) = free_text_hit(&app.drawing.texts, th, s) {
                 // Right-click on a text placed on the sheet: Copy, Duplicate, Edit, Delete.
                 app.drawing.free_menu = Some((s, i));
                 app.drawing.ft_sel = Some(i);
@@ -3791,6 +3890,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut block_act: Option<u8> = None;
     if let Some((s, line, cell)) = app.drawing.block_menu {
         let has_clip = app.drawing.cell_clip.is_some();
+        let has_fl_clip = app.drawing.fl_clip.is_some();
         crate::ui_kit::Menu::context(&response, |ui| {
             if cell.is_some() {
                 if crate::ui_kit::list_picker(ui, "Copy text", "Copy text", false).clicked() {
@@ -3813,6 +3913,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if line.is_some_and(|w| w != 100 && w != 101) && crate::ui_kit::list_picker(ui, "Delete this line", "Delete this line", false).clicked() {
                 block_act = Some(5);
+                ui.close();
+            }
+            for (n, label) in [(10u8, "Add horizontal line here"), (11, "Add vertical line here")] {
+                if crate::ui_kit::list_picker(ui, label, label, false).clicked() {
+                    block_act = Some(n);
+                    ui.close();
+                }
+            }
+            if has_fl_clip && crate::ui_kit::list_picker(ui, "Paste line here", "Paste line here", false).clicked() {
+                block_act = Some(12);
                 ui.close();
             }
             if has_clip && crate::ui_kit::list_picker(ui, "Paste as new text here", "Paste as new text here", false).clicked() {
@@ -3881,6 +3991,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (7, _) => add_row(&mut app.drawing),
                 (8, _) => remove_bottom_row(&mut app.drawing),
                 (9, _) => paste_free_text(&mut app.drawing, s),
+                (10 | 11, _) if app.drawing.flines.len() < MAX_FREE_LINES => {
+                    let (u, v) = (s.x - g.x0, s.y - g.margin);
+                    app.drawing.flines.push(if act == 10 { [0.0, v, g.bw, v] } else { [u, 0.0, u, g.bh] });
+                    app.drawing.fl_sel = Some(app.drawing.flines.len() - 1);
+                    true
+                }
+                (12, _) if app.drawing.flines.len() < MAX_FREE_LINES => match app.drawing.fl_clip {
+                    Some([dx, dy]) => {
+                        let (u, v) = (s.x - g.x0, s.y - g.margin);
+                        app.drawing.flines.push([u, v, u + dx, v + dy]);
+                        app.drawing.fl_sel = Some(app.drawing.flines.len() - 1);
+                        true
+                    }
+                    None => false,
+                },
                 _ => false,
             };
             app.drawing.block_menu = None;
@@ -3888,6 +4013,56 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if changed {
                 refresh(app);
             }
+        }
+    }
+    // Menu of a free line: copy it, make another like it, delete it.
+    let mut fl_act: Option<u8> = None;
+    if let Some((_, i)) = app.drawing.fl_menu {
+        crate::ui_kit::Menu::context(&response, |ui| {
+            for (n, label) in [(1u8, "Copy line"), (2, "Duplicate line"), (3, "Delete line")] {
+                if crate::ui_kit::list_picker(ui, label, label, false).clicked() {
+                    fl_act = Some(n);
+                    ui.close();
+                }
+            }
+        });
+        if let Some(act) = fl_act {
+            app.drawing.fl_menu = None;
+            let l = app.drawing.flines.get(i).copied();
+            match (act, l) {
+                (1, Some(l)) => app.drawing.fl_clip = Some([l[2] - l[0], l[3] - l[1]]),
+                (2, Some(l)) if app.drawing.flines.len() < MAX_FREE_LINES => {
+                    // The copy sits 5 mm beside the line (across it).
+                    let (dx, dy) = (l[2] - l[0], l[3] - l[1]);
+                    let n = dx.hypot(dy).max(1e-3);
+                    let (ox, oy) = (-dy / n * 5.0, dx / n * 5.0);
+                    app.drawing.flines.push([l[0] + ox, l[1] + oy, l[2] + ox, l[3] + oy]);
+                    app.drawing.fl_sel = Some(app.drawing.flines.len() - 1);
+                    refresh(app);
+                }
+                (3, Some(_)) => {
+                    app.drawing.flines.remove(i);
+                    app.drawing.fl_sel = None;
+                    refresh(app);
+                }
+                _ => {}
+            }
+        }
+    }
+    // A picked free line: Delete takes it away; a click elsewhere lets it go.
+    if let Some(i) = app.drawing.fl_sel {
+        if !ui.ctx().egui_wants_keyboard_input() && ui.input(|inp| inp.key_pressed(egui::Key::Delete) || inp.key_pressed(egui::Key::Backspace)) {
+            if i < app.drawing.flines.len() {
+                app.drawing.flines.remove(i);
+                refresh(app);
+            }
+            app.drawing.fl_sel = None;
+        } else if response.clicked() || ui.input(|inp| inp.key_pressed(egui::Key::Escape)) {
+            let over = match (response.interact_pointer_pos().and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q))), app.drawing.sheet.as_ref().map(|x| x.width), map.as_ref()) {
+                (Some(sp), Some(w), Some(m)) => fline_hit(&block_geo(&app.drawing, w), &app.drawing.flines, None, sp, 12.0 / m.px_per_mm().max(1e-3) * 0.5).map(|h| h.0),
+                _ => None,
+            };
+            app.drawing.fl_sel = over;
         }
     }
     // Menu of a text placed on the sheet.
@@ -4084,7 +4259,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.ft_drag.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -4598,6 +4773,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let n = centre_in_box(app, r);
                 painter.text(screen.left_top() + vec2(4.0, -4.0), egui::Align2::LEFT_BOTTOM, format!("{n} centre lines/marks selected: press Delete to remove"), egui::FontId::proportional(Tokens::get().font_body), accent);
             }
+        }
+    }
+    if let Some(i) = app.drawing.fl_sel
+        && let Some(l) = app.drawing.flines.get(i)
+    {
+        let (a, b) = fline_abs(&block_geo(&app.drawing, sheet.width), l);
+        let accent = Tokens::get().accent;
+        painter.line_segment([map(a), map(b)], Stroke::new(3.0, accent));
+        for q in [a, b] {
+            painter.circle(map(q), 4.0, Color32::WHITE, Stroke::new(2.0, accent));
         }
     }
     if let Some(i) = app.drawing.ft_sel

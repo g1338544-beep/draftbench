@@ -805,6 +805,17 @@ fn finish(
         for f in &divs {
             line("SHEET", Vec2::new(bx0 + block_w * f, by0), Vec2::new(bx0 + block_w * f, by0 + row * nrows as f64), entities);
         }
+        // Lines the user drew freely: from (u1, v1) to (u2, v2) mm from the block's lower left corner.
+        if let Some(list) = p.get("free_lines").and_then(Value::as_array) {
+            for l in list.iter().take(60) {
+                let n: Vec<f64> = l.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+                if let [u1, v1, u2, v2] = n[..]
+                    && [u1, v1, u2, v2].iter().all(|v| v.is_finite() && v.abs() < 1e5)
+                {
+                    line("SHEET", Vec2::new(bx0 + u1, by0 + v1), Vec2::new(bx0 + u2, by0 + v2), entities);
+                }
+            }
+        }
     }
     if block_on {
         entities.append(&mut block_entities);
