@@ -186,6 +186,15 @@ fn find_rounds(items: &[(Layer, Shape)]) -> Rounds {
     let mut out = Rounds { circles: Vec::new(), ring: std::collections::HashSet::new() };
     let mut segments: Vec<(Pos2, Pos2)> = Vec::new();
     for (layer, shape) in items {
+        // A centre circle (the bolt circle) can be dimensioned too, but is no part of a hole's outline.
+        if matches!(layer, Layer::Center) {
+            match shape {
+                Shape::Circle(c, r) => out.circles.push((*c, *r)),
+                Shape::Poly(points) => out.circles.extend(fit_circle(points, 12, true)),
+                _ => {}
+            }
+            continue;
+        }
         if !matches!(layer, Layer::Visible | Layer::Hidden) {
             continue;
         }
