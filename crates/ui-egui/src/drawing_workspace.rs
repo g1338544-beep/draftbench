@@ -5206,7 +5206,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else {
             let tol = 14.0 / px_per_mm;
             let hover_s = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
-            let snapped = hover_s.map(|h| snap_point(sheet, h, tol));
+            let snapped = hover_s.map(|h| snap_dim(sheet, h, tol, picks.is_empty()));
             if let Some(Some(pt)) = snapped {
                 painter.circle_stroke(map(pt), 6.0, Stroke::new(1.5, Tokens::get().accent));
             }
@@ -5280,7 +5280,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if response.clicked_by(egui::PointerButton::Primary)
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             {
-                let hit_pt = snap_point(sheet, c, tol);
+                let hit_pt = snap_dim(sheet, c, tol, picks.is_empty());
                 // Smart: a circle is a diameter; two points pick horizontal, vertical or aligned by their direction.
                 let mut kind = kind;
                 // Smart on a circle waits for the next pick: another circle or point measures between them,
@@ -5735,6 +5735,50 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
         guides.push([pos2(p.x - 400.0, y), pos2(p.x + 400.0, y)]);
     }
     (p, guides)
+}
+
+/// A dimension's pick: the nearest corner, end or centre; else a spot on a line. A centre line
+/// is always a reference to measure from or to; for the second pick any drawn line is, so the
+/// distance between two parallel lines (visible, dashed or centre) reads off with two clicks.
+/// The first click on a visible or dashed line still takes the whole line (see `nearest_segment`).
+fn snap_dim(sheet: &Sheet, p: Pos2, tol: f32, first: bool) -> Option<Pos2> {
+    if let Some(q) = snap_point(sheet, p, tol) {
+        return Some(q);
+    }
+    let mut best: Option<(f32, Pos2)> = None;
+    let mut offer = |a: Pos2, b: Pos2| {
+        let ab = b - a;
+        let len2 = ab.length_sq();
+        if !(len2 > 1e-9) || !len2.is_finite() {
+            return;
+        }
+        let t = ((p - a).dot(ab) / len2).clamp(0.0, 1.0);
+        let q = a + ab * t;
+        let d = (q - p).length();
+        if d <= tol && best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, q));
+        }
+    };
+    for (layer, shape) in sheet.items.iter().take(200_000) {
+        let wanted = match layer {
+            Layer::Center => true,
+            Layer::Visible | Layer::Hidden => !first,
+            _ => false,
+        };
+        if !wanted {
+            continue;
+        }
+        match shape {
+            Shape::Line(a, b) => offer(*a, *b),
+            Shape::Poly(pts) => pts.windows(2).for_each(|w| {
+                if let (Some(a), Some(b)) = (w.first(), w.get(1)) {
+                    offer(*a, *b);
+                }
+            }),
+            _ => {}
+        }
+    }
+    best.map(|(_, q)| q)
 }
 
 /// The nearest drawn corner, end, centre or circle quadrant within `tol` mm of `p`.
