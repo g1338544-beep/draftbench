@@ -1,0 +1,17 @@
+{
+  "name": "ตัดไว - แอปตัดคลิป",
+  "short_name": "ตัดไว",
+  "description": "แอปตัดต่อคลิปวิดีโอแนวตั้งบนมือถือ ตัด แบ่ง ใส่ข้อความ ใส่เพลง แล้วส่งออกเป็นไฟล์วิดีโอ",
+  "lang": "th",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#12101c",
+  "theme_color": "#12101c",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

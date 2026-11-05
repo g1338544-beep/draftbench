@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ตัดไว</title>
+<meta name="theme-color" content="#12101c">
+<link rel="icon" href="icon.png">
+<style>
+:root{--ink:#12101c;--panel:#1b1829;--line:#363050;--fg:#f5f2ff;--mute:#a7a0c6;--grad:linear-gradient(135deg,#ff8a5c 0%,#ff4f93 55%,#b45cff 100%);color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(120% 70% at 85% 0%,rgba(255,79,147,.35),transparent 60%),radial-gradient(90% 60% at 0% 30%,rgba(138,92,255,.3),transparent 65%),var(--ink);color:var(--fg);font:16px/1.55 "IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif;padding:max(32px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 32px max(16px,env(safe-area-inset-left))}
+.w{max-width:420px;margin:0 auto;display:grid;gap:18px}
+.hd{display:flex;align-items:center;gap:14px}
+.hd img{width:72px;height:72px;border-radius:18px}
+h1{margin:0;font-size:30px;line-height:1.1}
+.sub{margin:2px 0 0;color:var(--mute)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;display:grid;gap:12px}
+.card h2{margin:0;font-size:19px;display:flex;align-items:center;gap:8px}
+.card.me{border-color:#ff5f8f;box-shadow:0 0 0 1px #ff5f8f}
+.tag{font-size:12px;background:var(--grad);color:#fff;padding:2px 8px;border-radius:999px}
+a.btn{display:block;text-align:center;padding:15px;border-radius:14px;background:var(--grad);color:#fff;text-decoration:none;font-weight:700;font-size:18px}
+a.btn.alt{background:#2a2540}
+ol{margin:0;padding-left:20px;color:var(--mute);font-size:14px;display:grid;gap:4px}
+b{color:var(--fg)}
+.note{color:var(--mute);font-size:13px;text-align:center}
+</style>
+</head>
+<body>
+<div class="w">
+  <div class="hd"><img src="icon.png" alt=""><div><h1>ตัดไว</h1><p class="sub">แอปตัดคลิปสำหรับคนขายของออนไลน์</p></div></div>
+
+  <section class="card" id="android">
+    <h2>Android <span class="tag" id="tA" hidden>เครื่องนี้</span></h2>
+    <a class="btn" href="tatwai.apk" download="tatwai.apk">ดาวน์โหลดแอป (.apk · 20 MB)</a>
+    <ol>
+      <li>กดปุ่มด้านบน ถ้า Chrome เตือน กด <b>ดาวน์โหลดต่อ</b></li>
+      <li>โหลดเสร็จ แตะ <b>เปิด</b></li>
+      <li>ถ้าขึ้นว่าไม่อนุญาต กด <b>ตั้งค่า</b> → เปิด <b>อนุญาตจากแหล่งนี้</b></li>
+      <li>กด <b>ติดตั้ง</b> ถ้า Play Protect เตือน กด <b>ติดตั้งต่อไป</b></li>
+    </ol>
+  </section>
+
+  <section class="card" id="iphone">
+    <h2>iPhone / iPad <span class="tag" id="tI" hidden>เครื่องนี้</span></h2>
+    <a class="btn" href="app/">เปิดแอปตัดไว</a>
+    <ol>
+      <li>เปิดหน้านี้ใน <b>Safari</b></li>
+      <li>กด <b>เปิดแอปตัดไว</b></li>
+      <li>กดปุ่ม <b>แชร์</b> (สี่เหลี่ยมมีลูกศรขึ้น) ด้านล่าง</li>
+      <li>เลือก <b>เพิ่มไปยังหน้าจอโฮม</b> → <b>เพิ่ม</b></li>
+      <li>เปิดจากไอคอน <b>ตัดไว</b> บนหน้าจอได้เลย</li>
+    </ol>
+  </section>
+
+  <a class="btn alt" href="app/">ใช้บนเว็บทันที ไม่ต้องติดตั้ง</a>
+  <p class="note">ใช้ฟรี · คลิปของคุณอยู่ในเครื่องคุณเท่านั้น ไม่ถูกอัปโหลดไปไหน</p>
+</div>
+<script>
+var ua = navigator.userAgent, ios = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1), and = /Android/i.test(ua);
+if (ios){ document.getElementById('tI').hidden = false; document.getElementById('iphone').classList.add('me'); document.querySelector('.w').insertBefore(document.getElementById('iphone'), document.getElementById('android')); }
+if (and){ document.getElementById('tA').hidden = false; document.getElementById('android').classList.add('me'); }
+</script>
+</body>
+</html>
