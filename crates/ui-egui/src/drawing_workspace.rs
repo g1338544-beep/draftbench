@@ -586,6 +586,8 @@ impl State {
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch, v.ratio, v.bg, v.style, v.zoom])).collect::<Vec<_>>(),
             "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "flines": self.flines, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
             "paper": self.paper, "landscape": self.landscape,
+            "block_detail": self.block_detail, "block_free": self.block_free, "block_w": self.block_w,
+            "material": self.material, "qty": self.qty, "finishing": self.finishing, "heat": self.heat,
         })
     }
 
@@ -777,6 +779,17 @@ impl State {
         self.sel_dim = None;
         self.sheet = None;
         let f = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_f64).filter(|x| x.is_finite());
+        // Each sheet keeps its own title block: the Detail block, or the same one turned into lines and texts.
+        if let Some(b) = d.get("block_detail").and_then(serde_json::Value::as_bool) {
+            self.block_detail = b;
+        }
+        self.block_free = d.get("block_free").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        if let Some(t) = d.get("block_w").and_then(serde_json::Value::as_str) {
+            self.block_w = t.chars().take(6).collect();
+        }
+        for (k, field) in [("material", &mut self.material), ("qty", &mut self.qty), ("finishing", &mut self.finishing), ("heat", &mut self.heat)] {
+            *field = d.get(k).and_then(serde_json::Value::as_str).unwrap_or("").chars().take(40).collect();
+        }
         if let Some(list) = d.get("views").and_then(serde_json::Value::as_array) {
             for v in list.iter().take(24) {
                 let (Some(x), Some(y)) = (f(v, "x"), f(v, "y")) else { continue };
@@ -1138,8 +1151,22 @@ fn add_page(app: &mut SolveApp) {
     }
     st.pages = st.all_pages();
     let n = st.pages.len() + 1;
-    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": [], "flines": [], "texts": [], "paper": st.paper, "landscape": st.landscape}));
+    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": [], "flines": [], "texts": [], "paper": st.paper, "landscape": st.landscape, "block_detail": true, "block_free": false, "block_w": "190"}));
     switch_page(app, n - 1);
+}
+
+/// A copy of the sheet on screen, right after it: its views, dimensions, title block and texts, to carry on from.
+fn duplicate_page(app: &mut SolveApp) {
+    let st = &mut app.drawing;
+    if st.all_pages().len() >= 30 {
+        return;
+    }
+    st.pages = st.all_pages();
+    let Some(mut copy) = st.pages.get(st.page).cloned() else { return };
+    copy["sheet_no"] = json!((st.pages.len() + 1).to_string());
+    let to = st.page + 1;
+    st.pages.insert(to, copy);
+    switch_page(app, to);
 }
 
 /// Remove the sheet on screen (the last one cannot go).
@@ -3115,6 +3142,9 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.horizontal(|ui| {
                         if crate::ui_kit::button(ui, "Add sheet", crate::ui_kit::Button::Small).clicked() {
                             add_page(app);
+                        }
+                        if crate::ui_kit::button(ui, "Copy sheet", crate::ui_kit::Button::Small).clicked() {
+                            duplicate_page(app);
                         }
                         if count > 1 && crate::ui_kit::button(ui, "Delete sheet", crate::ui_kit::Button::Small).clicked() {
                             delete_page(app);
