@@ -89,6 +89,8 @@ struct PlacedView {
     rot: u8,
     /// The caption under the view: `None` = the automatic one (name and scale), an empty text hides it.
     label: Option<String>,
+    /// The letter on a section's or detail's cutting line and caption; blank = A, B, C in order.
+    letter: String,
     /// How far the caption was dragged from its place (sheet mm).
     cap: (f32, f32),
     /// Drawn in 3D colour behind its lines (the 3D View button): same place and scale as the view.
@@ -557,7 +559,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -791,6 +793,7 @@ impl State {
                     }),
                     rot: v.get("rot").and_then(serde_json::Value::as_u64).map_or(0, |n| (n % 4) as u8),
                     label: v.get("label").and_then(serde_json::Value::as_str).map(|t| t.chars().take(80).collect()),
+                    letter: v.get("letter").and_then(serde_json::Value::as_str).map(|t| t.chars().take(1).collect()).unwrap_or_default(),
                     colour: v.get("colour").and_then(serde_json::Value::as_bool).unwrap_or(false),
                     cap: v.get("cap").and_then(serde_json::Value::as_array).and_then(|a| Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32))).filter(|(x, y)| x.is_finite() && y.is_finite()).unwrap_or((0.0, 0.0)),
                 });
@@ -1155,6 +1158,9 @@ fn params(st: &State) -> Value {
             if let Some(t) = &v.label {
                 o["label"] = json!(t);
             }
+            if !v.letter.trim().is_empty() {
+                o["letter"] = json!(v.letter.trim());
+            }
             if v.cap != (0.0, 0.0) {
                 o["cap"] = json!([v.cap.0, v.cap.1]);
             }
@@ -1389,6 +1395,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         custom: None,
         rot: 0,
         label: None,
+        letter: String::new(),
         cap: (0.0, 0.0),
         colour: false,
     });
@@ -1413,6 +1420,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         custom: None,
         rot,
         label: None,
+        letter: String::new(),
         cap: (0.0, 0.0),
         colour: false,
     });
@@ -3117,6 +3125,13 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let v = &mut app.drawing.placed[i];
                             ui.label("Scale");
                             dirty |= scale_picker(ui, &format!("drawing_scale_{i}"), &mut v.scale);
+                            // The letter of a section or detail: A, B, C in order unless changed here.
+                            if v.section_line.is_some() || v.section.is_some() || v.detail.is_some() {
+                                ui.horizontal(|ui| {
+                                    ui.label("Letter");
+                                    dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_section_letter", i)), &mut v.letter, "auto", false, 1).changed();
+                                });
+                            }
                             // A drawn cutting line: turn this section's arrows (and its direction of sight) round.
                             if let Some([x1, y1, x2, y2]) = v.section_line
                                 && crate::ui_kit::button(ui, "Flip arrows (other side)", crate::ui_kit::Button::Small).clicked()
@@ -4731,6 +4746,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
                     label: None,
+                    letter: String::new(),
                     cap: (0.0, 0.0),
                     colour: app.drawing.placed.get(parent).is_some_and(|v| v.colour),
                     rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
@@ -5517,6 +5533,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             custom: None,
             rot: 0,
             label: None,
+            letter: String::new(),
             cap: (0.0, 0.0),
             colour: false,
         });
@@ -5538,6 +5555,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             custom: None,
             rot: 0,
             label: None,
+            letter: String::new(),
             cap: (0.0, 0.0),
             colour: false,
         });

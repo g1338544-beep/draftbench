@@ -278,7 +278,9 @@ fn manual(
             }
         }
         let angles = custom.unwrap_or_else(|| view.angles());
-        let letter = char::from(b'A' + list.iter().take(index).filter(|it| it.get("section").is_some() || it.get("detail").is_some()).count().min(25) as u8);
+        let auto_letter = char::from(b'A' + list.iter().take(index).filter(|it| it.get("section").is_some() || it.get("detail").is_some()).count().min(25) as u8);
+        // The user's own letter (one letter or digit) replaces the automatic one.
+        let letter = item.get("letter").and_then(Value::as_str).and_then(|t| t.trim().chars().next()).filter(|c| c.is_ascii_alphanumeric()).map_or(auto_letter, |c| c.to_ascii_uppercase());
         match section {
             None => {
                 if let Some(d) = detail {
