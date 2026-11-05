@@ -1054,12 +1054,18 @@ fn finish(
             let body = match *fill {
                 1 => scale_text.clone(),
                 2 => field("number"),
+                3 => field("qty"),
                 4 => field("sheet"),
                 5 => str_(p, "title").unwrap_or("").chars().take(40).collect(),
+                6 => field("material"),
                 0 => (*words).to_string(),
                 _ => String::new(),
             };
             put(bx0 + x * k, by0 + y * k, h * k, (body, 0.0, 0.0, 1.0, 0), &mut entities);
+        }
+        // Boxes whose words the user types: finishing, heat treatment and the company in the top left.
+        for (x, y, key) in [(1139.7, 118.3, "finishing"), (772.1, 16.2, "heat"), (677.0, 224.8, "company")] {
+            put(bx0 + x * k, by0 + y * k, 21.3 * k, (field(key), 0.0, 0.0, 1.0, 0), &mut entities);
         }
     }
     // Texts the user put anywhere on the sheet: x, y, size factor, font and the words.

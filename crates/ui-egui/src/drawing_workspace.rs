@@ -398,6 +398,11 @@ pub struct State {
     author: String,
     date: String,
     company: String,
+    /// Detail title block fields: material, quantity, finishing and heat treatment.
+    material: String,
+    qty: String,
+    finishing: String,
+    heat: String,
     notes: String,
     sheet: Option<Sheet>,
     error: Option<String>,
@@ -532,6 +537,10 @@ impl Default for State {
             author: String::new(),
             date: String::new(),
             company: String::new(),
+            material: String::new(),
+            qty: String::new(),
+            finishing: String::new(),
+            heat: String::new(),
             notes: String::new(),
             sheet: None,
             error: None,
@@ -607,7 +616,7 @@ impl State {
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "sec_flip": self.sec_flip, "hidden_style": self.hidden_style, "colours": self.colours,
             "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
-            "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_tpl": self.block_detail, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
+            "company": self.company, "material": self.material, "qty": self.qty, "finishing": self.finishing, "heat": self.heat, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_tpl": self.block_detail, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
         })
     }
 
@@ -664,6 +673,10 @@ impl State {
             ("cols", &mut self.cols, 40),
             ("author", &mut self.author, 80),
             ("company", &mut self.company, 80),
+            ("material", &mut self.material, 40),
+            ("qty", &mut self.qty, 20),
+            ("finishing", &mut self.finishing, 40),
+            ("heat", &mut self.heat, 40),
         ] {
             if let Some(t) = v.get(k).and_then(serde_json::Value::as_str) {
                 *field = t.chars().take(max).collect();
@@ -1211,7 +1224,7 @@ fn params(st: &State) -> Value {
         "projection": if st.first_angle { "first" } else { "third" },
         "placements": placements,
         "title": st.title,
-        "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "note": st.notes, "sheet": st.sheet_no, "revision": st.revision},
+        "block": {"number": st.number, "author": st.author, "date": st.date, "company": st.company, "material": st.material, "qty": st.qty, "finishing": st.finishing, "heat": st.heat, "note": st.notes, "sheet": st.sheet_no, "revision": st.revision},
         "tolerance": 0.15,
         "dimension_items": st.dims.iter().map(|d| json!({
             "kind": DIM_KINDS[d.kind.min(6)].0,
@@ -3454,6 +3467,10 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ("Date", 3),
                         ("Company", 4),
                         ("Notes (separate lines with |)", 5),
+                        ("Material (Detail block)", 6),
+                        ("Q'ty (Detail block)", 7),
+                        ("Finishing (Detail block)", 8),
+                        ("Heat treatment (Detail block)", 9),
                     ] {
                         ui.label(label);
                         let d = &mut app.drawing;
@@ -3463,6 +3480,10 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             2 => &mut d.author,
                             3 => &mut d.date,
                             4 => &mut d.company,
+                            6 => &mut d.material,
+                            7 => &mut d.qty,
+                            8 => &mut d.finishing,
+                            9 => &mut d.heat,
                             _ => &mut d.notes,
                         };
                         dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_block", key)), field, "", false, 80).changed();
