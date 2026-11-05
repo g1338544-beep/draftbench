@@ -3,7 +3,7 @@
   "short_name": "ตัดไว",
   "description": "แอปตัดต่อคลิปวิดีโอแนวตั้งบนมือถือ ตัด แบ่ง ใส่ข้อความ ใส่เพลง แล้วส่งออกเป็นไฟล์วิดีโอ",
   "lang": "th",
-  "start_url": "./",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
