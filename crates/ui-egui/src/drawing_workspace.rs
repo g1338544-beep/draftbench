@@ -285,6 +285,8 @@ pub struct State {
     block_on: bool,
     /// The Detail title block (tolerance and finish tables, part fields) scaled to the paper.
     block_detail: bool,
+    /// The Detail block was turned into free lines and texts: every one can be edited, moved and copied.
+    block_free: bool,
     block_h: String,
     /// The title block's column dividers, percent of its width, comma separated.
     cols: String,
@@ -465,6 +467,7 @@ impl Default for State {
             frame_on: true,
             block_on: true,
             block_detail: true,
+            block_free: false,
             block_h: "36".into(),
             cols: "40,70".into(),
             body_rows: 2,
@@ -616,7 +619,7 @@ impl State {
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "sec_flip": self.sec_flip, "hidden_style": self.hidden_style, "colours": self.colours,
             "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
-            "company": self.company, "material": self.material, "qty": self.qty, "finishing": self.finishing, "heat": self.heat, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_tpl": self.block_detail, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
+            "company": self.company, "material": self.material, "qty": self.qty, "finishing": self.finishing, "heat": self.heat, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_tpl": self.block_detail, "block_free": self.block_free, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
         })
     }
 
@@ -630,6 +633,9 @@ impl State {
         }
         if let Some(b) = flag("block_tpl") {
             self.block_detail = b;
+        }
+        if let Some(b) = flag("block_free") {
+            self.block_free = b;
         }
         let index = |k: &str, max: u64| v.get(k).and_then(serde_json::Value::as_u64).filter(|n| *n <= max).map(|n| n as usize);
         if let Some(n) = index("paper", 5) {
@@ -1260,7 +1266,7 @@ fn params(st: &State) -> Value {
     }
     p["frame_on"] = json!(st.frame_on);
     p["block_on"] = json!(st.block_on);
-    p["block_template"] = json!(if st.block_detail { "detail" } else { "" });
+    p["block_template"] = json!(if st.block_free { "free" } else if st.block_detail { "detail" } else { "" });
     if let Ok(k) = st.block_h.trim().parse::<f64>()
         && k.is_finite()
     {
@@ -2135,7 +2141,7 @@ fn join_cell(dx: f32, dy: f32, k: f32, font: u8, body: &str) -> String {
 }
 
 /// A free line of the title block, as (u1, v1, u2, v2) in mm from the block's lower left corner.
-const MAX_FREE_LINES: usize = 60;
+const MAX_FREE_LINES: usize = 200;
 
 fn fline_abs(g: &BlockGeo, l: &[f32; 4]) -> (Pos2, Pos2) {
     (pos2(g.x0 + l[0], g.margin + l[1]), pos2(g.x0 + l[2], g.margin + l[3]))
@@ -2356,6 +2362,45 @@ fn cell_centre(g: &BlockGeo, index: usize) -> (Pos2, f32, f32) {
     (pos2(g.x0 + g.bw * (lo + hi) / 2.0, g.margin + rowh * from_bottom as f32 + rowh * 0.3), g.bw * (hi - lo), rowh)
 }
 
+/// Turns the Detail title block into free lines and texts, so each one can be edited, moved,
+/// copied and deleted like the lines and texts of the old frame.
+fn explode_detail_block(app: &mut SolveApp) -> bool {
+    let Some(width) = app.drawing.sheet.as_ref().map(|s| f64::from(s.width)) else { return false };
+    let g = block_geo(&app.drawing, width as f32);
+    let (block_w, lines, texts) = solidcraft_engine::cmd::detail_template(width, f64::from(g.margin));
+    if lines.len() + app.drawing.flines.len() > MAX_FREE_LINES || texts.len() + app.drawing.texts.len() > MAX_FREE_TEXTS {
+        return false;
+    }
+    let st = &mut app.drawing;
+    st.block_w = format!("{block_w:.2}");
+    let (bx0, by0) = (width as f32 - g.margin - block_w as f32, g.margin);
+    let th = ui_text_height(st);
+    for l in &lines {
+        st.flines.push([l[0] as f32, l[1] as f32, l[2] as f32, l[3] as f32]);
+    }
+    let scale = if st.sheet_scale.contains(':') { st.sheet_scale.trim().to_string() } else { String::new() };
+    for (x, y, h, words, fill) in &texts {
+        let body = match *fill {
+            0 => words.clone(),
+            1 if !scale.is_empty() => scale.clone(),
+            1 => words.clone(),
+            2 => st.number.clone(),
+            3 => st.qty.clone(),
+            4 => st.sheet_no.clone(),
+            5 => st.title.clone(),
+            6 => st.material.clone(),
+            _ => String::new(),
+        };
+        if body.trim().is_empty() {
+            continue;
+        }
+        st.texts.push(FreeText { x: bx0 + *x as f32, y: by0 + *y as f32, k: (*h as f32 / th).clamp(0.2, 8.0), font: 0, text: body.chars().take(120).collect() });
+    }
+    st.block_free = true;
+    st.block_detail = false;
+    true
+}
+
 /// The title block cell under a sheet point.
 fn cell_at(g: &BlockGeo, s: Pos2) -> Option<usize> {
     if s.x < g.x0 || s.x > g.x0 + g.bw || s.y < g.margin || s.y > g.margin + g.bh {
@@ -2534,7 +2579,7 @@ fn delete_grid_line(st: &mut State, which: u8) -> bool {
 /// Open the text window of the title block cell at a sheet point; false when there is none.
 fn open_cell(app: &mut SolveApp, s: Pos2) -> bool {
     let Some(width) = app.drawing.sheet.as_ref().map(|x| x.width) else { return false };
-    if !app.drawing.block_on {
+    if !app.drawing.block_on || app.drawing.block_free {
         return false;
     }
     let g = block_geo(&app.drawing, width);
@@ -3439,6 +3484,14 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dirty |= crate::ui_kit::checkbox(ui, "Show the border", &mut app.drawing.frame_on).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "Show the title block", &mut app.drawing.block_on).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "Detail title block (tolerance + finish tables, sized to the paper)", &mut app.drawing.block_detail).changed();
+                    if app.drawing.block_detail && !app.drawing.block_free && crate::ui_kit::button(ui, "Edit every line and text of the block", crate::ui_kit::Button::Small).clicked() {
+                        if explode_detail_block(app) {
+                            app.set_status("The Detail block is now lines and texts: click, drag, copy or delete any of them, and add Notes.".to_string(), false);
+                            dirty = true;
+                        } else {
+                            app.set_status("Not enough room for more lines or texts.".to_string(), true);
+                        }
+                    }
                     ui.label("Title block height (mm) · column dividers (% of width, separated by commas)");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_block_h"), &mut app.drawing.block_h, "36", false, 6).changed();
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_cols"), &mut app.drawing.cols, "40,70", false, 40).changed();
@@ -3779,6 +3832,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
+            && !app.drawing.block_free
             && let Some(which) = grid_hit(&block_geo(&app.drawing, sheet.width), s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
         {
             // A line of the title block: drag it to resize the table.
@@ -3789,6 +3843,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
+            && !app.drawing.block_free
             && let Some(index) = cell_at(&block_geo(&app.drawing, sheet.width), s)
         {
             // A title block text: drag it anywhere.

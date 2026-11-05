@@ -127,3 +127,18 @@ fn sketch_entities(paths: Vec<projection::Path>, dashed: bool, entities: &mut Ve
 #[cfg(test)]
 #[path = "view_dxf_tests.rs"]
 mod tests;
+
+/// The Detail title block laid out for a sheet `sheet_w` mm wide, in millimetres from the block's
+/// lower left corner: its width, its lines, and its words as (x, y, height, words, fill) - `fill`
+/// says which value belongs in a box (0 is fixed text). Used to turn the block into lines and texts
+/// the user can edit, move and copy one by one.
+/// Block width, lines and words of the Detail title block: see [`detail_template`].
+pub type DetailTemplate = (f64, Vec<[f64; 4]>, Vec<(f64, f64, f64, String, u8)>);
+
+pub fn detail_template(sheet_w: f64, margin: f64) -> DetailTemplate {
+    let block_w = (0.45 * sheet_w).clamp(130.0, (sheet_w - 2.0 * margin).max(60.0));
+    let k = block_w / detail::WIDTH;
+    let lines = detail::LINES.iter().map(|l| [l[0] * k, l[1] * k, l[2] * k, l[3] * k]).collect();
+    let texts = detail::TEXTS.iter().map(|(x, y, h, w, fill)| (x * k, y * k, h * k, (*w).to_string(), *fill)).collect();
+    (block_w, lines, texts)
+}

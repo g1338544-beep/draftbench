@@ -951,6 +951,8 @@ fn finish(
     let wanted = p.get("block_w").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 60.0).unwrap_or(190.0);
     // The Detail title block is sized from the paper: about 45 % of its width.
     let template = p.get("block_template").and_then(Value::as_str) == Some("detail");
+    // "free": the Detail block was turned into free lines and texts; none of the fixed frame is drawn.
+    let free_block = p.get("block_template").and_then(Value::as_str) == Some("free");
     let block_w = if template { (0.45 * sheet_w).clamp(130.0, (sheet_w - 2.0 * margin).max(60.0)) } else { wanted.min(sheet_w - 2.0 * margin).max(10.0) };
     let (bx0, by0) = (sheet_w - margin - block_w, margin);
     // Dividers (fractions of the width) and the number of body rows under the title row.
@@ -971,7 +973,7 @@ fn finish(
             for l in detail::LINES {
                 line("SHEET", Vec2::new(bx0 + l[0] * k, by0 + l[1] * k), Vec2::new(bx0 + l[2] * k, by0 + l[3] * k), entities);
             }
-        } else {
+        } else if !free_block {
             rect("SHEET", Vec2::new(bx0, by0), Vec2::new(right, by0 + bh), entities);
             for j in 1..=nrows {
                 line("SHEET", Vec2::new(bx0, by0 + row * j as f64), Vec2::new(right, by0 + row * j as f64), entities);
@@ -982,7 +984,7 @@ fn finish(
         }
         // Lines the user drew freely: from (u1, v1) to (u2, v2) mm from the block's lower left corner.
         if let Some(list) = p.get("free_lines").and_then(Value::as_array) {
-            for l in list.iter().take(60) {
+            for l in list.iter().take(200) {
                 let n: Vec<f64> = l.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
                 if let [u1, v1, u2, v2] = n[..]
                     && [u1, v1, u2, v2].iter().all(|v| v.is_finite() && v.abs() < 1e5)
@@ -1045,7 +1047,7 @@ fn finish(
             put(bx0 + block_w * (lo + hi) / 2.0, by0 + row * from_bottom + row * 0.3, th, cell(idx, default), &mut entities);
         }
     }
-    if !block_on || template {
+    if !block_on || template || free_block {
         entities.truncate(text_from);
     }
     if block_on && template {
