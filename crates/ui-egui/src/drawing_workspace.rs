@@ -2772,6 +2772,13 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     let kind_name = sel.and_then(|i| app.drawing.dims.get(i)).map(|d| DIM_KINDS[d.kind.min(6)].1);
     let mut sel_dec = sel.and_then(|i| app.drawing.dims.get(i)).map(|d| d.decimals);
     let sel_dec_before = sel_dec;
+    // A diameter or radius: the angle of its leader (degrees, anticlockwise from the right) and how far it runs.
+    let mut lead: Option<(f32, f32)> = sel.and_then(|i| app.drawing.dims.get(i)).filter(|d| matches!(DIM_KINDS[d.kind.min(6)].0, "diameter" | "radius")).map(|d| {
+        let v = d.b - d.a;
+        let deg = v.y.atan2(v.x).to_degrees();
+        ((if deg < 0.0 { deg + 360.0 } else { deg }).clamp(0.0, 360.0), d.at.clamp(0.0, 300.0))
+    });
+    let lead_before = lead;
     let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_dimwin"), "dimension", "Dimension").show_body(ctx, |ui| {
         ui.label("Type");
         ui.horizontal_wrapped(|ui| {
@@ -2822,6 +2829,12 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                 });
             }
+            if let Some((ang, len)) = lead.as_mut() {
+                ui.label("Leader angle (degrees)");
+                crate::ui_kit::slider(ui, ang, 0.0..=360.0, crate::ui_kit::Slider::default());
+                ui.label("Leader length (mm)");
+                crate::ui_kit::slider(ui, len, 0.0..=300.0, crate::ui_kit::Slider::default());
+            }
             if crate::ui_kit::button(ui, "Delete dimension", crate::ui_kit::Button::Small).clicked() {
                 remove = true;
             }
@@ -2841,6 +2854,18 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
         && let Some(d) = app.drawing.dims.get_mut(i)
     {
         d.decimals = n;
+        refresh(app);
+    }
+    if let (Some(i), Some((ang, len))) = (sel, lead)
+        && lead != lead_before
+        && ang.is_finite()
+        && len.is_finite()
+        && let Some(d) = app.drawing.dims.get_mut(i)
+    {
+        let r = (d.b - d.a).length().max(1e-6);
+        let a = ang.to_radians();
+        d.b = d.a + vec2(a.cos(), a.sin()) * r;
+        d.at = len;
         refresh(app);
     }
     if decimals != app.drawing.dim_decimals {
