@@ -1659,8 +1659,26 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
             _ => format!("{}{}", if kind == "diameter" { "%%c" } else { "R" }, dim_value(measured, decimals)),
         };
         let reach = 1.5 + th * 0.3 * text_value.chars().count() as f64;
-        let centre = Vec2::new(out.x + dir.x * reach, out.y + dir.y * reach);
-        entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: centre, height: th, angle_deg: 0.0, text: text_value } });
+        // Where the value sits: 1 over a line carrying on along the leader, 2 on a level shoulder, else past its end.
+        let (centre, angle_deg) = match d.get("style").and_then(Value::as_i64) {
+            Some(1) => {
+                let along = if dir.x >= 0.0 { dir } else { Vec2::new(-dir.x, -dir.y) };
+                let tail = Vec2::new(out.x + dir.x * 2.0 * reach, out.y + dir.y * 2.0 * reach);
+                line("DIM", out, tail, entities);
+                let up = Vec2::new(-along.y, along.x);
+                (
+                    Vec2::new(out.x + dir.x * reach + up.x * th * 0.8, out.y + dir.y * reach + up.y * th * 0.8),
+                    along.y.atan2(along.x).to_degrees(),
+                )
+            }
+            Some(2) => {
+                let sgn = if dir.x < 0.0 { -1.0 } else { 1.0 };
+                line("DIM", out, Vec2::new(out.x + sgn * 2.0 * reach, out.y), entities);
+                (Vec2::new(out.x + sgn * reach, out.y + th * 0.8), 0.0)
+            }
+            _ => (Vec2::new(out.x + dir.x * reach, out.y + dir.y * reach), 0.0),
+        };
+        entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: centre, height: th, angle_deg, text: text_value } });
         return;
     }
     let (p1, p2) = match kind {

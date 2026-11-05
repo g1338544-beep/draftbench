@@ -63,6 +63,8 @@ struct DimItem {
     slide: f32,
     /// Decimal places of this dimension's value: -1 follows the drawing's setting, else 0–4.
     decimals: i32,
+    /// Circle dimensions: where the value sits - 0 at the end of the leader, 1 over a line along it, 2 on a level shoulder.
+    style: i32,
 }
 
 /// One view the user placed: its centre on the sheet in mm and how its lines are drawn.
@@ -560,7 +562,7 @@ impl State {
     fn page_json(&self) -> serde_json::Value {
         json!({
             "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
-            "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals})).collect::<Vec<_>>(),
+            "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals, "style": d.style})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
             "clines": self.clines,
@@ -814,6 +816,7 @@ impl State {
                     text: v.get("text").and_then(serde_json::Value::as_str).unwrap_or("").chars().take(40).collect(),
                     slide: f(v, "slide").unwrap_or(0.0).clamp(-5000.0, 5000.0) as f32,
                     decimals: v.get("decimals").and_then(serde_json::Value::as_i64).filter(|n| (-1..=4).contains(n)).map_or(-1, |n| n as i32),
+                    style: v.get("style").and_then(serde_json::Value::as_i64).filter(|n| (0..=2).contains(n)).map_or(0, |n| n as i32),
                 });
             }
         }
@@ -1217,6 +1220,7 @@ fn params(st: &State) -> Value {
             "at": d.at,
             "slide": d.slide,
             "decimals": d.decimals,
+            "style": d.style,
             "text": d.text,
         })).collect::<Vec<_>>(),
         "centre_extra": st.centre_extra.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..=50.0).contains(h)).unwrap_or(3.0),
@@ -2779,6 +2783,8 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
         ((if deg < 0.0 { deg + 360.0 } else { deg }).clamp(0.0, 360.0), d.at.clamp(0.0, 300.0))
     });
     let lead_before = lead;
+    let mut sel_style = sel.and_then(|i| app.drawing.dims.get(i)).filter(|_| lead.is_some()).map(|d| d.style);
+    let sel_style_before = sel_style;
     let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_dimwin"), "dimension", "Dimension").show_body(ctx, |ui| {
         ui.label("Type");
         ui.horizontal_wrapped(|ui| {
@@ -2829,6 +2835,16 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                 });
             }
+            if let Some(st) = sel_style.as_mut() {
+                ui.label("Value position");
+                ui.horizontal_wrapped(|ui| {
+                    for (n, label) in [(0, "At the end"), (1, "Over the line"), (2, "On a shoulder")] {
+                        if crate::ui_kit::list_picker(ui, label, label, *st == n).clicked() {
+                            *st = n;
+                        }
+                    }
+                });
+            }
             if let Some((ang, len)) = lead.as_mut() {
                 ui.label("Leader angle (degrees)");
                 crate::ui_kit::slider(ui, ang, 0.0..=360.0, crate::ui_kit::Slider::default());
@@ -2854,6 +2870,13 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
         && let Some(d) = app.drawing.dims.get_mut(i)
     {
         d.decimals = n;
+        refresh(app);
+    }
+    if let (Some(i), Some(st)) = (sel, sel_style)
+        && sel_style != sel_style_before
+        && let Some(d) = app.drawing.dims.get_mut(i)
+    {
+        d.style = st;
         refresh(app);
     }
     if let (Some(i), Some((ang, len))) = (sel, lead)
@@ -5281,7 +5304,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ((h.x - pa.x) * -uy + (h.y - pa.y) * ux) / n
                     }
                 };
-                let tmp = DimItem { kind: ek, a: pa, b: pb, at, text: String::new(), slide: 0.0, decimals: -1 };
+                let tmp = DimItem { kind: ek, a: pa, b: pb, at, text: String::new(), slide: 0.0, decimals: -1, style: 0 };
                 let accent = Tokens::get().accent;
                 let mid = pos2((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0);
                 let k = sheet
@@ -5337,7 +5360,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     } else {
                         let v = c - centre;
                         let len = v.length().max(1e-6);
-                        new_dim = Some(DimItem { kind: 3, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0, decimals: -1 });
+                        new_dim = Some(DimItem { kind: 3, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0, decimals: -1, style: 0 });
                         app.drawing.dim_tool = Some((7, Vec::new()));
                     }
                 } else if let (Some((a, b)), Some(k)) = (seg_pick, tool_kind) {
@@ -5347,7 +5370,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if let Some(target) = picks.first().copied() {
                         let number = app.drawing.dims.iter().filter(|d| d.kind == 5).count() + 1;
                         let text = if kind == 5 { number.to_string() } else if app.drawing.note_text.trim().is_empty() { "NOTE".to_string() } else { app.drawing.note_text.trim().to_string() };
-                        new_dim = Some(DimItem { kind, a: target, b: snap_leader(target, c), at: 0.0, text, slide: 0.0, decimals: -1 });
+                        new_dim = Some(DimItem { kind, a: target, b: snap_leader(target, c), at: 0.0, text, slide: 0.0, decimals: -1, style: 0 });
                         app.drawing.dim_tool = Some((again, Vec::new()));
                     } else {
                         app.drawing.dim_tool = Some((if kind == 0 || kind == 1 || kind == 2 { again } else { kind }, vec![hit_pt.unwrap_or(c)]));
@@ -5357,7 +5380,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if let (Some(centre), Some(r)) = (picks.first().copied(), picks.get(1).map(|p| p.x)) {
                         let v = c - centre;
                         let len = v.length().max(1e-6);
-                        new_dim = Some(DimItem { kind, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0, decimals: -1 });
+                        new_dim = Some(DimItem { kind, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0, decimals: -1, style: 0 });
                         app.drawing.dim_tool = Some((again, Vec::new()));
                     } else if let Some((centre, r)) = snap_circle(sheet, c, tol * 2.5) {
                         app.drawing.dim_tool = Some((kind, vec![centre, pos2(r, 0.0)]));
@@ -5377,7 +5400,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ((c.x - a.x) * -dy + (c.y - a.y) * dx) / n
                         }
                     };
-                    new_dim = Some(DimItem { kind, a, b, at, text: String::new(), slide: 0.0, decimals: -1 });
+                    new_dim = Some(DimItem { kind, a, b, at, text: String::new(), slide: 0.0, decimals: -1, style: 0 });
                     app.drawing.dim_tool = Some((again, Vec::new()));
                 }
             }
