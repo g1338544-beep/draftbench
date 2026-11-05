@@ -671,7 +671,8 @@ fn cut_plane(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, offs
     let cam = Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
     let (right, up, _) = cam.basis();
     let along = |v: Vec3| v.dot(normal);
-    let at = offset;
+    // Nudged by a hair so no mesh vertex lies exactly on the plane (hole centres, seams): that keeps every crossing clean.
+    let at = offset + 1.37e-4;
     let mut out = Vec::new();
     for placed in &scene.placements {
         let Some(mesh) = scene.meshes.get(placed.mesh) else { continue };
@@ -712,7 +713,7 @@ fn hatch(segments: &[(Vec2, Vec2)], spacing: f64, entities: &mut Vec<DxfEntity>)
         return;
     }
     let mut made = 0usize;
-    let mut c = lo + spacing / 2.0;
+    let mut c = lo + spacing / 2.0 + 1.9e-4;
     while c < hi && made < 3000 {
         let mut hits: Vec<(f64, Vec2)> = Vec::new();
         for (a, b) in segments {

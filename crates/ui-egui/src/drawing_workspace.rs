@@ -5138,7 +5138,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let (u, v) = (cx + (a.x - bx.1) / k, cy + (a.y - bx.2) / k);
                             let r = (b - a).length() / k;
                             let view = app.drawing.placed.get(bx.0).map_or(1, |p| p.view);
-                            det_new = Some(([u, v, r], k, (bx.1 + bx.3 / 2.0 + 60.0).min(sheet.width - 50.0), (bx.2 - bx.4 / 2.0 - 50.0).max(60.0), view));
+                            let at = free_spot(sheet, pos2(bx.1 + bx.3 / 2.0 + 60.0, bx.2 - bx.4 / 2.0 - 50.0), (bx.3 * 0.6, bx.4 * 0.6));
+                            det_new = Some(([u, v, r], k, at.x, at.y, view));
                         }
                         _ => sec_msg_detail = Some("Detail View: click the centre inside a view, then a point on the circle".to_string()),
                     }
@@ -5195,7 +5196,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         (Some(bx), Some(k), Some((cx, cy))) if k > 0.0 && (b - a).length() > 0.5 => {
                             let model = |q: Pos2| (cx + (q.x - bx.1) / k, cy + (q.y - bx.2) / k);
                             let (p1, p2) = (model(a), model(b));
-                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, (bx.1 + bx.3 / 2.0 + 70.0).min(sheet.width - 40.0), bx.2, app.drawing.placed.get(bx.0).map_or(1, |v| v.view)));
+                            // Under the view it is cut from, or the nearest free place: never on top of another view.
+                            let at = free_spot(sheet, pos2(bx.1, bx.2 - bx.4 - 45.0), (bx.3, bx.4));
+                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view)));
                         }
                         (None, _, _) | (_, None, _) | (_, _, None) => sec_msg = Some("Section View needs a view on the sheet to cut: add one first".to_string()),
                         _ => {}
@@ -5942,6 +5945,38 @@ fn snap_dim(sheet: &Sheet, p: Pos2, tol: f32, first: bool) -> Option<Pos2> {
         }
     }
     best.map(|(_, q)| q)
+}
+
+/// A free place on the sheet for a new view about `size` mm, as near `prefer` as it gets: clear of the
+/// views already there (with their captions), the sheet's edge and the title block. Falls back to
+/// `prefer` when the sheet is full.
+fn free_spot(sheet: &Sheet, prefer: Pos2, size: (f32, f32)) -> Pos2 {
+    let (w, h) = (size.0.clamp(10.0, 600.0), size.1.clamp(10.0, 600.0));
+    let edge = 15.0;
+    // Boxes as (left, right, bottom, top); a view's caption sits under it.
+    let area = |cx: f32, cy: f32, w: f32, h: f32| (cx - w / 2.0 - 6.0, cx + w / 2.0 + 6.0, cy - h / 2.0 - 22.0, cy + h / 2.0 + 6.0);
+    let taken: Vec<(f32, f32, f32, f32)> = sheet.boxes.iter().map(|b| area(b.1, b.2, b.3, b.4)).collect();
+    let block = (sheet.width * 0.52, sheet.width, 0.0, 95.0);
+    let hit = |a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)| a.0 < b.1 && b.0 < a.1 && a.2 < b.3 && b.2 < a.3;
+    let mut best: Option<(f32, Pos2)> = None;
+    let (mut y, mut rows) = (edge + h / 2.0 + 22.0, 0);
+    while y + h / 2.0 + 6.0 <= sheet.height - edge && rows < 200 {
+        let (mut x, mut cols) = (edge + w / 2.0, 0);
+        while x + w / 2.0 <= sheet.width - edge && cols < 200 {
+            let me = area(x, y, w, h);
+            if !taken.iter().any(|t| hit(me, *t)) && !hit(me, block) {
+                let d = (pos2(x, y) - prefer).length();
+                if best.is_none_or(|(bd, _)| d < bd) {
+                    best = Some((d, pos2(x, y)));
+                }
+            }
+            x += 10.0;
+            cols += 1;
+        }
+        y += 10.0;
+        rows += 1;
+    }
+    best.map_or(prefer, |(_, q)| q)
 }
 
 /// The nearest drawn corner, end, centre or circle quadrant within `tol` mm of `p`.
