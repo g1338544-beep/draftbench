@@ -263,6 +263,8 @@ pub struct State {
     revision: String,
     centre_mode: usize,
     bolt: bool,
+    /// Section arrows (and the view they look along) face the other way.
+    sec_flip: bool,
     hidden_style: usize,
     /// AutoCAD colour numbers: visible, hidden, centre, dimension.
     colours: [u8; 4],
@@ -442,6 +444,7 @@ impl Default for State {
             revision: "A".into(),
             centre_mode: 0,
             bolt: true,
+            sec_flip: false,
             hidden_style: 0,
             colours: [7, 8, 1, 3],
             centre: true,
@@ -598,7 +601,7 @@ impl State {
             "paper": self.paper, "landscape": self.landscape, "first_angle": self.first_angle,
             "custom_w": self.custom_w, "custom_h": self.custom_h, "sheet_scale": self.sheet_scale,
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
-            "bolt": self.bolt, "hidden_style": self.hidden_style, "colours": self.colours,
+            "bolt": self.bolt, "sec_flip": self.sec_flip, "hidden_style": self.hidden_style, "colours": self.colours,
             "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
             "company": self.company, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_tpl": self.block_detail, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
         })
@@ -627,6 +630,9 @@ impl State {
         }
         if let Some(b) = flag("bolt") {
             self.bolt = b;
+        }
+        if let Some(b) = flag("sec_flip") {
+            self.sec_flip = b;
         }
         if let Some(b) = flag("centre") {
             self.centre = b;
@@ -1220,6 +1226,7 @@ fn params(st: &State) -> Value {
         "dim_arrow": st.dim_arrow.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (0.5..=12.0).contains(h)),
         "bom": st.bom.iter().filter(|r| r.iter().any(|c| !c.trim().is_empty())).collect::<Vec<_>>(),
         "bolt_circle": st.bolt,
+        "section_flip": st.sec_flip,
         "hole_table": st.hole_table,
         "hidden_style": if st.hidden_style == 1 { "dashed" } else { "hidden" },
         "colors": {"visible": st.colours[0], "hidden": st.colours[1], "center": st.colours[2], "dim": st.colours[3]},
@@ -3042,6 +3049,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         });
                         dirty |= crate::ui_kit::checkbox(ui, "Bolt circle centreline", &mut app.drawing.bolt).changed();
+                        dirty |= crate::ui_kit::checkbox(ui, "Section arrows point the other way", &mut app.drawing.sec_flip).changed();
                         if !app.drawing.centre_cut.is_empty() && crate::ui_kit::button(ui, &format!("Bring back erased centre lines ({})", app.drawing.centre_cut.len()), crate::ui_kit::Button::Small).clicked() {
                             app.drawing.centre_cut.clear();
                             dirty = true;

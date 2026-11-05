@@ -146,10 +146,14 @@ fn manual(
         // projected edges. `at` blank means the middle of the bodies along the axis.
         // A cutting line drawn by the user on the Top view: x1, y1, x2, y2 in model mm. The section looks at the
         // vertical plane through it, reading along the line.
+        let flip = p.get("section_flip").and_then(Value::as_bool).unwrap_or(false);
         let section_line: Option<[f64; 4]> = item.get("section").and_then(|sec| sec.get("line")).and_then(Value::as_array).and_then(|a| {
             let n: Vec<f64> = a.iter().filter_map(Value::as_f64).collect();
             match n[..] {
-                [x1, y1, x2, y2] if n.iter().all(|v| v.is_finite() && v.abs() < 1e5) && ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt() > 1e-6 => Some([x1, y1, x2, y2]),
+                // Reversing the line turns the arrows, and the way the section looks, the other way round.
+                [x1, y1, x2, y2] if n.iter().all(|v| v.is_finite() && v.abs() < 1e5) && ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt() > 1e-6 => {
+                    Some(if flip { [x2, y2, x1, y1] } else { [x1, y1, x2, y2] })
+                }
                 _ => None,
             }
         });
