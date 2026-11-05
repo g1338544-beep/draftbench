@@ -3117,6 +3117,13 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let v = &mut app.drawing.placed[i];
                             ui.label("Scale");
                             dirty |= scale_picker(ui, &format!("drawing_scale_{i}"), &mut v.scale);
+                            // A drawn cutting line: turn this section's arrows (and its direction of sight) round.
+                            if let Some([x1, y1, x2, y2]) = v.section_line
+                                && crate::ui_kit::button(ui, "Flip arrows (other side)", crate::ui_kit::Button::Small).clicked()
+                            {
+                                v.section_line = Some([x2, y2, x1, y1]);
+                                dirty = true;
+                            }
                             dirty |= crate::ui_kit::checkbox(ui, "Hidden lines (dashed)", &mut v.dashed).changed();
                             dirty |= crate::ui_kit::checkbox(ui, "Overall dimensions", &mut v.dims).changed();
                             // The caption under the view: edit it, hide it, or go back to the automatic one.
