@@ -4965,13 +4965,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let tol = 14.0 / px_per_mm;
             let accent = Tokens::get().accent;
             let hover = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
-            let pick = |c: Pos2| -> Pos2 { snap_point(sheet, c, tol).unwrap_or(c) };
+            let first_pt = picked.first().copied();
+            let pick = |c: Pos2| -> Pos2 { section_snap(sheet, c, first_pt, tol).0 };
             let hint = if picked.is_empty() { "Section View: click the first point of the cutting line on any view (hole centres snap, Esc ends)" } else { "Section View: click the second point" };
             painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
+            // Every hole centre is a dot to aim at, so the cutting line is easy to put through them.
+            for (q, _) in sheet.rounds().circles.iter().take(400) {
+                painter.circle_filled(map(*q), 2.5, accent.gamma_multiply(0.7));
+            }
             if let Some(h) = hover {
-                painter.circle_stroke(map(pick(h)), 7.0, Stroke::new(2.0, accent));
-                if let Some(first) = picked.first().copied() {
-                    painter.line_segment([map(first), map(pick(h))], Stroke::new(2.0, accent));
+                let (at, guides) = section_snap(sheet, h, first_pt, tol);
+                for g in &guides {
+                    painter.line_segment([map(g[0]), map(g[1])], Stroke::new(1.0, accent.gamma_multiply(0.6)));
+                }
+                painter.circle_stroke(map(at), 7.0, Stroke::new(2.0, accent));
+                if let Some(first) = first_pt {
+                    painter.line_segment([map(first), map(at)], Stroke::new(2.0, accent));
                 }
             }
             if response.clicked_by(egui::PointerButton::Primary)
@@ -5631,6 +5640,68 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else if app.drawing.drag.is_some() && !response.dragged() {
         app.drawing.drag = None;
     }
+}
+
+/// The Section View cutting line's guide: `c` snapped to a drawn corner, end or hole centre; else
+/// onto a centre line near it; then lined up level or plumb with the line's first point and with
+/// hole centres. The dashed guides to draw come back with the point.
+fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2, Vec<[Pos2; 2]>) {
+    let mut guides: Vec<[Pos2; 2]> = Vec::new();
+    if let Some(mut q) = snap_point(sheet, c, tol) {
+        // Even on a point, a second point nearly level or plumb with the first keeps the line straight.
+        if let Some(f) = first {
+            if (q.y - f.y).abs() <= tol * 0.25 {
+                q.y = f.y;
+            }
+            if (q.x - f.x).abs() <= tol * 0.25 {
+                q.x = f.x;
+            }
+        }
+        return (q, guides);
+    }
+    let mut p = c;
+    // A centre line: the point drops onto it.
+    let mut best: Option<(f32, Pos2)> = None;
+    for (layer, shape) in &sheet.items {
+        if let (Layer::Center, Shape::Line(a, b)) = (layer, shape) {
+            let ab = *b - *a;
+            let len2 = ab.x * ab.x + ab.y * ab.y;
+            if !(len2 > 1e-9) || !len2.is_finite() {
+                continue;
+            }
+            let ac = c - *a;
+            let t = ((ac.x * ab.x + ac.y * ab.y) / len2).clamp(0.0, 1.0);
+            let q = *a + ab * t;
+            let d = (q - c).length();
+            if d <= tol && best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, q));
+            }
+        }
+    }
+    if let Some((_, q)) = best {
+        p = q;
+    }
+    // Level or plumb with the first point, or with any hole centre.
+    let mut xs: Vec<f32> = Vec::new();
+    let mut ys: Vec<f32> = Vec::new();
+    if let Some(f) = first {
+        xs.push(f.x);
+        ys.push(f.y);
+    }
+    for (q, _) in sheet.rounds().circles.iter().take(400) {
+        xs.push(q.x);
+        ys.push(q.y);
+    }
+    let near = |v: f32, list: &[f32]| list.iter().copied().filter(|t| (t - v).abs() <= tol * 0.6).min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()));
+    if let Some(x) = near(p.x, &xs) {
+        p.x = x;
+        guides.push([pos2(x, p.y - 400.0), pos2(x, p.y + 400.0)]);
+    }
+    if let Some(y) = near(p.y, &ys) {
+        p.y = y;
+        guides.push([pos2(p.x - 400.0, y), pos2(p.x + 400.0, y)]);
+    }
+    (p, guides)
 }
 
 /// The nearest drawn corner, end, centre or circle quadrant within `tol` mm of `p`.
