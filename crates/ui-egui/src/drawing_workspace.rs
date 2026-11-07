@@ -6149,6 +6149,28 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
             guides.push([pos2(p.x - 400.0, q.y), pos2(p.x + 400.0, q.y)]);
         }
     }
+    // From the first point: a guide along each 15° direction the pointer is nearly on (the angle lines), and one
+    // through any hole centre it points at (hole to hole). Guides only: the point stays where the pointer is.
+    if let Some(f) = first {
+        let d = p - f;
+        let len = d.length();
+        if len.is_finite() && len > tol {
+            let deg = d.y.atan2(d.x).to_degrees();
+            let m = (deg / 15.0).round() * 15.0;
+            if (deg - m).abs() <= 1.5 && (m / 90.0).fract().abs() > 1e-3 && (m / 90.0).fract().abs() < 0.999 {
+                let u = vec2(m.to_radians().cos(), m.to_radians().sin());
+                guides.push([f - u * 400.0, f + u * 400.0]);
+            }
+            for (q, _) in sheet.rounds().circles.iter().take(400) {
+                let e = *q - f;
+                let el = e.length();
+                if el > tol && (d.x * e.y - d.y * e.x).abs() <= 0.026 * len * el && d.dot(e) > 0.0 {
+                    let u = e / el;
+                    guides.push([f - u * 400.0, f + u * 400.0]);
+                }
+            }
+        }
+    }
     (p, guides)
 }
 
