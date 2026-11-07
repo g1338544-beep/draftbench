@@ -3669,9 +3669,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let body = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
             // Trim Body with a whole surface body of any shape: the surface is thickened across the part that
             // goes (as thick as the two bodies are big) and cut out, so the cut follows the surface exactly.
-            if d.extra.get("trim").and_then(Value::as_bool).unwrap_or(false)
-                && let Some(Sel::Body { name }) = sels(d, 1).first()
-            {
+            if let Some(Sel::Body { name }) = sels(d, 1).first() {
                 let st = s.world_state();
                 let tool = st.body(name).ok_or("pick a surface body as the trimming tool")?;
                 if !tool.body.is_surface() {
@@ -3682,6 +3680,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 let thick = (reach.len() * 1.5).max(1.0);
                 // The surface's normal side goes; Reverse Direction trims the other side.
                 let signed = if d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false) { -thick } else { thick };
+                if !d.extra.get("trim").and_then(Value::as_bool).unwrap_or(false) {
+                    // Split Body: two bodies, one each side of the surface.
+                    let reverse = d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false);
+                    return Ok(vec![("solid.split_by_surface".into(), json!({"body": body, "surface": name, "reverse": reverse}))]);
+                }
                 return Ok(vec![("surface.thicken".into(), json!({"bodies": [name], "thickness": signed, "operation": "cut", "targets": [body]}))]);
             }
             // A plane, a planar face's plane, or any other face (its surface extended).

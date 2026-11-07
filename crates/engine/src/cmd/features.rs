@@ -120,6 +120,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("split_body")
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
+    CommandSpec::new("solid.split_by_surface", "Split by Surface", split_by_surface)
+        .at("SOLID", "MODIFY")
+        .icon("split_body")
+        .params("body: name; surface: name of a surface body of any shape (the cut follows it exactly): the body becomes two bodies, the part on the surface's normal side and a copy of the rest; reverse?: bool"),
     CommandSpec::new("solid.trim_body", "Trim Body", trim_body)
         .at("SOLID", "MODIFY")
         .icon("trim_body")
@@ -1729,6 +1733,43 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let plane = plane_param(s, p.get("plane"), cmd)?;
     add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, sketch: None, line: None })
+}
+
+/// Split by Surface: the body is cut in two along a surface body of any shape. A copy of the body is made,
+/// then the surface is thickened across one side (as thick as the two are big) and cut out of the body, and
+/// across the other side and cut out of the copy, so the two parts meet exactly along the surface.
+fn split_by_surface(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.split_by_surface";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
+    let surface = str_(p, "surface").ok_or_else(|| bad(cmd, "`surface` must name a surface body"))?.to_string();
+    let thick = {
+        let st = s.world_state();
+        let target = st.body(&body).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+        let tool = st.body(&surface).ok_or_else(|| bad(cmd, format!("no surface body `{surface}`")))?;
+        if !tool.body.is_surface() {
+            return Err(bad(cmd, format!("`{surface}` is not a surface body")));
+        }
+        let both = tool.mesh().bounds().union(&target.mesh().bounds());
+        let reach = (both.max - both.min).len();
+        if !reach.is_finite() {
+            return Err(bad(cmd, "the bodies have no size"));
+        }
+        (reach * 1.5).max(1.0)
+    };
+    let sign = if bool_(p, "reverse").unwrap_or(false) { -1.0 } else { 1.0 };
+    let before: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    s.execute("solid.move", &json!({"bodies": [body.clone()], "translate": [0, 0, 0], "copy": true}))?;
+    let copy = s
+        .model
+        .state()
+        .bodies
+        .iter()
+        .map(|b| b.name.clone())
+        .find(|n| !before.contains(n))
+        .ok_or_else(|| bad(cmd, "the copy of the body could not be made"))?;
+    s.execute("surface.thicken", &json!({"bodies": [surface.clone()], "thickness": thick * sign, "operation": "cut", "targets": [body.clone()]}))?;
+    s.execute("surface.thicken", &json!({"bodies": [surface], "thickness": thick * sign, "operation": "intersect", "targets": [copy.clone()]}))?;
+    Ok(json!({"bodies": [body, copy]}))
 }
 
 /// Trim Body: cut a body with a plane, a face or a sketch line and keep only the part around
