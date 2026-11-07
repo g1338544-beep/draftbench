@@ -91,6 +91,8 @@ struct PlacedView {
     custom: Option<(f64, f64)>,
     /// Quarter turns (counter-clockwise) the view is turned on the sheet: a side view beside the top view.
     rot: u8,
+    /// Degrees (counter-clockwise) the view is turned on the sheet, for a section cut along a slanted line.
+    spin: f32,
     /// The caption under the view: `None` = the automatic one (name and scale), an empty text hides it.
     label: Option<String>,
     /// The letter on a section's or detail's cutting line and caption; blank = A, B, C in order.
@@ -587,7 +589,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals, "style": d.style})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -843,6 +845,7 @@ impl State {
                     align: v.get("align").and_then(serde_json::Value::as_array).and_then(|a| {
                         Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?))
                     }),
+                    spin: v.get("spin").and_then(serde_json::Value::as_f64).filter(|d| d.is_finite()).map_or(0.0, |d| d as f32),
                     rot: v.get("rot").and_then(serde_json::Value::as_u64).map_or(0, |n| (n % 4) as u8),
                     label: v.get("label").and_then(serde_json::Value::as_str).map(|t| t.chars().take(80).collect()),
                     letter: v.get("letter").and_then(serde_json::Value::as_str).map(|t| t.chars().take(1).collect()).unwrap_or_default(),
@@ -1222,6 +1225,9 @@ fn params(st: &State) -> Value {
             if v.rot % 4 != 0 {
                 o["rot"] = json!(v.rot % 4);
             }
+            if v.spin.abs() > 1e-3 {
+                o["rot_deg"] = json!(v.spin);
+            }
             if let Some(t) = &v.label {
                 o["label"] = json!(t);
             }
@@ -1453,6 +1459,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
     let n = app.drawing.placed.len();
     let (col, row) = ((n % 3) as f32, (n / 3) as f32);
     app.drawing.placed.push(PlacedView {
+            spin: 0.0,
         view,
         x: f64::from(w * (0.22 + 0.28 * col)),
         y: f64::from(h * (0.68 - 0.3 * row.min(1.0))),
@@ -1476,29 +1483,49 @@ fn add_view(app: &mut SolveApp, view: usize) {
 }
 
 /// The chosen view alone on a blank sheet, for the ghost that follows the pointer while the Base View is open.
+/// A cutting line's two ends in the order that puts its view on the right or below: the view lies on the
+/// side opposite the arrows, and the arrows look to the left of the line as it runs from the first end.
+fn section_ends(a: Pos2, b: Pos2) -> (Pos2, Pos2) {
+    let d = b - a;
+    let len = d.length().max(1e-6);
+    let (nx, ny) = (d.y / len, -d.x / len);
+    if nx < -1e-4 || (nx.abs() <= 1e-4 && ny > 0.0) { (b, a) } else { (a, b) }
+}
+
 /// Where a section view lies for a cutting line running along `d` (sheet mm) across a view with the centre
-/// and size `(x, y, w, h)`: straight across the line from it. Right of the view for an up-down line, below it
-/// for a left-right one, and for a slanted line along its perpendicular, so the view follows the slant.
+/// and size `(x, y, w, h)`: straight across the line from it, along the line's perpendicular, so a slanted
+/// line gives a view that follows the slant (right of the view for an up-down line, below it for a level one).
 fn section_spot(d: egui::Vec2, (x, y, w, h): (f32, f32, f32, f32)) -> Pos2 {
     let len = d.length().max(1e-6);
     let (ux, uy) = (d.x / len, d.y / len);
-    if ux.abs().min(uy.abs()) <= 0.17 {
-        return if d.y.abs() >= d.x.abs() { pos2(x + w + 45.0, y) } else { pos2(x, y - h - 45.0) };
-    }
-    // The perpendicular on the right (and below) side.
-    let (mut nx, mut ny) = (-uy, ux);
-    if nx < 0.0 || (nx == 0.0 && ny > 0.0) {
+    let (mut nx, mut ny) = (uy, -ux);
+    if nx < -1e-4 || (nx.abs() <= 1e-4 && ny > 0.0) {
         nx = -nx;
         ny = -ny;
+    }
+    if nx.abs() <= 1e-4 {
+        nx = 0.0;
+    }
+    if ny.abs() <= 1e-4 {
+        ny = 0.0;
     }
     let reach = nx.abs() * w / 2.0 + ny.abs() * h / 2.0 + 45.0;
     pos2(x + nx * reach, y + ny * reach)
 }
 
-/// Whether a cutting line runs (nearly) along a sheet axis: only then the view beside a plan is turned a quarter.
-fn along_axis(d: egui::Vec2) -> bool {
-    let len = d.length().max(1e-6);
-    (d.x / len).abs().min((d.y / len).abs()) <= 0.17
+/// The turn (degrees, counter-clockwise) of a section view cut from a Top or Bottom view along `line`: its
+/// horizontal runs along the cutting line and its up toward the arrows, as a folded drawing shows it. A
+/// level line needs none, an up-down one a quarter, a slanted one the slant. Other views keep their Z up.
+fn section_spin(line: [f32; 4], from: usize) -> f32 {
+    if !matches!(from, 1 | 5) {
+        return 0.0;
+    }
+    let (dx, dy) = (line[2] - line[0], line[3] - line[1]);
+    if dx.hypot(dy) < 1e-6 {
+        return 0.0;
+    }
+    let deg = dy.atan2(dx).to_degrees();
+    if deg.abs() < 0.05 { 0.0 } else { deg }
 }
 
 /// The quarter turn of a section view placed beside a Top or Bottom view: as in a folded drawing,
@@ -1516,6 +1543,7 @@ fn section_quarter(placed: &[PlacedView], from: usize, at: (f32, f32)) -> u8 {
 fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option<Sheet> {
     let name = VIEWS.get(view)?.0;
     app.drawing.placed.push(PlacedView {
+            spin: 0.0,
         view,
         x: 150.0,
         y: 150.0,
@@ -5028,6 +5056,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let dashed = app.drawing.placed.get(parent).is_some_and(|v| v.dashed);
                 let n = app.drawing.placed.len();
                 app.drawing.placed.push(PlacedView {
+            spin: 0.0,
                     view,
                     x: f64::from(at.x),
                     y: f64::from(at.y),
@@ -5326,6 +5355,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let ctr = top.and_then(|bx| sheet.centres.iter().find(|s| s.0 == bx.0).map(|s| (s.1, s.2)));
                     match (top, k, ctr) {
                         (Some(bx), Some(k), Some((cx, cy))) if k > 0.0 && (b - a).length() > 0.5 => {
+                            let (a, b) = section_ends(a, b);
                             let model = |q: Pos2| (cx + (q.x - bx.1) / k, cy + (q.y - bx.2) / k);
                             let (p1, p2) = (model(a), model(b));
                             // Under the view it is cut from, or the nearest free place: never on top of another view.
@@ -5899,6 +5929,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if let Some((d, k, x, y, from)) = det_new {
         app.drawing.placed.push(PlacedView {
+            spin: 0.0,
             view: from,
             x: f64::from(x),
             y: f64::from(y),
@@ -5921,8 +5952,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         begin(app);
     }
     if let Some((line, k, x, y, from)) = sec_new {
-        let rot = if along_axis(egui::vec2(line[2] - line[0], line[3] - line[1])) { section_quarter(&app.drawing.placed, from, (x, y)) } else { 0 };
+        let spin = section_spin(line, from);
+        let rot = 0;
         app.drawing.placed.push(PlacedView {
+            spin,
             view: from,
             x: f64::from(x),
             y: f64::from(y),
@@ -5947,6 +5980,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some((path, k, x, y, from)) = sec_path_new {
         let rot = section_quarter(&app.drawing.placed, from, (x, y));
         app.drawing.placed.push(PlacedView {
+            spin: 0.0,
             view: from,
             x: f64::from(x),
             y: f64::from(y),

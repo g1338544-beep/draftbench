@@ -281,6 +281,9 @@ fn manual(
         // A side view beside the top view is turned by quarter turns so its depth runs the same way.
         let quarter = item.get("rot").and_then(Value::as_u64).map_or(0, |n| (n % 4) as usize);
         let all = if quarter == 0 { all } else { turn(&all, quarter) };
+        // A section cut along a slanted line is turned by that slant (degrees, counter-clockwise).
+        let spin = item.get("rot_deg").and_then(Value::as_f64).filter(|d| d.is_finite()).map_or(0.0, |d| d % 360.0);
+        let all = if spin == 0.0 { all } else { turn_by(&all, spin.to_radians()) };
         let (w, h) = (all.hi.x - all.lo.x, all.hi.y - all.lo.y);
         // A view projected from another keeps that view's scale unless it has its own.
         let inherited = item.get("scale_from").and_then(Value::as_u64).and_then(|i| scales.get(&(i as usize)).copied());
@@ -375,11 +378,15 @@ fn manual(
             };
             let cam = Camera { target: Vec3::ZERO, yaw: ang.0, pitch: ang.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
             let (rv, uv, _) = cam.basis();
-            let turned = |q: Vec2| match quarter % 4 {
-                1 => Vec2::new(-q.y, q.x),
-                2 => Vec2::new(-q.x, -q.y),
-                3 => Vec2::new(q.y, -q.x),
-                _ => q,
+            let (sn, cs) = spin.to_radians().sin_cos();
+            let turned = |q: Vec2| {
+                let q = match quarter % 4 {
+                    1 => Vec2::new(-q.y, q.x),
+                    2 => Vec2::new(-q.x, -q.y),
+                    3 => Vec2::new(q.y, -q.x),
+                    _ => q,
+                };
+                Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs)
             };
             for (p0, p1) in axes.iter().take(200) {
                 if (n.dot(*p0) - off).abs() > 0.05 || (n.dot(*p1) - off).abs() > 0.05 {
@@ -396,7 +403,7 @@ fn manual(
                 }
             }
         }
-        let centres_on = section.is_none() && detail.is_none() && quarter == 0 && item.get("center").and_then(Value::as_bool).unwrap_or(true);
+        let centres_on = section.is_none() && detail.is_none() && quarter == 0 && spin == 0.0 && item.get("center").and_then(Value::as_bool).unwrap_or(true);
         if centres_on && view != StandardView::Iso {
             let here = circles(&all.lines, true);
             // Hole axes carry over to the view projected from this one (and back): a circle in one
@@ -1544,6 +1551,18 @@ fn touches(a: Vec2, b: Vec2, r: [f64; 4]) -> bool {
         }
     }
     true
+}
+
+fn turn_by(all: &Projected, angle: f64) -> std::rc::Rc<Projected> {
+    let (sn, cs) = angle.sin_cos();
+    let rot = |q: Vec2| Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs);
+    let corners = [all.lo, all.hi, Vec2::new(all.lo.x, all.hi.y), Vec2::new(all.hi.x, all.lo.y)].map(rot);
+    let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+    for q in corners {
+        lo = Vec2::new(lo.x.min(q.x), lo.y.min(q.y));
+        hi = Vec2::new(hi.x.max(q.x), hi.y.max(q.y));
+    }
+    std::rc::Rc::new(Projected { lines: all.lines.iter().map(|(a, b, hidden)| (rot(*a), rot(*b), *hidden)).collect(), lo, hi })
 }
 
 fn turn(all: &Projected, quarter: usize) -> std::rc::Rc<Projected> {
