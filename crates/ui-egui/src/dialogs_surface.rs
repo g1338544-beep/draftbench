@@ -100,6 +100,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 direction: Option<Vec3>,
                 /// The picked regions are taken away; the rest stays.
                 remove: bool,
+                /// Trim Type Mutual: two surfaces cut each other (Standard: a plane, face or curves cut one).
+                mutual: bool,
             },
             /// `holes`: an index into [`UNTRIM_HOLES`].
             Untrim {
@@ -217,7 +219,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.unstitch" => Surf::Unstitch,
         "surface.reverse_normal" => Surf::ReverseNormal,
         "surface.ruled" => Surf::Ruled { distance: "10 mm".into(), mode: 1, angle: "5 deg".into(), flip: false, round: false, chain: true },
-        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, remove: false },
+        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, remove: false, mutual: false },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
         "solid.split_face" => Surf::SplitFace,
         _ => Surf::simple_start(id)?.0,
@@ -318,8 +320,22 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
                 *join = op == 1;
             });
         }
-        Surf::Trim { extend, stitch, remove, .. } => {
-            ui_kit::options(ui, "trim_options", &mut [("Remove the picked regions (keep the rest)", remove), ("Extend to meet", extend), ("Stitch the kept pieces", stitch)]);
+        Surf::Trim { extend, stitch, remove, mutual, .. } => {
+            // As SolidWorks lays it out: Trim Type, Keep / Remove selections, then the options.
+            let mut kind = usize::from(*mutual);
+            ui_kit::segmented(ui, &mut kind, &["Standard", "Mutual"], Default::default());
+            *mutual = kind == 1;
+            ui.small(if *mutual {
+                "Mutual: pick two surfaces; each is cut by the other. Pick what to keep of each."
+            } else {
+                "Standard: pick the surface, then a plane, face or sketch curves as the trimming tool."
+            });
+            let mut sel = usize::from(*remove);
+            ui_kit::segmented(ui, &mut sel, &["Keep selections", "Remove selections"], Default::default());
+            *remove = sel == 1;
+            if *mutual {
+                ui_kit::options(ui, "trim_options", &mut [("Extend to meet", extend), ("Stitch the kept pieces", stitch)]);
+            }
         }
         Surf::Sweep(opts) => enter |= crate::dialogs_sweep::rows(ui, opts, "ss"),
         Surf::Loft { rail_fit } => crate::dialogs_sweep::rail_fit_row(ui, "sl", rail_fit),
@@ -759,7 +775,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
             ("surface.extend", p)
         }
-        Surf::Trim { extend, stitch, direction, remove } => {
+        Surf::Trim { extend, stitch, direction, remove, mutual } => {
             need(0, "the surface to trim")?;
             need(2, "the regions to keep or remove (points on them)")?;
             let body = items(inputs, 0).body_names().into_iter().next().unwrap_or_default();
@@ -777,7 +793,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             if *remove {
                 p["remove"] = json!(true);
             }
-            if let Some(other) = items(inputs, 3).body_names().into_iter().next() {
+            if let Some(other) = items(inputs, 3).body_names().into_iter().next().filter(|_| *mutual) {
                 need(4, "what to keep of the other surface")?;
                 p["with"] = json!(other);
                 p["keep_with"] = points(4).ok_or("pick what to keep of the other surface")?;
@@ -1100,7 +1116,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 (None, None) => tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
             };
             (
-                Surf::Trim { extend: *extend, stitch: *stitch, direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)), remove: *remove },
+                Surf::Trim { extend: *extend, stitch: *stitch, direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)), remove: *remove, mutual: with.is_some() },
                 vec![
                     vec![Sel::Body { name: body.to_string() }],
                     tools,
