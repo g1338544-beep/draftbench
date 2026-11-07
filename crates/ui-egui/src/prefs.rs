@@ -1584,18 +1584,8 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             });
             ui_kit::text(ui, app.tr("settings.msaa_applies_on_restart"), ui_kit::Text::Note("msaa"));
-            ui_kit::row(ui, app.tr("ui.display_quality"), |ui| {
-                use solidcraft_engine::doc::display_quality::DisplayQuality;
-                let label = |q: DisplayQuality| crate::i18n::tr(&format!("ui.display_quality_{}", q.id())).to_string();
-                let current = DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default();
-                ui_kit::dropdown_menu(ui, "pref_display_quality", &label(current), |ui| {
-                    for q in DisplayQuality::ALL {
-                        if ui_kit::list_picker(ui, q.id(), &label(q), current == q).clicked() {
-                            app.preferences.display_quality = q.id().into();
-                        }
-                    }
-                });
-            });
+            ui_kit::text(ui, app.tr("ui.display_quality"), ui_kit::Text::Inline);
+            display_quality_tiles(app, ui, t);
             ui_kit::text(ui, app.tr("settings.display_quality_note"), ui_kit::Text::Note("quality"));
             ui_kit::row(ui, app.tr("ui.supersampling"), |ui| {
                 let ss_label = |f: f32| if f > 1.0 { format!("{f}×") } else { crate::i18n::tr("ui.supersampling_off").into() };
@@ -1661,6 +1651,39 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 /// The names under the Colour vision sample (message ids).
 pub(crate) const COLOUR_VISION_SAMPLE: [&str; 6] =
     ["ui.colour_vision_fixed", "ui.colour_vision_projected", "ui.axes", "Bends", "ui.draft", "ui.colour_vision_failed"];
+
+/// Display quality as four tiles, each drawing a circle with the number of chords that quality tessellates it into,
+/// so the choice shows its effect (Coarse: a pentagon … Ultra: round).
+fn display_quality_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    use solidcraft_engine::doc::display_quality::DisplayQuality;
+    let current = DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default();
+    ui.horizontal_wrapped(|ui| {
+        for (q, sides) in DisplayQuality::ALL.into_iter().zip([5usize, 8, 18, 72]) {
+            let (rect, response) = ui.allocate_exact_size(egui::vec2(96.0, 86.0), egui::Sense::click());
+            let on = current == q;
+            let p = ui.painter_at(rect);
+            let edge = if on { t.accent } else { t.origin_plane_edge };
+            p.rect_filled(rect, 6.0, t.viewport_top);
+            let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
+            p.add(egui::Shape::closed_line(corners.to_vec(), egui::Stroke::new(if on || response.hovered() { 2.0 } else { 1.0 }, edge)));
+            let c = rect.center() - egui::vec2(0.0, 8.0);
+            let r = 24.0;
+            let ring: Vec<egui::Pos2> =
+                (0..sides).map(|k| { let a = std::f32::consts::TAU * k as f32 / sides as f32 - std::f32::consts::FRAC_PI_2; c + egui::vec2(a.cos(), a.sin()) * r }).collect();
+            p.add(egui::Shape::closed_line(ring, egui::Stroke::new(1.8, t.accent)));
+            p.text(
+                egui::pos2(rect.center().x, rect.bottom() - 12.0),
+                egui::Align2::CENTER_CENTER,
+                crate::i18n::tr(&format!("ui.display_quality_{}", q.id())),
+                egui::FontId::proportional(13.0),
+                ui.visuals().text_color(),
+            );
+            if response.clicked() {
+                app.preferences.display_quality = q.id().into();
+            }
+        }
+    });
+}
 
 /// The Colour vision sample (#778): fixed and projected sketch lines, the X and Y axes, bends up
 /// and down, Draft Analysis and a failed feature, each drawn as it is where it appears, in the
