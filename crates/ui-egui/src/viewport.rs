@@ -1472,6 +1472,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
     let measuring = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Measure { .. }));
+    // The Measure dialog's snap options (all on unless switched off).
+    let snap = |key: &str| app.dialog.as_ref().is_none_or(|d| d.extra.get(key).and_then(serde_json::Value::as_bool).unwrap_or(true));
+    let (snap_corner, snap_mid, snap_centre) = (!measuring || snap("snap_corner"), measuring && snap("snap_mid"), measuring && snap("snap_centre"));
     for (i, b) in st.bodies.iter().enumerate() {
         if !app.session.body_visible(&b.name) {
             continue;
@@ -1498,7 +1501,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             }
             if last_edge != Some(ei) {
                 last_edge = Some(ei);
-                for v in [e.first(), e.last()].into_iter().flatten() {
+                for v in [e.first(), e.last()].into_iter().flatten().filter(|_| snap_corner) {
                     if let Some(sp) = proj.to_screen(*v) {
                         let dd = sp.distance(pos);
                         if dd < 7.0 && visible(*v) && bestv.wants(dd) {
@@ -1507,11 +1510,11 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                     }
                 }
                 // Measuring also snaps to an edge's middle and to the centre of a round edge (a hole's axis point).
-                if measuring
+                if (snap_mid || snap_centre)
                     && let Some(first) = e.first()
                     && visible(*first)
                 {
-                    let extra = [Some(polyline_mid(e)), crate::sketch3d::edge_circle_centre(e)];
+                    let extra = [snap_mid.then(|| polyline_mid(e)), if snap_centre { crate::sketch3d::edge_circle_centre(e) } else { None }];
                     for v in extra.into_iter().flatten() {
                         if let Some(sp) = proj.to_screen(v) {
                             let dd = sp.distance(pos);
