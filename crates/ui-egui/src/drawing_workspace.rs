@@ -1513,21 +1513,6 @@ fn section_spot(d: egui::Vec2, (x, y, w, h): (f32, f32, f32, f32)) -> Pos2 {
     pos2(x + nx * reach, y + ny * reach)
 }
 
-/// The turn (degrees, counter-clockwise) of a section view cut from a Top or Bottom view along `line`: its
-/// horizontal runs along the cutting line and its up toward the arrows, as a folded drawing shows it. A
-/// level line needs none, an up-down one a quarter, a slanted one the slant. Other views keep their Z up.
-fn section_spin(line: [f32; 4], from: usize) -> f32 {
-    if !matches!(from, 1 | 5) {
-        return 0.0;
-    }
-    let (dx, dy) = (line[2] - line[0], line[3] - line[1]);
-    if dx.hypot(dy) < 1e-6 {
-        return 0.0;
-    }
-    let deg = dy.atan2(dx).to_degrees();
-    if deg.abs() < 0.05 { 0.0 } else { deg }
-}
-
 /// The quarter turn of a section view placed beside a Top or Bottom view: as in a folded drawing,
 /// the view beside a plan runs its depth along the sheet's horizontal, so the part stands turned
 /// (the neck points left for a view on the right). A view below or above keeps its Z up.
@@ -5952,7 +5937,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         begin(app);
     }
     if let Some((line, k, x, y, from)) = sec_new {
-        let spin = section_spin(line, from);
+        let spin = 0.0;
         let rot = 0;
         app.drawing.placed.push(PlacedView {
             spin,

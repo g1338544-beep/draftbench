@@ -282,7 +282,27 @@ fn manual(
         let quarter = item.get("rot").and_then(Value::as_u64).map_or(0, |n| (n % 4) as usize);
         let all = if quarter == 0 { all } else { turn(&all, quarter) };
         // A section cut along a slanted line is turned by that slant (degrees, counter-clockwise).
-        let spin = item.get("rot_deg").and_then(Value::as_f64).filter(|d| d.is_finite()).map_or(0.0, |d| d % 360.0);
+        let spin = match item.get("rot_deg").and_then(Value::as_f64).filter(|d| d.is_finite()) {
+            Some(d) => d % 360.0,
+            // Cut along any line: the view is projected along the cut, so the cutting line's direction in
+            // the section (where it runs in the cut plane) lies along the line's direction on the sheet.
+            None => match (section_line, line_plane) {
+                (Some([x1, y1, x2, y2]), Some((_, _, ang))) if quarter == 0 => {
+                    let basis = |a: (f64, f64)| Camera { target: Vec3::ZERO, yaw: a.0, pitch: a.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() }.basis();
+                    let (r, u, _) = basis(view.angles());
+                    let (rs, us, _) = basis(ang);
+                    let d3 = Vec3::new(r.x * (x2 - x1) + u.x * (y2 - y1), r.y * (x2 - x1) + u.y * (y2 - y1), r.z * (x2 - x1) + u.z * (y2 - y1));
+                    let img = (d3.dot(rs), d3.dot(us));
+                    if img.0.hypot(img.1) < 1e-9 || (x2 - x1).hypot(y2 - y1) < 1e-9 {
+                        0.0
+                    } else {
+                        let deg = ((y2 - y1).atan2(x2 - x1) - img.1.atan2(img.0)).to_degrees() % 360.0;
+                        if deg.abs() < 0.05 { 0.0 } else { deg }
+                    }
+                }
+                _ => 0.0,
+            },
+        };
         let all = if spin == 0.0 { all } else { turn_by(&all, spin.to_radians()) };
         let (w, h) = (all.hi.x - all.lo.x, all.hi.y - all.lo.y);
         // A view projected from another keeps that view's scale unless it has its own.
