@@ -80,6 +80,8 @@ struct PlacedView {
     section: Option<(usize, String)>,
     /// A section along a line drawn on the Top view: x1, y1, x2, y2 in model mm.
     section_line: Option<[f32; 4]>,
+    /// A stepped cutting line: x, y, x, y, … in model mm on the view it was drawn on.
+    section_path: Option<Vec<f32>>,
     /// A detail view: a circle (u, v, radius in the source view's mm) shown larger.
     detail: Option<[f32; 3]>,
     /// Projected from another view: its index, and whether it sits beside it (shares the y
@@ -331,6 +333,8 @@ pub struct State {
     mark_mode: u8,
     /// The Section View tool: the points of the cutting line picked so far.
     sec_tool: Option<Vec<Pos2>>,
+    /// The stepped section tool: the points of the bending cutting line so far.
+    sec_poly: Option<Vec<Pos2>>,
     /// A phone shows the settings panel only when asked.
     panel_open: Option<bool>,
     /// Whether the screen is a phone's (set each frame).
@@ -501,6 +505,7 @@ impl Default for State {
             mark_tool: false,
             mark_mode: 0,
             sec_tool: None,
+            sec_poly: None,
             panel_open: None,
             phone: false,
             det_tool: None,
@@ -582,7 +587,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals, "style": d.style})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -826,6 +831,10 @@ impl State {
                             [x1, y1, x2, y2] if n.iter().all(|t| t.is_finite() && t.abs() < 1e5) => Some([x1, y1, x2, y2]),
                             _ => None,
                         }
+                    }),
+                    section_path: v.get("section_path").and_then(serde_json::Value::as_array).and_then(|a| {
+                        let n: Vec<f32> = a.iter().filter_map(|t| t.as_f64().map(|t| t as f32)).collect();
+                        (n.len() >= 6 && n.len() % 2 == 0 && n.len() <= 48 && n.iter().all(|t| t.is_finite() && t.abs() < 1e5)).then_some(n)
                     }),
                     custom: v.get("custom").and_then(serde_json::Value::as_array).and_then(|a| {
                         let (y, p) = (a.first()?.as_f64()?, a.get(1)?.as_f64()?);
@@ -1245,6 +1254,9 @@ fn params(st: &State) -> Value {
             if let Some(l) = v.section_line {
                 o["section"] = json!({ "line": l });
             }
+            if let Some(path) = &v.section_path {
+                o["section"] = json!({ "path": path });
+            }
             if let Some(d) = v.detail {
                 o["detail"] = json!(d);
                 o["center"] = json!(false);
@@ -1449,6 +1461,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         dims: false,
         section: None,
         section_line: None,
+        section_path: None,
         detail: None,
         align: None,
         custom: None,
@@ -1474,6 +1487,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         dims: false,
         section: None,
         section_line: None,
+        section_path: None,
         detail: None,
         align: None,
         custom: None,
@@ -2106,7 +2120,17 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             app.drawing.cline_tool = None;
             app.drawing.dim_tool = None;
         }
+        "drawing.ribbon.sectionstep" => {
+            app.drawing.sec_poly = if app.drawing.sec_poly.is_some() { None } else { Some(Vec::new()) };
+            app.drawing.sec_tool = None;
+            app.drawing.det_tool = None;
+            app.drawing.mark_tool = false;
+            app.drawing.erase_tool = false;
+            app.drawing.cline_tool = None;
+            app.drawing.dim_tool = None;
+        }
         "drawing.ribbon.section" => {
+            app.drawing.sec_poly = None;
             app.drawing.sec_tool = if app.drawing.sec_tool.is_some() { None } else { Some(Vec::new()) };
             app.drawing.det_tool = None;
             app.drawing.mark_tool = false;
@@ -3284,6 +3308,14 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 v.section_line = Some([x2, y2, x1, y1]);
                                 dirty = true;
                             }
+                            if let Some(path) = v.section_path.clone()
+                                && crate::ui_kit::button(ui, "Flip arrows (other side)", crate::ui_kit::Button::Small).clicked()
+                            {
+                                let mut pts: Vec<[f32; 2]> = path.chunks_exact(2).filter_map(|c| if let [x, y] = c { Some([*x, *y]) } else { None }).collect();
+                                pts.reverse();
+                                v.section_path = Some(pts.into_iter().flatten().collect());
+                                dirty = true;
+                            }
                             dirty |= crate::ui_kit::checkbox(ui, "Hidden lines (dashed)", &mut v.dashed).changed();
                             dirty |= crate::ui_kit::checkbox(ui, "Overall dimensions", &mut v.dims).changed();
                             // The caption under the view: edit it, hide it, or go back to the automatic one.
@@ -3314,11 +3346,13 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 cut = !cut;
                                 v.section = cut.then(|| (0, String::new()));
                                 v.section_line = None;
+                                v.section_path = None;
                                 // Look straight at the cut: right for X, front for Y, top for Z.
                                 v.view = 2;
                                 dirty = true;
                             }
                             if v.section_line.is_none()
+                                && v.section_path.is_none()
                                 && let Some((axis, at)) = &mut v.section
                             {
                                 ui.horizontal(|ui| {
@@ -4909,6 +4943,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dims: false,
                     section: None,
                     section_line: None,
+        section_path: None,
                     detail: None,
                     align: if free { None } else { Some((parent, horizontal)) },
                     custom: None,
@@ -5217,12 +5252,90 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Stepped Section: click the points of a cutting line that bends (hole centres snap); a double-click or Enter ends it.
+    let mut sec_path_new: Option<(Vec<f32>, f32, f32, f32, usize)> = None;
+    if let Some(mut pts) = app.drawing.sec_poly.clone() {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
+            app.drawing.sec_poly = None;
+        } else {
+            let tol = 14.0 / px_per_mm;
+            let accent = Tokens::get().accent;
+            let hover = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
+            let last = pts.last().copied();
+            let hint = if pts.is_empty() {
+                "Stepped Section: click the first point of the cutting line (hole centres snap, Esc ends)"
+            } else {
+                "Stepped Section: click each bend; double-click or Enter at the last point"
+            };
+            painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
+            for (q, _) in sheet.rounds().circles.iter().take(400) {
+                painter.circle_filled(map(*q), 2.5, accent.gamma_multiply(0.7));
+            }
+            for w in pts.windows(2) {
+                if let [a, b] = w {
+                    painter.line_segment([map(*a), map(*b)], Stroke::new(2.5, accent));
+                }
+            }
+            if let Some(h) = hover {
+                let (at, guides) = section_snap(sheet, h, last, tol);
+                for g in &guides {
+                    painter.line_segment([map(g[0]), map(g[1])], Stroke::new(1.0, accent.gamma_multiply(0.6)));
+                }
+                painter.circle_stroke(map(at), 7.0, Stroke::new(2.0, accent));
+                if let Some(l) = last {
+                    painter.line_segment([map(l), map(at)], Stroke::new(2.0, accent.gamma_multiply(0.7)));
+                }
+            }
+            let mut finish = ui.input(|i| i.key_pressed(egui::Key::Enter)) || response.double_clicked();
+            if !finish
+                && response.clicked_by(egui::PointerButton::Primary)
+                && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            {
+                let q = section_snap(sheet, c, last, tol).0;
+                if last.is_some_and(|l| (l - q).length() < tol * 0.5) {
+                    finish = true;
+                } else if pts.len() < 12 {
+                    pts.push(q);
+                }
+            }
+            if finish {
+                if pts.len() >= 3 {
+                    let tops: Vec<&(usize, f32, f32, f32, f32)> = sheet
+                        .boxes
+                        .iter()
+                        .filter(|bx| app.drawing.placed.get(bx.0).is_some_and(|v| v.view < 6 && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none()))
+                        .collect();
+                    let a = pts.first().copied().unwrap_or_default();
+                    let top = tops.iter().find(|bx| (a.x - bx.1).abs() <= bx.3 / 2.0 && (a.y - bx.2).abs() <= bx.4 / 2.0).or(tops.first()).copied().copied();
+                    let k = top.and_then(|bx| sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1));
+                    let ctr = top.and_then(|bx| sheet.centres.iter().find(|s| s.0 == bx.0).map(|s| (s.1, s.2)));
+                    match (top, k, ctr) {
+                        (Some(bx), Some(k), Some((cx, cy))) if k > 0.0 => {
+                            let model = |q: Pos2| [cx + (q.x - bx.1) / k, cy + (q.y - bx.2) / k];
+                            let path: Vec<f32> = pts.iter().flat_map(|q| model(*q)).collect();
+                            // The longest piece sets the direction of the cut: the view lies across it.
+                            let long = pts.windows(2).filter_map(|w| if let [p, q] = w { Some(*q - *p) } else { None }).max_by(|u, v| u.length().total_cmp(&v.length())).unwrap_or_default();
+                            let want = if long.y.abs() >= long.x.abs() { pos2(bx.1 + bx.3 + 45.0, bx.2) } else { pos2(bx.1, bx.2 - bx.4 - 45.0) };
+                            let at = free_spot(sheet, want, (bx.3, bx.4));
+                            sec_path_new = Some((path, k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view)));
+                        }
+                        _ => sec_msg = Some("Stepped Section needs a view on the sheet to cut: add one first".to_string()),
+                    }
+                } else {
+                    sec_msg = Some("Stepped Section needs at least three points; use Section View for a straight line".to_string());
+                }
+                app.drawing.sec_poly = None;
+            } else {
+                app.drawing.sec_poly = Some(pts);
+            }
+        }
+    }
     // Double-click a line: a strip of colours appears beside it; pick one (or Auto) and the line takes it.
     {
         let idle = app.drawing.dim_tool.is_none()
             && app.drawing.proj_tool.is_none()
             && app.drawing.cline_tool.is_none()
-            && app.drawing.sec_tool.is_none() && app.drawing.det_tool.is_none()
+            && app.drawing.sec_tool.is_none() && app.drawing.sec_poly.is_none() && app.drawing.det_tool.is_none()
             && !app.drawing.mark_tool
             && !app.drawing.erase_tool
             && app.drawing.base.is_none()
@@ -5310,7 +5423,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let idle = app.drawing.dim_tool.is_none()
             && app.drawing.proj_tool.is_none()
             && app.drawing.cline_tool.is_none()
-            && app.drawing.sec_tool.is_none() && app.drawing.det_tool.is_none()
+            && app.drawing.sec_tool.is_none() && app.drawing.sec_poly.is_none() && app.drawing.det_tool.is_none()
             && !app.drawing.mark_tool
             && !app.drawing.erase_tool
             && app.drawing.base.is_none()
@@ -5701,6 +5814,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             dims: false,
             section: None,
             section_line: None,
+        section_path: None,
             detail: Some(d),
             align: None,
             custom: None,
@@ -5723,6 +5837,30 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             dims: false,
             section: Some((0, String::new())),
             section_line: Some(line),
+            section_path: None,
+            detail: None,
+            align: None,
+            custom: None,
+            rot: 0,
+            label: None,
+            letter: String::new(),
+            cap: (0.0, 0.0),
+            colour: false,
+        });
+        app.drawing.selected = Some(app.drawing.placed.len() - 1);
+        begin(app);
+    }
+    if let Some((path, k, x, y, from)) = sec_path_new {
+        app.drawing.placed.push(PlacedView {
+            view: from,
+            x: f64::from(x),
+            y: f64::from(y),
+            scale: format!("{k}"),
+            dashed: false,
+            dims: false,
+            section: Some((0, String::new())),
+            section_line: None,
+            section_path: Some(path),
             detail: None,
             align: None,
             custom: None,

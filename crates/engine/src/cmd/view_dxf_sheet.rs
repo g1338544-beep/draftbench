@@ -121,6 +121,8 @@ fn manual(
     // Views a cutting line can be drawn on, and the sections to draw: (angles, x, y, centre, scale, lo, hi) and (axis, position, angles, letter).
     let mut frames: Vec<((f64, f64), f64, f64, Vec2, f64, Vec2, Vec2)> = Vec::new();
     let mut cuts: Vec<(usize, f64, (f64, f64), char, Option<([f64; 4], (f64, f64))>)> = Vec::new();
+    // Stepped cutting lines: the points, the angles of the view they were drawn on, the section's angles and its letter.
+    let mut cut_paths: Vec<(Vec<Vec2>, (f64, f64), (f64, f64), char)> = Vec::new();
     let mut centre_used = false;
     // Detail views: (circle u, v, radius, the view's angles, letter) so the circle and letter are drawn on the view it comes from.
     let mut details: Vec<([f64; 3], (f64, f64), char)> = Vec::new();
@@ -157,9 +159,27 @@ fn manual(
                 _ => None,
             }
         });
+        // A stepped cutting line: a chain of points (x, y, x, y, ...) in model mm on the same view. Its pieces that run
+        // along the longest piece cut the part; the jogs between them add no width, as on a drawing sheet.
+        let section_path: Option<Vec<Vec2>> = item.get("section").and_then(|sec| sec.get("path")).and_then(Value::as_array).and_then(|a| {
+            let n: Vec<f64> = a.iter().filter_map(Value::as_f64).collect();
+            if n.len() < 6 || n.len() % 2 != 0 || n.len() > 48 || n.iter().any(|v| !v.is_finite() || v.abs() > 1e5) {
+                return None;
+            }
+            let mut pts: Vec<Vec2> = n.chunks_exact(2).filter_map(|c| if let [x, y] = c { Some(Vec2::new(*x, *y)) } else { None }).collect();
+            if flip {
+                pts.reverse();
+            }
+            Some(pts)
+        });
         // The line is drawn on the view named by the item (u, v along that view's right and up): the cut plane
         // holds the line and the view's depth; the section looks along `back` = line direction x view's back.
-        let line_plane = section_line.and_then(|[x1, y1, x2, y2]| {
+        let src_cam = Camera { target: Vec3::ZERO, yaw: view.angles().0, pitch: view.angles().1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+        let src_point = |q: Vec2| -> Vec3 {
+            let (r, u, _) = src_cam.basis();
+            Vec3::new(r.x * q.x + u.x * q.y, r.y * q.x + u.y * q.y, r.z * q.x + u.z * q.y)
+        };
+        let plane_of = |[x1, y1, x2, y2]: [f64; 4]| {
             let src = Camera { target: Vec3::ZERO, yaw: view.angles().0, pitch: view.angles().1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
             let (r, u, b) = src.basis();
             let d3 = Vec3::new(r.x * (x2 - x1) + u.x * (y2 - y1), r.y * (x2 - x1) + u.y * (y2 - y1), r.z * (x2 - x1) + u.z * (y2 - y1)).normalized()?;
@@ -168,12 +188,25 @@ fn manual(
             let pitch = back.z.clamp(-1.0, 1.0).asin();
             let yaw = if back.z.abs() > 0.9999 { (-d3.y).atan2(d3.x) } else { (-back.x).atan2(-back.y) };
             Some((back, back.dot(p0), (yaw, pitch)))
+        };
+        let path_plane = section_path.as_ref().and_then(|pts| {
+            let mut best: Option<(f64, [f64; 4])> = None;
+            for w in pts.windows(2) {
+                if let [a, b] = w {
+                    let l = (b.x - a.x).hypot(b.y - a.y);
+                    if best.is_none_or(|(bl, _)| l > bl) {
+                        best = Some((l, [a.x, a.y, b.x, b.y]));
+                    }
+                }
+            }
+            best.and_then(|(_, l)| plane_of(l))
         });
+        let line_plane = section_line.and_then(plane_of).or(path_plane);
         let custom = match line_plane {
             Some((_, _, angles)) => Some(angles),
             None => custom,
         };
-        let section: Option<(usize, Option<f64>)> = if section_line.is_some() { Some((3, None)) } else { item.get("section").and_then(|sec| {
+        let section: Option<(usize, Option<f64>)> = if section_line.is_some() || section_path.is_some() { Some((3, None)) } else { item.get("section").and_then(|sec| {
             let axis = match sec.get("axis").and_then(Value::as_str)? {
                 "x" => 0,
                 "y" => 1,
@@ -184,11 +217,18 @@ fn manual(
         }) };
         let mut section_at = 0.0;
         let mut cut_count = usize::MAX;
+        let mut section_closing: Vec<(Vec2, Vec2)> = Vec::new();
         let all = if let Some((axis, at)) = section {
             section_at = at.unwrap_or_else(|| middle(scene, axis));
-            let cut = match line_plane {
-                Some((normal, offset, angles)) => cut_plane(scene, angles, normal, offset),
-                None => cut_outline(scene, custom.unwrap_or_else(|| view.angles()), axis, section_at),
+            let cut = match (&section_path, line_plane) {
+                (Some(pts), Some((normal, _, angles))) => {
+                    let pts3: Vec<Vec3> = pts.iter().map(|q| src_point(*q)).collect();
+                    let (cut, closing) = stepped_cut(scene, &pts3, normal, angles);
+                    section_closing = closing;
+                    cut
+                }
+                (_, Some((normal, offset, angles))) => cut_plane(scene, angles, normal, offset),
+                _ => cut_outline(scene, custom.unwrap_or_else(|| view.angles()), axis, section_at),
             };
             if cut.is_empty() {
                 return Err(bad(CMD, "the section plane does not cut any visible body"));
@@ -201,6 +241,7 @@ fn manual(
                 }
             }
             let behind = match line_plane {
+                Some(_) if section_path.is_some() => Vec::new(),
                 Some((normal, offset, angles)) => behind_edges(scene, angles, normal, offset, &cut),
                 None => {
                     let normal = match axis {
@@ -303,10 +344,16 @@ fn manual(
                 }
                 frames.push((angles, x, y, c, scale, all.lo, all.hi));
             }
+            Some(_) if section_path.is_some() => {
+                if let Some(pts) = &section_path {
+                    cut_paths.push((pts.clone(), view.angles(), angles, letter));
+                }
+            }
             Some((axis, _)) => cuts.push((axis, section_at, angles, letter, section_line.map(|l| (l, view.angles())))),
         }
         if section.is_some() {
-            let segments: Vec<(Vec2, Vec2)> = all.lines.iter().take(cut_count).map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
+            let mut segments: Vec<(Vec2, Vec2)> = all.lines.iter().take(cut_count).map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
+            segments.extend(section_closing.iter().map(|(a, b)| (to_sheet(*a), to_sheet(*b))));
             hatch(&segments, 3.0, &mut entities);
         }
         let centres_on = section.is_none() && detail.is_none() && quarter == 0 && item.get("center").and_then(Value::as_bool).unwrap_or(true);
@@ -501,6 +548,50 @@ fn manual(
                     line("DIM", tip, back_pt, &mut entities);
                 }
                 text("TEXT", Vec2::new(end.x - dir.x * 0.0 - sight.x * 4.0, end.y - sight.y * 4.0 - th * 0.3), th, letter.to_string(), &mut entities);
+            }
+        }
+    }
+    // A stepped cutting line: chain line along every piece, heavy at the ends and the bends, arrows and letters at the ends.
+    for (pts, from, sec_angles, letter) in &cut_paths {
+        let sec_cam = Camera { target: Vec3::ZERO, yaw: sec_angles.0, pitch: sec_angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+        let (_, _, back) = sec_cam.basis();
+        for (angles, x, y, c, scale, _, _) in &frames {
+            if (angles.0 - from.0).abs() > 1e-6 || (angles.1 - from.1).abs() > 1e-6 {
+                continue;
+            }
+            let cam = Camera { target: Vec3::ZERO, yaw: angles.0, pitch: angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+            let (right, up, _) = cam.basis();
+            let Some(sight) = unit(Vec2::new(-back.dot(right), -back.dot(up))) else { continue };
+            let sheet_pts: Vec<Vec2> = pts.iter().map(|q| Vec2::new(x + (q.x - c.x) * scale, y + (q.y - c.y) * scale)).collect();
+            let n = sheet_pts.len();
+            for (i, w) in sheet_pts.windows(2).enumerate() {
+                let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
+                let Some(dir) = unit(Vec2::new(b.x - a.x, b.y - a.y)) else { continue };
+                let len = (b.x - a.x).hypot(b.y - a.y);
+                let (mut a2, mut b2) = (*a, *b);
+                if i == 0 {
+                    a2 = Vec2::new(a.x - dir.x * 6.0, a.y - dir.y * 6.0);
+                }
+                if i + 2 == n {
+                    b2 = Vec2::new(b.x + dir.x * 6.0, b.y + dir.y * 6.0);
+                }
+                line("CENTER", a2, b2, &mut entities);
+                let stub = (len * 0.4).min(8.0);
+                line("VISIBLE", a2, Vec2::new(a.x + dir.x * stub, a.y + dir.y * stub), &mut entities);
+                line("VISIBLE", b2, Vec2::new(b.x - dir.x * stub, b.y - dir.y * stub), &mut entities);
+            }
+            centre_used = true;
+            for (k, end) in [(0usize, sheet_pts.first()), (1, sheet_pts.last())] {
+                let (Some(end), Some(other)) = (end, if k == 0 { sheet_pts.get(1) } else { sheet_pts.get(n.saturating_sub(2)) }) else { continue };
+                let Some(dir) = unit(Vec2::new(end.x - other.x, end.y - other.y)) else { continue };
+                let end = Vec2::new(end.x + dir.x * 6.0, end.y + dir.y * 6.0);
+                let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
+                line("DIM", end, tip, &mut entities);
+                for kk in [-1.0, 1.0] {
+                    let back_pt = Vec2::new(tip.x - sight.x * 3.0 - sight.y * 0.9 * kk, tip.y - sight.y * 3.0 + sight.x * 0.9 * kk);
+                    line("DIM", tip, back_pt, &mut entities);
+                }
+                text("TEXT", Vec2::new(end.x - sight.x * 4.0, end.y - sight.y * 4.0 - th * 0.3), th, letter.to_string(), &mut entities);
             }
         }
     }
@@ -713,6 +804,60 @@ fn cut_plane(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, offs
         }
     }
     out
+}
+
+/// A stepped cut: the plane `normal` through each piece of the path that runs along the section's width, clipped to that
+/// piece's stretch and laid side by side. Also the closing edges where one piece meets the next (for the hatch only).
+fn stepped_cut(scene: &meshes::Scene, pts: &[Vec3], normal: Vec3, angles: (f64, f64)) -> (Vec<(Vec2, Vec2)>, Vec<(Vec2, Vec2)>) {
+    let cam = Camera { target: Vec3::ZERO, yaw: angles.0, pitch: angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+    let (right, _, _) = cam.basis();
+    let mut ranges: Vec<(f64, f64, f64)> = Vec::new();
+    for w in pts.windows(2) {
+        let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
+        let Some(dn) = (*b - *a).normalized() else { continue };
+        if dn.dot(right).abs() < 0.99 {
+            continue;
+        }
+        let (ta, tb) = (a.dot(right), b.dot(right));
+        ranges.push((ta.min(tb), ta.max(tb), normal.dot(*a)));
+    }
+    let (mut cut, mut closing) = (Vec::new(), Vec::new());
+    for (lo, hi, offset) in ranges.into_iter().take(12) {
+        let segs = cut_plane(scene, angles, normal, offset);
+        for (a, b) in &segs {
+            let dx = b.x - a.x;
+            let (t0, t1) = if dx.abs() < 1e-12 {
+                if a.x >= lo && a.x <= hi { (0.0, 1.0) } else { continue }
+            } else {
+                let (mut ta, mut tb) = ((lo - a.x) / dx, (hi - a.x) / dx);
+                if ta > tb {
+                    std::mem::swap(&mut ta, &mut tb);
+                }
+                (ta.max(0.0), tb.min(1.0))
+            };
+            if t0 >= t1 {
+                continue;
+            }
+            let at = |t: f64| Vec2::new(a.x + dx * t, a.y + (b.y - a.y) * t);
+            cut.push((at(t0), at(t1)));
+        }
+        for x in [lo, hi] {
+            let xs = x + 1.3e-5;
+            let mut ys: Vec<f64> = segs
+                .iter()
+                .filter(|(a, b)| (a.x > xs) != (b.x > xs))
+                .map(|(a, b)| a.y + (xs - a.x) / (b.x - a.x) * (b.y - a.y))
+                .filter(|y| y.is_finite())
+                .collect();
+            ys.sort_by(|p, q| p.partial_cmp(q).unwrap_or(std::cmp::Ordering::Equal));
+            for pair in ys.chunks_exact(2) {
+                if let [y0, y1] = pair {
+                    closing.push((Vec2::new(x, *y0), Vec2::new(x, *y1)));
+                }
+            }
+        }
+    }
+    (cut, closing)
 }
 
 /// Edges of the bodies that lie behind the cutting plane (on the far side from the viewer), projected like the cut
