@@ -196,6 +196,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 if ui_kit::button(ui, tr("Use fixed plane"), ui_kit::Button::Normal).clicked() {
                     d.extra.insert("fixed_plane".into(), json!(true));
                 }
+                // A sketch can always be started: a face that cannot keep an attachment (a stretched
+                // surface, a reshaped face) takes the sketch on a fixed plane at once.
+                if d.error.as_deref().is_some_and(|e| e.contains("attachment")) && d.extra.get("fixed_plane").and_then(serde_json::Value::as_bool) != Some(true) {
+                    d.extra.insert("fixed_plane".into(), json!(true));
+                }
             }
         }
         Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k),
