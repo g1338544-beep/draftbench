@@ -3459,8 +3459,20 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             ("solid.sweep", p)
         }
         Kind::OffsetPlane { .. } => {
-            need(0, "a plane")?;
-            let base = plane_arg(app, sels(d, 0).first())?;
+            // A WCS axis (XC, YC or ZC) offsets the plane square to that axis from the WCS origin.
+            let wcs_axis = d.extra.get("wcs_axis").and_then(Value::as_str).filter(|a| matches!(*a, "x" | "y" | "z"));
+            let base = if let Some(axis) = wcs_axis {
+                let w = app.session.wcs.unwrap_or(solidcraft_engine::cmd::wcs::Wcs::WORLD);
+                let n = match axis {
+                    "x" => w.x,
+                    "y" => w.y,
+                    _ => w.z(),
+                };
+                json!({"origin": pt(w.origin), "normal": pt(n)})
+            } else {
+                need(0, "a plane")?;
+                plane_arg(app, sels(d, 0).first())?
+            };
             ("construct.plane.offset", json!({"base": base}))
         }
         Kind::MeshConvert { tolerance } => {

@@ -713,6 +713,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
         }
         Kind::OffsetPlane { offset } => {
+            // Or offset from the WCS origin along XC, YC or ZC, with no plane picked.
+            form_row(ui, "WCS axis", |ui| {
+                extra_choice(ui, &mut d.extra, "offset_wcs_axis", "wcs_axis", &[("Picked plane", "none"), ("XC", "x"), ("YC", "y"), ("ZC", "z")]);
+            });
             enter |= expr_row(ui, "Distance", offset);
         }
         Kind::AnglePlane { angle } => {
