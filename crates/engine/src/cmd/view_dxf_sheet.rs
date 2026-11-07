@@ -2016,7 +2016,9 @@ fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
     let mut out = Vec::new();
     for members in groups.values() {
         let n = members.len();
-        if n < 6 || members.iter().any(|v| degree.get(*v) != Some(&2)) {
+        // A rim seen twice (top and bottom, tessellated differently) leaves corners of degree 3 or 4: still a
+        // closed ring, so only open chains (a corner with fewer than two edges) are refused.
+        if n < 6 || members.iter().any(|v| degree.get(*v).is_none_or(|d| *d < 2)) {
             continue;
         }
         let points: Vec<Vec2> = members.iter().filter_map(|v| pts.get(*v).copied()).collect();
@@ -2046,7 +2048,8 @@ fn loops(edges: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, f64)> {
         }
         let lens: Vec<f64> = unique.iter().filter(|(a, _)| members.contains(a)).filter_map(|(a, b)| Some(pts.get(*a)?.dist(*pts.get(*b)?))).collect();
         let mean = lens.iter().sum::<f64>() / lens.len().max(1) as f64;
-        if lens.iter().any(|l| (l - mean).abs() > 0.5 * mean) {
+        let simple = members.iter().all(|v| degree.get(*v) == Some(&2));
+        if simple && lens.iter().any(|l| (l - mean).abs() > 0.5 * mean) {
             continue;
         }
         out.push((c, r));
