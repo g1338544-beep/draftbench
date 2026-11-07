@@ -4529,7 +4529,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         let text = app.drawing.ft_sel.and_then(|i| app.drawing.texts.get(i).cloned());
         let line = app.drawing.fl_sel.and_then(|i| app.drawing.flines.get(i).copied());
-        let hover = response.hover_pos().and_then(|q| m.to_sheet(q));
+        let hover = response.hover_pos().and_then(|q| map.as_ref().and_then(|mm| mm.to_sheet(q)));
         let mut changed = false;
         if copy_key {
             if let Some(t) = &text {
