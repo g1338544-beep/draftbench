@@ -386,6 +386,14 @@ pub fn refine_snap(
             return Some((plane.to_local(point), Some(format!("vertex:{},{},{}", point.x, point.y, point.z))));
         }
     }
+    // The centre of a round model edge (a hole, a boss) under the cursor.
+    for c in crate::sketch3d::circle_centres(app) {
+        let q = plane.to_local(c);
+        if proj.to_screen(plane.to_world(q)).is_some_and(|s| s.distance(a) < 9.0) {
+            SNAP.with(|s| *s.borrow_mut() = Some(("Center", q)));
+            return Some((q, None));
+        }
+    }
     let mid_only = crate::tool_modifiers::target_midpoint();
     // Shift midpoint mode: widen the midpoint capture a little and skip other inferences.
     let mid_tol = if mid_only { tol * 1.5 } else { tol };

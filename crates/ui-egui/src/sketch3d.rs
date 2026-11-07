@@ -107,7 +107,7 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
 }
 
 /// Centres of the circles the visible bodies' closed round edges make (holes, bosses, rims).
-fn circle_centres(app: &SolveApp) -> Vec<Vec3> {
+pub(crate) fn circle_centres(app: &SolveApp) -> Vec<Vec3> {
     let st = app.session.world_state();
     let mut out: Vec<Vec3> = Vec::new();
     let mut budget = 6000usize;
