@@ -1699,13 +1699,22 @@ impl SolveApp {
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
         self.ui.layout.publish(ui.ctx());
         // A phone: the Browser and the timeline start closed (the screen is the model's); opened again, they stay.
+        // A window that was only briefly narrow (the page loading, a resize) must not leave them closed on a wide
+        // screen: what the phone rule closed opens again when the window is wide.
+        let key = egui::Id::new("sc_phone_collapsed");
+        let auto_key = egui::Id::new("sc_phone_auto_closed");
         if shell::is_phone(ui.ctx()) {
-            let key = egui::Id::new("sc_phone_collapsed");
             if !ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false)) {
                 ui.ctx().data_mut(|d| d.insert_temp(key, true));
+                ui.ctx().data_mut(|d| d.insert_temp(auto_key, true));
                 self.ui.show_browser = false;
                 self.ui.show_timeline = false;
             }
+        } else if ui.ctx().data(|d| d.get_temp::<bool>(auto_key).unwrap_or(false)) {
+            ui.ctx().data_mut(|d| d.insert_temp(auto_key, false));
+            ui.ctx().data_mut(|d| d.insert_temp(key, false));
+            self.ui.show_browser = true;
+            self.ui.show_timeline = true;
         }
         scenario::clear_handles();
         self.poll_deferred(ui.ctx());
