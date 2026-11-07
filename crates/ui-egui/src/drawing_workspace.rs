@@ -1476,6 +1476,18 @@ fn add_view(app: &mut SolveApp, view: usize) {
 }
 
 /// The chosen view alone on a blank sheet, for the ghost that follows the pointer while the Base View is open.
+/// The quarter turn of a section view placed beside a Top or Bottom view: as in a folded drawing,
+/// the view beside a plan runs its depth along the sheet's horizontal, so the part stands turned
+/// (the neck points left for a view on the right). A view below or above keeps its Z up.
+fn section_quarter(placed: &[PlacedView], from: usize, at: (f32, f32)) -> u8 {
+    if !matches!(from, 1 | 5) {
+        return 0;
+    }
+    let Some(p) = placed.iter().find(|v| v.view == from && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none()) else { return 0 };
+    let (dx, dy) = (f64::from(at.0) - p.x, f64::from(at.1) - p.y);
+    if dx.abs() <= dy.abs() { 0 } else if dx >= 0.0 { 1 } else { 3 }
+}
+
 fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option<Sheet> {
     let name = VIEWS.get(view)?.0;
     app.drawing.placed.push(PlacedView {
@@ -5884,6 +5896,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         begin(app);
     }
     if let Some((line, k, x, y, from)) = sec_new {
+        let rot = section_quarter(&app.drawing.placed, from, (x, y));
         app.drawing.placed.push(PlacedView {
             view: from,
             x: f64::from(x),
@@ -5897,7 +5910,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             detail: None,
             align: None,
             custom: None,
-            rot: 0,
+            rot,
             label: None,
             letter: String::new(),
             cap: (0.0, 0.0),
@@ -5907,6 +5920,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         begin(app);
     }
     if let Some((path, k, x, y, from)) = sec_path_new {
+        let rot = section_quarter(&app.drawing.placed, from, (x, y));
         app.drawing.placed.push(PlacedView {
             view: from,
             x: f64::from(x),
@@ -5920,7 +5934,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             detail: None,
             align: None,
             custom: None,
-            rot: 0,
+            rot,
             label: None,
             letter: String::new(),
             cap: (0.0, 0.0),
