@@ -281,7 +281,7 @@ impl Session {
             let placement_hidden = !path.is_empty() && !self.occurrence_visible(&path);
             let scope = Self::folder_scope(&path);
             for b in st.bodies.iter().filter(|b| self.doc.model_body_component(b) == component) {
-                if placement_hidden || self.item_folder_hidden(&scope, component, "bodies", &b.name) {
+                if placement_hidden || self.item_folder_hidden(&scope, component, if b.body.is_surface() { "surfaces" } else { "bodies" }, &b.name) {
                     out.insert(self.doc.world_body_name(&st, &b.name, component, &path));
                 }
             }

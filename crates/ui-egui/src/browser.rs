@@ -166,7 +166,7 @@ fn find_group(app: &SolveApp, id: u64) -> Option<&solidcraft_engine::doc::Browse
 pub fn group_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     let st = app.session.world_state();
     find_group(app, id)
-        .filter(|g| g.folder == "bodies")
+        .filter(|g| is_bodies(&g.folder))
         .map(|g| g.items.iter().filter(|b| st.body(b).is_some()).cloned().collect())
         .unwrap_or_default()
 }
@@ -185,7 +185,7 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
         // The group itself: its items keep their own state.
         Item::action("ui.folderVisible", "Show/Hide", "eye").key("V").with(json!({ "key": format!("{scope}/g{id}") })),
     ];
-    if g.folder == "bodies" {
+    if is_bodies(&g.folder) {
         v.push(Item::action("ui.isolate", "Isolate", "body").with(json!({ "bodies": group_bodies(app, id) })));
     }
     v
@@ -196,7 +196,7 @@ pub fn folder_items(app: &SolveApp, component: u64, folder: &str, scope: &str) -
     let sel: Vec<String> = selected_keys(app, component, folder);
     let all = entries(app, component, folder);
     let mut v = Vec::new();
-    if folder == "bodies" {
+    if is_bodies(folder) {
         let bodies: Vec<String> = all.iter().map(|e| e.key.clone()).collect();
         v.push(Item::action("component.from_bodies", "Create Components from Bodies", "component").with(json!({ "bodies": bodies })));
     }
@@ -632,7 +632,7 @@ impl Lit {
     /// The things a folder entry stands for.
     fn entry_things(folder: &str, e: &Entry) -> Vec<Thing> {
         match folder {
-            "bodies" => e.bodies.iter().cloned().map(Thing::Body).collect(),
+            "bodies" | "surfaces" => e.bodies.iter().cloned().map(Thing::Body).collect(),
             "sketches" => e.key.parse().ok().map(Thing::Sketch).into_iter().collect(),
             _ => vec![Thing::Plane(e.label.clone())],
         }
@@ -1051,7 +1051,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         layer_rows(app, ui, d);
     }
     let _ = t;
-    for folder in ["bodies", "sketches", "construction"] {
+    for folder in ["bodies", "surfaces", "sketches", "construction"] {
         folder_rows(app, ui, id, folder, d, acts);
     }
     features::rows(app, ui, id, &[], d, acts);
@@ -1157,7 +1157,7 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
     if !open {
         return;
     }
-    for folder in ["bodies", "sketches", "construction"] {
+    for folder in ["bodies", "surfaces", "sketches", "construction"] {
         occurrence_folder_rows(app, ui, placement.component, &path, folder, depth + 1, acts);
     }
     features::rows(app, ui, placement.component, &path, depth + 1, acts);
@@ -1667,15 +1667,16 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
     let sel = &app.session.selection;
     let state = app.session.model.state();
     match folder {
-        "bodies" => model_body_indices(app, comp)
+        "bodies" | "surfaces" => model_body_indices(app, comp)
             .into_iter()
             .filter_map(|i| state.bodies.get(i))
+            .filter(|b| b.body.is_surface() == (folder == "surfaces"))
             .filter(|b| !app.session.body_removed_later(&b.name))
             .map(|b| Entry {
                 key: b.name.clone(),
                 row_key: format!("b:{}", b.name),
                 label: b.name.clone(),
-                icon: "body",
+                icon: if folder == "surfaces" { "surface_patch" } else { "body" },
                 visible: !app.session.visibility.hidden_bodies.contains(&b.name),
                 selected: sel.iter().any(|x| matches!(x, Sel::Body { name } if *name == b.name)),
                 color: None,
@@ -1759,7 +1760,7 @@ fn arrange(app: &SolveApp, comp: u64, folder: &str, all: Vec<Entry>) -> (Vec<(so
 fn set_visible(app: &mut SolveApp, folder: &str, items: &[&Entry], on: bool) {
     for e in items {
         match folder {
-            "bodies" => {
+            "bodies" | "surfaces" => {
                 app.session.visibility.hidden_bodies.retain(|b| !e.bodies.contains(b));
                 if !on {
                     app.session.visibility.hidden_bodies.extend(e.bodies.clone());
@@ -1780,9 +1781,15 @@ fn set_visible(app: &mut SolveApp, folder: &str, items: &[&Entry], on: bool) {
     }
 }
 
+/// The folders that list bodies: solids and surface bodies.
+fn is_bodies(folder: &str) -> bool {
+    matches!(folder, "bodies" | "surfaces")
+}
+
 fn folder_label(folder: &str) -> &'static str {
     match folder {
         "bodies" => "Bodies",
+        "surfaces" => "Surfaces",
         "sketches" => "Sketches",
         _ => "Construction",
     }
@@ -1791,6 +1798,7 @@ fn folder_label(folder: &str) -> &'static str {
 fn folder_static(folder: &str) -> &'static str {
     match folder {
         "bodies" => "bodies",
+        "surfaces" => "surfaces",
         "sketches" => "sketches",
         _ => "construction",
     }
@@ -1819,7 +1827,7 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
             placed.entry(b.source.as_str()).or_insert(b);
         }
         for e in &mut all {
-            if folder == "bodies" {
+            if is_bodies(folder) {
                 let Some(body) = placed.get(e.key.as_str()) else { continue };
                 e.sel = Some(Sel::Body { name: body.world.clone() });
                 e.target = Some(Target::Body { name: body.world.clone() });
@@ -1838,7 +1846,7 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
     let fstatic = folder_static(folder);
     let key = format!("{prefix}/{folder}");
     if let Some(r) = app.tree.reveal.clone()
-        && folder == "bodies"
+        && is_bodies(folder)
         && all.iter().any(|e| e.key == r)
     {
         app.tree.collapsed.remove(&key);
@@ -1990,7 +1998,7 @@ fn entry_row(
     if r.fold {
         toggle(app, &pattern_key, true);
     }
-    if folder == "bodies"
+    if is_bodies(folder)
         && app.tree.reveal.as_deref() == Some(e.key.as_str())
         && let Some(rect) = r.rect
     {
@@ -2105,7 +2113,7 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
         }
         DropAction::Component { to, folder, keys } => {
             let _ = match folder {
-                "bodies" => app.run("component.move_bodies", json!({ "bodies": keys, "component": to })),
+                "bodies" | "surfaces" => app.run("component.move_bodies", json!({ "bodies": keys, "component": to })),
                 "sketches" => app.run("component.move_sketches", json!({ "sketches": keys, "component": to })),
                 _ => Ok(serde_json::Value::Null),
             };

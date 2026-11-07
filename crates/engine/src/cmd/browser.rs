@@ -46,12 +46,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
 ];
 
-const FOLDERS: [&str; 3] = ["bodies", "sketches", "construction"];
+const FOLDERS: [&str; 4] = ["bodies", "surfaces", "sketches", "construction"];
 
 fn folder_of(p: &Value, cmd: &str) -> Result<String> {
     match str_(p, "folder") {
         Some(f) if FOLDERS.contains(&f) => Ok(f.to_string()),
-        _ => Err(bad(cmd, "`folder` must be bodies, sketches or construction")),
+        _ => Err(bad(cmd, "`folder` must be bodies, surfaces, sketches or construction")),
     }
 }
 
@@ -312,7 +312,8 @@ pub(super) fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             list.iter().map(|j| super::joints::joint_id(s, Some(j), cmd).map(Shown::Joint)).collect::<Result<_>>()?
         }
         (Some(_), Some(_)) => return Err(bad(cmd, "give `items` or `folder`, not both")),
-        (Some("bodies"), None) => s.world_state().bodies.iter().map(|b| Shown::Body(b.name.clone())).collect(),
+        (Some("bodies"), None) => s.world_state().bodies.iter().filter(|b| !b.body.is_surface()).map(|b| Shown::Body(b.name.clone())).collect(),
+        (Some("surfaces"), None) => s.world_state().bodies.iter().filter(|b| b.body.is_surface()).map(|b| Shown::Body(b.name.clone())).collect(),
         (Some("sketches"), None) => s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)).collect(),
         (Some("construction"), None) => s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())).collect(),
         (Some("origin"), None) => ORIGIN.iter().map(|o| Shown::Origin(o.to_string())).collect(),
@@ -337,7 +338,7 @@ pub(super) fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         s.visibility.hidden_folders.retain(|k| !k.ends_with(&own) && !groups.iter().any(|g| k.ends_with(g.as_str())));
     }
     let v = &mut s.visibility;
-    if visible && str_(p, "folder") == Some("bodies") {
+    if visible && matches!(str_(p, "folder"), Some("bodies" | "surfaces")) {
         v.hidden_occurrences.clear();
     }
     for it in &items {
