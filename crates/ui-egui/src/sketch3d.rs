@@ -106,6 +106,29 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
     ss.plane.intersect_ray(o, d).map(|w| (w, "Plane"))
 }
 
+/// The centre of the circle a polyline edge makes (a full circle or an arc: the circle through its first,
+/// middle and last points, when every point lies on it), or None for any other edge.
+pub(crate) fn edge_circle_centre(e: &[Vec3]) -> Option<Vec3> {
+    let n = e.len();
+    let (&p0, &p1, &p2) = (e.first()?, e.get(n / 2)?, e.last()?);
+    if n < 5 {
+        return None;
+    }
+    let (u, v) = (p1 - p0, p2 - p0);
+    let w = u.cross(v);
+    let w2 = w.dot(w);
+    if !(w2.is_finite() && w2 > 1e-12) {
+        return None;
+    }
+    let c = p0 + (w.cross(u) * v.dot(v) + v.cross(w) * u.dot(u)) / (2.0 * w2);
+    let r = p0.dist(c);
+    if !(r.is_finite() && r > 1e-6 && r < 1e6) {
+        return None;
+    }
+    let normal = w / w2.sqrt();
+    e.iter().all(|p| (p.dist(c) - r).abs() <= 3e-3 * r + 1e-6 && (*p - c).dot(normal).abs() <= 3e-3 * r + 1e-6).then_some(c)
+}
+
 /// Centres of the circles the visible bodies' closed round edges make (holes, bosses, rims).
 pub(crate) fn circle_centres(app: &SolveApp) -> Vec<Vec3> {
     let st = app.session.world_state();
@@ -118,27 +141,9 @@ pub(crate) fn circle_centres(app: &SolveApp) -> Vec<Vec3> {
                 return out;
             }
             budget -= 1;
-            // A full circle or an arc (a hole may be one edge or two halves): the circle through
-            // the first, middle and last points, when every point lies on it.
-            let n = e.len();
-            let (Some(&p0), Some(&p1), Some(&p2)) = (e.first(), e.get(n / 2), e.last()) else { continue };
-            if n < 5 {
-                continue;
-            }
-            let (u, v) = (p1 - p0, p2 - p0);
-            let w = u.cross(v);
-            let w2 = w.dot(w);
-            if !(w2.is_finite() && w2 > 1e-12) {
-                continue;
-            }
-            let c = p0 + (w.cross(u) * v.dot(v) + v.cross(w) * u.dot(u)) / (2.0 * w2);
-            let r = p0.dist(c);
-            if !(r.is_finite() && r > 1e-6 && r < 1e6) {
-                continue;
-            }
-            let normal = w / w2.sqrt();
-            let round = e.iter().all(|p| (p.dist(c) - r).abs() <= 3e-3 * r + 1e-6 && (*p - c).dot(normal).abs() <= 3e-3 * r + 1e-6);
-            if round && !out.iter().any(|o| o.dist(c) < 1e-6) {
+            if let Some(c) = edge_circle_centre(e)
+                && !out.iter().any(|o| o.dist(c) < 1e-6)
+            {
                 out.push(c);
             }
         }

@@ -1471,6 +1471,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     let seen = if all { None } else { crate::pick_buffer::edges_near(app, proj, pos, &st) };
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
+    let measuring = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Measure { .. }));
     for (i, b) in st.bodies.iter().enumerate() {
         if !app.session.body_visible(&b.name) {
             continue;
@@ -1502,6 +1503,21 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                         let dd = sp.distance(pos);
                         if dd < 7.0 && visible(*v) && bestv.wants(dd) {
                             bestv.offer(dd, Hit::Vertex { body: b.name.clone(), point: *v });
+                        }
+                    }
+                }
+                // Measuring also snaps to an edge's middle and to the centre of a round edge (a hole's axis point).
+                if measuring
+                    && let Some(first) = e.first()
+                    && visible(*first)
+                {
+                    let extra = [Some(polyline_mid(e)), crate::sketch3d::edge_circle_centre(e)];
+                    for v in extra.into_iter().flatten() {
+                        if let Some(sp) = proj.to_screen(v) {
+                            let dd = sp.distance(pos);
+                            if dd < 7.0 && bestv.wants(dd) {
+                                bestv.offer(dd, Hit::Vertex { body: b.name.clone(), point: v });
+                            }
                         }
                     }
                 }
