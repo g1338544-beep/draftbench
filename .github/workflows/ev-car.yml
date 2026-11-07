@@ -1,0 +1,34 @@
+# Builds the electric-car example (examples/ev/car.py -> car.json) with the CLI and uploads the design and renders.
+name: EV car
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['examples/ev/**', '.github/workflows/ev-car.yml']
+
+jobs:
+  car:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the CLI
+        run: cargo build --release -p solidcraft-cli
+      - name: Make the script
+        run: python3 examples/ev/car.py examples/ev/car.json
+      - name: Run it
+        run: |
+          mkdir -p out
+          ./target/release/solidcraft-cli run examples/ev/car.json --save out/electric-car.solidcraft --results --allow-errors --json-out out/results.json 2>&1 | tee out/run.log || true
+      - name: Snapshots
+        run: |
+          for v in iso front right top back; do
+            ./target/release/solidcraft-cli snapshot out/electric-car.solidcraft --view $v --out out/$v.png --width 1400 --height 900 --no-grid 2>&1 | tee -a out/run.log || true
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ev-car
+          path: out
