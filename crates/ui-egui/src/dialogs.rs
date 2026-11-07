@@ -629,7 +629,7 @@ impl Dialog {
                 Kind::ReplaceFace,
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
             ),
-            "face.delete" | "solid.remove_fillet" | "solid.remove_chamfer" | "solid.remove_hole" => {
+            "face.delete" | "solid.remove_feature" => {
                 Dialog::new(Kind::DeleteFaces, vec![SelInput::new("Faces", FACES, true)])
             }
             "face.resize" => Dialog::new(Kind::ResizeFace { diameter: String::new() }, vec![SelInput::new("Round faces", FACES, true)]),

@@ -86,18 +86,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("delete_face")
         .params("faces: [[x,y,z] points on the faces, or face names from model.faces]; body?; heal?: bool (default true: the neighbouring planes close the gap, as when a rounded edge, hole or boss is taken off; false: the gap stays open and the faces left are a surface body)"),
-    CommandSpec::new("solid.remove_fillet", "Remove Fillet", delete_face)
+    CommandSpec::new("solid.remove_feature", "Remove Fillet / Chamfer / Hole", delete_face)
         .at("SOLID", "MODIFY")
         .icon("delete_face")
-        .params("faces: [[x,y,z] points on the faces of a rounded edge (R): pick its round face; the neighbouring faces extend and the edge is sharp again, or face names from model.faces]; body?; heal?: bool (default true; false leaves the gap open as a surface body). Same as face.delete"),
-    CommandSpec::new("solid.remove_chamfer", "Remove Chamfer", delete_face)
-        .at("SOLID", "MODIFY")
-        .icon("delete_face")
-        .params("faces: [[x,y,z] points on the faces of a chamfered corner: pick its flat bevel face; the neighbouring faces extend to the sharp corner, or face names from model.faces]; body?; heal?: bool (default true; false leaves the gap open as a surface body). Same as face.delete"),
-    CommandSpec::new("solid.remove_hole", "Remove Hole", delete_face)
-        .at("SOLID", "MODIFY")
-        .icon("delete_face")
-        .params("faces: [[x,y,z] points on the faces of a hole: pick its wall; the hole is filled and the face it was cut in closes over it, or face names from model.faces]; body?; heal?: bool (default true; false leaves the gap open as a surface body). Same as face.delete"),
+        .params("faces: [[x,y,z] points on the round face of a fillet (R), the bevel of a chamfer or the wall of a hole, or face names from model.faces]; body?; heal?: bool (default true: the neighbouring faces extend and the edge is sharp again, the hole filled; false leaves the gap open as a surface body). Same as face.delete"),
     CommandSpec::new("solid.offset_face", "Move Face", offset_face)
         .at("SOLID", "MODIFY")
         .icon("move_face")
