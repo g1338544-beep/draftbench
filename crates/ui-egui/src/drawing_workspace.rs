@@ -6075,60 +6075,25 @@ fn step_snap(c: Pos2, last: Option<Pos2>, tol: f32, free: bool) -> Pos2 {
 /// onto a centre line near it; then lined up level or plumb with the line's first point and with
 /// hole centres. The dashed guides to draw come back with the point.
 fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2, Vec<[Pos2; 2]>) {
+    // A guide only: the point stays where the pointer is. It squares up with the first point when nearly
+    // level or plumb, and dashed guides show where hole centres line up, but nothing pulls it onto them.
     let mut guides: Vec<[Pos2; 2]> = Vec::new();
-    if let Some(mut q) = snap_point(sheet, c, tol) {
-        // Even on a point, a second point nearly level or plumb with the first keeps the line straight.
-        if let Some(f) = first {
-            if (q.y - f.y).abs() <= tol * 0.25 {
-                q.y = f.y;
-            }
-            if (q.x - f.x).abs() <= tol * 0.25 {
-                q.x = f.x;
-            }
-        }
-        return (q, guides);
-    }
     let mut p = c;
-    // A centre line: the point drops onto it.
-    let mut best: Option<(f32, Pos2)> = None;
-    for (layer, shape) in &sheet.items {
-        if let (Layer::Center, Shape::Line(a, b)) = (layer, shape) {
-            let ab = *b - *a;
-            let len2 = ab.x * ab.x + ab.y * ab.y;
-            if !(len2 > 1e-9) || !len2.is_finite() {
-                continue;
-            }
-            let ac = c - *a;
-            let t = ((ac.x * ab.x + ac.y * ab.y) / len2).clamp(0.0, 1.0);
-            let q = *a + ab * t;
-            let d = (q - c).length();
-            if d <= tol && best.is_none_or(|(bd, _)| d < bd) {
-                best = Some((d, q));
-            }
+    if let Some(f) = first {
+        if (p.y - f.y).abs() <= tol * 0.35 {
+            p.y = f.y;
+        } else if (p.x - f.x).abs() <= tol * 0.35 {
+            p.x = f.x;
         }
     }
-    if let Some((_, q)) = best {
-        p = q;
-    }
-    // Level or plumb with the first point, or with any hole centre.
-    let mut xs: Vec<f32> = Vec::new();
-    let mut ys: Vec<f32> = Vec::new();
-    if let Some(f) = first {
-        xs.push(f.x);
-        ys.push(f.y);
-    }
+    let near = |v: f32, list: &[f32]| list.iter().copied().any(|t| (t - v).abs() <= tol * 0.35);
     for (q, _) in sheet.rounds().circles.iter().take(400) {
-        xs.push(q.x);
-        ys.push(q.y);
-    }
-    let near = |v: f32, list: &[f32]| list.iter().copied().filter(|t| (t - v).abs() <= tol * 0.6).min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()));
-    if let Some(x) = near(p.x, &xs) {
-        p.x = x;
-        guides.push([pos2(x, p.y - 400.0), pos2(x, p.y + 400.0)]);
-    }
-    if let Some(y) = near(p.y, &ys) {
-        p.y = y;
-        guides.push([pos2(p.x - 400.0, y), pos2(p.x + 400.0, y)]);
+        if near(p.x, &[q.x]) {
+            guides.push([pos2(q.x, p.y - 400.0), pos2(q.x, p.y + 400.0)]);
+        }
+        if near(p.y, &[q.y]) {
+            guides.push([pos2(p.x - 400.0, q.y), pos2(p.x + 400.0, q.y)]);
+        }
     }
     (p, guides)
 }
