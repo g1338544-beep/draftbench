@@ -314,6 +314,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.session.revision.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     app.ui.show_grid.hash(&mut h);
+    app.ui.tangent_edges.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
     solidcraft_engine::doc::display_quality::current().hash(&mut h);
@@ -584,12 +585,15 @@ struct BodyDraw {
     on_gpu: bool,
 }
 
+/// Whether shaded bodies also show their tangent (smooth) edges; set from the View menu.
+static TANGENT_EDGES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
 impl BodyDraw {
     /// Everything [`BodyDraw::build`] reads.
     fn key(&self, shaded: bool, edges: bool, hidden_edges: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (std::sync::Arc::as_ptr(&self.mesh) as usize).hash(&mut h);
-        (self.col, self.faded, self.opacity.to_bits(), self.on_gpu, shaded, edges, hidden_edges, edge_col, hidden_col).hash(&mut h);
+        (self.col, self.faded, self.opacity.to_bits(), self.on_gpu, shaded, edges, hidden_edges, edge_col, hidden_col, TANGENT_EDGES.load(std::sync::atomic::Ordering::Relaxed)).hash(&mut h);
         let mut looks: Vec<_> = self.face_looks.iter().map(|(f, l)| (*f, l.color, l.opacity.to_bits())).collect();
         looks.sort_unstable();
         looks.hash(&mut h);
@@ -636,7 +640,7 @@ impl BodyDraw {
         let helices: Vec<bool> = if shaded && edges { m.edges.iter().map(|e| helix_like(e)).collect() } else { Vec::new() };
         let thread_like = helices.iter().filter(|h| **h).count() >= 4;
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
-            if !m.edge_pickable(ei) || (shaded && !m.shaded_edge_visible(ei)) {
+            if !m.edge_pickable(ei) || (shaded && !TANGENT_EDGES.load(std::sync::atomic::Ordering::Relaxed) && !m.shaded_edge_visible(ei)) {
                 continue;
             }
             if thread_like && helices.get(ei).copied().unwrap_or(false) {
@@ -697,6 +701,7 @@ fn push_block(
 }
 
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
+    TANGENT_EDGES.store(app.ui.tangent_edges, std::sync::atomic::Ordering::Relaxed);
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
     let s = &app.session;
@@ -4165,6 +4170,7 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
             crate::prefs::graphics_preset_selector(app, ui);
             ui.separator();
             crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
+            crate::ui_kit::checkbox(ui, "Tangent edges (show every edge)", &mut app.ui.tangent_edges);
             crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ground shadow"), &mut app.ui.ground_shadow);
             crate::prefs::ambient_occlusion_checkbox(app, ui, "Ambient occlusion");
             ui.separator();

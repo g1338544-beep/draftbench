@@ -272,6 +272,8 @@ pub struct UiState {
     pub show_browser: bool,
     pub show_timeline: bool,
     pub show_grid: bool,
+    /// Draw the tangent (smooth) edges of shaded bodies too, so every edge shows.
+    pub tangent_edges: bool,
     pub show_origin: bool,
     pub perspective: bool,
     pub show_sketches: bool,
@@ -307,6 +309,7 @@ impl Default for UiState {
             show_browser: true,
             show_timeline: true,
             show_grid: true,
+            tangent_edges: true,
             show_origin: true,
             perspective: false,
             show_sketches: true,
