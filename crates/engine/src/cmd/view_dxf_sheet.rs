@@ -700,10 +700,13 @@ fn manual(
                 let (ox, oy) = (loff.get(2 * k).copied().unwrap_or(0.0), loff.get(2 * k + 1).copied().unwrap_or(0.0));
                 let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
                 line("DIM", end, tip, &mut entities);
-                for k in [-1.0, 1.0] {
-                    let back_pt = Vec2::new(tip.x - sight.x * 3.0 - sight.y * 0.9 * k, tip.y - sight.y * 3.0 + sight.x * 0.9 * k);
-                    line("DIM", tip, back_pt, &mut entities);
+                // A solid arrowhead: the triangle's edges and strokes from the tip across to its base.
+                let base = Vec2::new(tip.x - sight.x * 3.5, tip.y - sight.y * 3.5);
+                let side = |w: f64| Vec2::new(base.x - sight.y * w, base.y + sight.x * w);
+                for w in [-1.3, -0.65, 0.0, 0.65, 1.3] {
+                    line("DIM", tip, side(w), &mut entities);
                 }
+                line("DIM", side(-1.3), side(1.3), &mut entities);
                 text("TEXT", Vec2::new(end.x - dir.x * 0.0 - sight.x * 4.0 + ox, end.y - sight.y * 4.0 - th * 0.3 + oy), th, letter.to_string(), &mut entities);
             }
         }
@@ -745,10 +748,13 @@ fn manual(
                 let (ox, oy) = (loff.get(2 * k).copied().unwrap_or(0.0), loff.get(2 * k + 1).copied().unwrap_or(0.0));
                 let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
                 line("DIM", end, tip, &mut entities);
-                for kk in [-1.0, 1.0] {
-                    let back_pt = Vec2::new(tip.x - sight.x * 3.0 - sight.y * 0.9 * kk, tip.y - sight.y * 3.0 + sight.x * 0.9 * kk);
-                    line("DIM", tip, back_pt, &mut entities);
+                // A solid arrowhead: the triangle's edges and strokes from the tip across to its base.
+                let base = Vec2::new(tip.x - sight.x * 3.5, tip.y - sight.y * 3.5);
+                let side = |w: f64| Vec2::new(base.x - sight.y * w, base.y + sight.x * w);
+                for w in [-1.3, -0.65, 0.0, 0.65, 1.3] {
+                    line("DIM", tip, side(w), &mut entities);
                 }
+                line("DIM", side(-1.3), side(1.3), &mut entities);
                 text("TEXT", Vec2::new(end.x - sight.x * 4.0 + ox, end.y - sight.y * 4.0 - th * 0.3 + oy), th, letter.to_string(), &mut entities);
             }
         }
