@@ -2177,7 +2177,7 @@ fn join_cell(dx: f32, dy: f32, k: f32, font: u8, body: &str) -> String {
 }
 
 /// A free line of the title block, as (u1, v1, u2, v2) in mm from the block's lower left corner.
-const MAX_FREE_LINES: usize = 200;
+const MAX_FREE_LINES: usize = 600;
 
 fn fline_abs(g: &BlockGeo, l: &[f32; 4]) -> (Pos2, Pos2) {
     (pos2(g.x0 + l[0], g.margin + l[1]), pos2(g.x0 + l[2], g.margin + l[3]))
@@ -2210,7 +2210,7 @@ struct FreeText {
     text: String,
 }
 
-const MAX_FREE_TEXTS: usize = 100;
+const MAX_FREE_TEXTS: usize = 400;
 
 fn ui_text_height(st: &State) -> f32 {
     st.text_height.trim().parse::<f32>().ok().filter(|h| h.is_finite() && (2.0..=10.0).contains(h)).unwrap_or(3.5)

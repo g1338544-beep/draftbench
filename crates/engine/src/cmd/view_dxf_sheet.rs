@@ -520,7 +520,7 @@ fn manual(
     let arrow = p.get("dim_arrow").and_then(Value::as_f64).filter(|a| (0.5..=12.0).contains(a)).unwrap_or(3.0);
     let decimals = p.get("dim_decimals").and_then(Value::as_u64).filter(|n| *n <= 4).map(|n| n as usize);
     if let Some(list) = p.get("dimension_items").and_then(Value::as_array) {
-        for d in list.iter().take(200) {
+        for d in list.iter().take(600) {
             add_dimension(&mut entities, d, &boxes, dim_th, arrow, decimals);
         }
     }
@@ -986,7 +986,7 @@ fn finish(
         }
         // Lines the user drew freely: from (u1, v1) to (u2, v2) mm from the block's lower left corner.
         if let Some(list) = p.get("free_lines").and_then(Value::as_array) {
-            for l in list.iter().take(200) {
+            for l in list.iter().take(600) {
                 let n: Vec<f64> = l.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
                 if let [u1, v1, u2, v2] = n[..]
                     && [u1, v1, u2, v2].iter().all(|v| v.is_finite() && v.abs() < 1e5)
@@ -1074,7 +1074,7 @@ fn finish(
     }
     // Texts the user put anywhere on the sheet: x, y, size factor, font and the words.
     if let Some(list) = p.get("free_texts").and_then(Value::as_array) {
-        for t in list.iter().take(100) {
+        for t in list.iter().take(400) {
             let num = |k: &str| t.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e5);
             let (Some(x), Some(y)) = (num("x"), num("y")) else { continue };
             let k = num("k").unwrap_or(1.0).clamp(0.2, 8.0);
