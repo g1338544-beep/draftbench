@@ -3694,6 +3694,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         return;
     }
+    // The Detail title block is always made of free lines and texts: each can be edited, moved, copied, deleted, and Notes added.
+    if app.drawing.block_detail && !app.drawing.block_free && app.drawing.block_on && app.drawing.sheet.is_some() && explode_detail_block(app) {
+        begin(app);
+    }
     let extent = app.drawing.sheet.as_ref().map(|s| s.width.hypot(s.height)).unwrap_or(500.0);
     let map = sheet_map(app, rect, extent);
 
