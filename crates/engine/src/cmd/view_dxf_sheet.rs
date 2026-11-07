@@ -106,6 +106,50 @@ fn manual(
     title: String,
     path: Option<String>,
 ) -> Result<Built> {
+    let built = manual_once(p, scene, parts, key, list, sheet, first_angle, title.clone(), path.clone())?;
+    // Views with no scale of their own all get the same one: the smallest each would have chosen, so
+    // the drawing doesn't show one view at 1:1 beside another at 1:2.
+    if p.get("scale").is_some() {
+        return Ok(built);
+    }
+    let own = |i: usize| {
+        list.get(i).is_some_and(|it| it.get("scale").and_then(Value::as_f64).is_none() && it.get("scale_from").is_none() && it.get("detail").is_none())
+    };
+    let chosen: Vec<f64> = built
+        .summary
+        .get("boxes")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter(|b| b.get("index").and_then(Value::as_u64).is_some_and(|i| own(i as usize)))
+                .filter_map(|b| b.get("scale").and_then(Value::as_f64))
+                .collect()
+        })
+        .unwrap_or_default();
+    let lo = chosen.iter().copied().fold(f64::INFINITY, f64::min);
+    let hi = chosen.iter().copied().fold(0.0_f64, f64::max);
+    if chosen.len() > 1 && lo.is_finite() && lo > 0.0 && hi - lo > 1e-12 {
+        let mut common = p.clone();
+        if let Some(o) = common.as_object_mut() {
+            o.insert("scale".into(), json!(lo));
+        }
+        return manual_once(&common, scene, parts, key, list, sheet, first_angle, title, path);
+    }
+    Ok(built)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn manual_once(
+    p: &Value,
+    scene: &meshes::Scene,
+    parts: &[sketch::Part],
+    key: Key,
+    list: &[Value],
+    sheet: (f64, f64),
+    first_angle: bool,
+    title: String,
+    path: Option<String>,
+) -> Result<Built> {
     let (sheet_w, sheet_h) = sheet;
     let th = text_height(p);
     let mut any_centre = false;
