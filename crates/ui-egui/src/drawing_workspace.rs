@@ -5345,7 +5345,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             if let Some(h) = hover {
-                let (at, guides) = section_snap(sheet, h, last, tol);
+                let (at, guides) = (step_snap(h, last, tol, ui.input(|i| i.modifiers.alt)), Vec::<[Pos2; 2]>::new());
                 for g in &guides {
                     painter.line_segment([map(g[0]), map(g[1])], Stroke::new(1.0, accent.gamma_multiply(0.6)));
                 }
@@ -5359,7 +5359,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && response.clicked_by(egui::PointerButton::Primary)
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             {
-                let q = section_snap(sheet, c, last, tol).0;
+                let q = step_snap(c, last, tol, ui.input(|i| i.modifiers.alt));
                 if last.is_some_and(|l| (l - q).length() < tol * 0.5) {
                     finish = true;
                 } else if pts.len() < 12 {
@@ -6054,6 +6054,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else if app.drawing.drag.is_some() && !response.dragged() {
         app.drawing.drag = None;
     }
+}
+
+/// A point of the Stepped Section's line: where the pointer is, kept level or plumb with the previous
+/// point when it is nearly so (so each step runs square). It never jumps to holes, corners or centre
+/// lines, which pulled the line toward the circles; hold Alt for no help at all.
+fn step_snap(c: Pos2, last: Option<Pos2>, tol: f32, free: bool) -> Pos2 {
+    let mut q = c;
+    if let (Some(l), false) = (last, free) {
+        if (q.y - l.y).abs() <= tol * 0.35 {
+            q.y = l.y;
+        } else if (q.x - l.x).abs() <= tol * 0.35 {
+            q.x = l.x;
+        }
+    }
+    q
 }
 
 /// The Section View cutting line's guide: `c` snapped to a drawn corner, end or hole centre; else
