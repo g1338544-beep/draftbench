@@ -6196,7 +6196,17 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 }
             }
             let all = kernel::with_same_surface(&mb.body, &picked);
-            let left = if *heal { kernel::delete_faces(&mb.body, &all)? } else { kernel::remove_faces(&mb.body, &all)? };
+            let left = if *heal {
+                match kernel::delete_faces(&mb.body, &all) {
+                    Ok(b) => b,
+                    // Rounds or other curved neighbours can't be extended to close the gap: take the faces
+                    // off and leave the open surface, as Delete Face without healing does.
+                    Err(e) if e.to_string().contains("which is curved") => kernel::remove_faces(&mb.body, &all)?,
+                    Err(e) => return Err(e.into()),
+                }
+            } else {
+                kernel::remove_faces(&mb.body, &all)?
+            };
             let nb = Traced::step(left, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
