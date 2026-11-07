@@ -381,6 +381,12 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
         app.tool = Some(tool);
         return;
     }
+    if tool.pts.is_empty() {
+        // A new chain starts straight: nothing to be tangent to.
+        tool.tangent = None;
+        tool.arc = false;
+        tool.away = false;
+    }
     tool.pts.push(p);
     if tool.cmd == "sketch.line" {
         if tool.pts.len() >= 2 {
