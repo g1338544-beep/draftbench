@@ -3289,6 +3289,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let mut add: Option<usize> = None;
                     let mut remove: Option<usize> = None;
                     let mut start_projected: Option<usize> = None;
+                    let mut follow_scale: Option<(usize, String)> = None;
                     if phone && crate::ui_kit::button(ui, "Close panel", crate::ui_kit::Button::Small).clicked() {
                         app.drawing.panel_open = Some(false);
                     }
@@ -3427,7 +3428,13 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         if selected {
                             let v = &mut app.drawing.placed[i];
                             ui.label("Scale");
-                            dirty |= scale_picker(ui, &format!("drawing_scale_{i}"), &mut v.scale);
+                            let before = v.scale.clone();
+                            if scale_picker(ui, &format!("drawing_scale_{i}"), &mut v.scale) {
+                                dirty = true;
+                            }
+                            if v.scale != before && v.detail.is_none() && v.view < 6 {
+                                follow_scale = Some((i, v.scale.clone()));
+                            }
                             // The letter of a section or detail: A, B, C in order unless changed here.
                             if v.section_line.is_some() || v.section.is_some() || v.detail.is_some() {
                                 ui.horizontal(|ui| {
@@ -3773,6 +3780,15 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     if let Some(i) = start_projected {
                         app.drawing.proj_tool = Some(i);
+                    }
+                    if let Some((from, scale)) = follow_scale {
+                        // Every other standard view follows; the isometric and detail views keep their own.
+                        for (j, v) in app.drawing.placed.iter_mut().enumerate() {
+                            if j != from && v.view < 6 && v.detail.is_none() {
+                                v.scale = scale.clone();
+                            }
+                        }
+                        dirty = true;
                     }
                     if let Some(view) = add {
                         add_view(app, view);
