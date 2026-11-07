@@ -74,12 +74,12 @@ for tag, (x, y) in WHEELS.items():
     cmd("solid.cylinder", base=[x, y - 60, 345], axis="Y", radius=34, height=120, operation="new_body", body_name="Hub cap " + tag)
 
 # --- Colours ----------------------------------------------------------------------------------------
-cmd("appearance.assign", bodies=["Body"], color="#1c4fa3", pbr={"metallic": 0.6, "roughness": 0.22})
-cmd("appearance.assign", faces=[[760, 0, 1150], [-1450, 0, 1195]], body="Body", color="#0d1117", pbr={"metallic": 0.1, "roughness": 0.05})
+cmd("appearance.assign", bodies=["Body"], color="#1c4fa3", pbr={"metallic": 0.6, "roughness": 0.22, "dielectric_ior": 1.5})
+cmd("appearance.assign", faces=[[760, 0, 1150], [-1450, 0, 1195]], body="Body", color="#0d1117", pbr={"metallic": 0.1, "roughness": 0.05, "dielectric_ior": 1.5})
 for tag in WHEELS:
-    cmd("appearance.assign", bodies=["Tyre " + tag], color="#161616", pbr={"metallic": 0.0, "roughness": 0.85})
-    cmd("appearance.assign", bodies=["Rim " + tag], color="#c9ccd1", pbr={"metallic": 0.9, "roughness": 0.2})
-    cmd("appearance.assign", bodies=["Hub cap " + tag], color="#8a8d92", pbr={"metallic": 0.8, "roughness": 0.3})
+    cmd("appearance.assign", bodies=["Tyre " + tag], color="#161616", pbr={"metallic": 0.0, "roughness": 0.85, "dielectric_ior": 1.5})
+    cmd("appearance.assign", bodies=["Rim " + tag], color="#c9ccd1", pbr={"metallic": 0.9, "roughness": 0.2, "dielectric_ior": 1.5})
+    cmd("appearance.assign", bodies=["Hub cap " + tag], color="#8a8d92", pbr={"metallic": 0.8, "roughness": 0.3, "dielectric_ior": 1.5})
 
 import os
 limit = int(os.environ.get("LIMIT", "0")) or len(C)
