@@ -274,7 +274,7 @@ const ELEMENTS: &[Element] = &[
         panel::page_list(
             ui,
             &mut s.selected,
-            &[WindowPage {
+            &[WindowPage { group: "",
                 icon: "settings",
                 label: "ui.general",
                 handle: "gallery:page",

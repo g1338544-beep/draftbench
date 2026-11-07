@@ -571,6 +571,8 @@ impl<'a> Window<'a> {
 
 /// A page's existing icon, translated label key, stable handle and draw callback.
 pub(crate) struct WindowPage<S> {
+    /// A heading drawn above the first page of each run of pages with the same group ("" for none).
+    pub group: &'static str,
     pub icon: &'static str,
     pub label: &'static str,
     pub handle: &'static str,
@@ -593,7 +595,13 @@ pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPag
         ui.set_clip_rect(ui.clip_rect().intersect(nav));
         ui.spacing_mut().item_spacing.y = t.space_2;
         egui::ScrollArea::vertical().id_salt("window_pages").show(ui, |ui| {
+            let mut last_group = "";
             for (index, page) in pages.iter().enumerate() {
+                if page.group != last_group && !page.group.is_empty() {
+                    ui.add_space(t.space_8);
+                    ui.label(egui::RichText::new(page.group).size(t.font_small).color(t.form_dim));
+                }
+                last_group = page.group;
                 let label = crate::i18n::tr(page.label);
                 let (rect, response) =
                     ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_4), egui::Sense::click());

@@ -212,21 +212,21 @@ pub fn nav_preset(id: &str) -> &'static NavPreset {
 pub const PAGES: [&str; 9] = ["General", "Navigation", "Keyboard Shortcuts", "Design", "Graphics", "Sketch", "Selection", "AI", "Plugins"];
 // Keep every existing page and its scenario identity; only their presentation is shared.
 const WINDOW_PAGES: [ui_kit::WindowPage<SolveApp>; 9] = [
-    ui_kit::WindowPage { icon: "settings", label: "ui.general", handle: "prefs:page:General", scroll: true, draw: window_page::<0> },
-    ui_kit::WindowPage { icon: "orbit", label: "ui.navigation", handle: "prefs:page:Navigation", scroll: true, draw: window_page::<1> },
-    ui_kit::WindowPage {
+    ui_kit::WindowPage { group: "", icon: "settings", label: "ui.general", handle: "prefs:page:General", scroll: true, draw: window_page::<0> },
+    ui_kit::WindowPage { group: "INPUT", icon: "orbit", label: "ui.navigation", handle: "prefs:page:Navigation", scroll: true, draw: window_page::<1> },
+    ui_kit::WindowPage { group: "INPUT",
         icon: "settings",
         label: "ui.keyboard_shortcuts",
         handle: "prefs:page:Keyboard Shortcuts",
         scroll: false,
         draw: window_page::<2>,
     },
-    ui_kit::WindowPage { icon: "ws_design", label: "ui.design", handle: "prefs:page:Design", scroll: true, draw: window_page::<3> },
-    ui_kit::WindowPage { icon: "style", label: "ui.graphics", handle: "prefs:page:Graphics", scroll: true, draw: window_page::<4> },
-    ui_kit::WindowPage { icon: "sketch", label: "ui.sketch", handle: "prefs:page:Sketch", scroll: true, draw: window_page::<5> },
-    ui_kit::WindowPage { icon: "select", label: "ui.selection", handle: "prefs:page:Selection", scroll: true, draw: window_page::<6> },
-    ui_kit::WindowPage { icon: "assistant", label: "ui.ai_button", handle: "prefs:page:AI", scroll: true, draw: window_page::<7> },
-    ui_kit::WindowPage { icon: "library", label: "ui.plugins", handle: "prefs:page:Plugins", scroll: true, draw: window_page::<8> },
+    ui_kit::WindowPage { group: "WORK", icon: "ws_design", label: "ui.design", handle: "prefs:page:Design", scroll: true, draw: window_page::<3> },
+    ui_kit::WindowPage { group: "WORK", icon: "style", label: "ui.graphics", handle: "prefs:page:Graphics", scroll: true, draw: window_page::<4> },
+    ui_kit::WindowPage { group: "WORK", icon: "sketch", label: "ui.sketch", handle: "prefs:page:Sketch", scroll: true, draw: window_page::<5> },
+    ui_kit::WindowPage { group: "WORK", icon: "select", label: "ui.selection", handle: "prefs:page:Selection", scroll: true, draw: window_page::<6> },
+    ui_kit::WindowPage { group: "EXTEND", icon: "assistant", label: "ui.ai_button", handle: "prefs:page:AI", scroll: true, draw: window_page::<7> },
+    ui_kit::WindowPage { group: "EXTEND", icon: "library", label: "ui.plugins", handle: "prefs:page:Plugins", scroll: true, draw: window_page::<8> },
 ];
 
 fn window_page<const INDEX: usize>(ui: &mut egui::Ui, app: &mut SolveApp) {
@@ -1246,6 +1246,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                 });
             });
+            nav_mapping_table(app, ui, t);
             if app.preferences.nav == TOUCHPAD_NAV {
                 ui_kit::text(ui, crate::i18n::tr("nav.touchpad.help"), ui_kit::Text::Note("navigation"));
             } else {
@@ -1297,19 +1298,8 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             });
             setting::pan_reverse_x(app, ui);
-            ui_kit::row(ui, app.tr_label("Orbit around"), |ui| {
-                let modes = [OrbitAround::Origin, OrbitAround::ViewCentre, OrbitAround::Cursor];
-                let mut selected = modes.iter().position(|m| *m == app.preferences.orbit_around).unwrap_or(1);
-                if ui_kit::segmented(
-                    ui,
-                    &mut selected,
-                    &[crate::i18n::tr_label("Origin"), crate::i18n::tr_label("View centre"), crate::i18n::tr_label("Point under the cursor")],
-                    Default::default(),
-                ) && let Some(mode) = modes.get(selected)
-                {
-                    app.preferences.orbit_around = *mode;
-                }
-            });
+            ui_kit::text(ui, app.tr_label("Orbit around"), ui_kit::Text::Inline);
+            orbit_around_tiles(app, ui, t);
             ui_kit::row(ui, app.tr_label("Middle double-click"), |ui| {
                 let current = MiddleDoubleClick::of(app);
                 ui_kit::dropdown_menu(ui, "pref_middle_double_click", crate::i18n::tr_label(current.label()), |ui| {
@@ -1477,7 +1467,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             setting::offer_stand_up(app, ui);
         }
         PAGE_GRAPHICS => {
-            ui_kit::row(ui, app.tr("ui.graphics_preset"), |ui| graphics_preset_selector(app, ui));
+            ui_kit::row(ui, app.tr("ui.graphics_preset"), |ui| graphics_preset_buttons(app, ui));
             ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
                 let mut selected = usize::from(app.ui.visual_style.min(3));
                 ui_kit::dropdown(ui, "pref_style", &mut selected, &["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"]);
@@ -1565,20 +1555,8 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 colour_vision_sample(ui, t);
                 ui_kit::text(ui, app.tr("ui.colour_vision_note"), ui_kit::Text::Note("colour_vision"));
             });
-            ui_kit::row(ui, app.tr("ui.anti_aliasing"), |ui| {
-                ui_kit::dropdown_menu(ui, "pref_msaa", &format!("{}×", app.preferences.msaa), |ui| {
-                    for m in MSAA {
-                        let ok = app.msaa_supported.is_empty() || app.msaa_supported.contains(&m);
-                        let r = ui
-                            .add_enabled_ui(ok, |ui| ui_kit::list_picker(ui, &m.to_string(), &format!("{m}×"), app.preferences.msaa == m))
-                            .inner
-                            .on_disabled_hover_text(app.tr("settings.msaa_unsupported"));
-                        if r.clicked() {
-                            app.preferences.msaa = m;
-                        }
-                    }
-                });
-            });
+            ui_kit::text(ui, app.tr("ui.anti_aliasing"), ui_kit::Text::Inline);
+            msaa_tiles(app, ui, t);
             ui_kit::text(ui, app.tr("settings.msaa_applies_on_restart"), ui_kit::Text::Note("msaa"));
             ui_kit::text(ui, app.tr("ui.display_quality"), ui_kit::Text::Inline);
             display_quality_tiles(app, ui, t);
@@ -1707,6 +1685,174 @@ fn orientation_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 app.preferences.up_axis = if is_y { "y" } else { "z" }.into();
             }
         }
+    });
+}
+
+/// Performance, Quality or Custom, as buttons: the first two set the choices below together, Custom is what
+/// it shows once they have been changed one by one.
+fn graphics_preset_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let current = graphics_preset(&app.preferences);
+    let mut selected = match current {
+        "performance" => 0,
+        "quality" => 1,
+        _ => 2,
+    };
+    let labels = [app.tr("ui.graphics_performance").to_string(), app.tr("ui.graphics_quality").to_string(), crate::i18n::tr_label("Custom").to_string()];
+    let names: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let changed = ui_kit::segmented(ui, &mut selected, &names, Default::default());
+    crate::scenario::publish_handle("view:graphics_preset", ui.min_rect().center());
+    if changed {
+        match selected {
+            0 => drop(app.run("view.graphics_preset", json!({"preset": "performance"}))),
+            1 => drop(app.run("view.graphics_preset", json!({"preset": "quality"}))),
+            _ => {}
+        }
+    }
+}
+
+/// A tile frame: the background, the border (the accent when chosen) and its hit area.
+fn tile(ui: &mut egui::Ui, t: &Tokens, size: egui::Vec2, on: bool, enabled: bool) -> (egui::Rect, egui::Response, egui::Painter) {
+    let (rect, response) = ui.allocate_exact_size(size, if enabled { egui::Sense::click() } else { egui::Sense::hover() });
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 6.0, t.viewport_top);
+    let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
+    let edge = if on { t.accent } else { t.origin_plane_edge };
+    p.add(egui::Shape::closed_line(corners.to_vec(), egui::Stroke::new(if on || (enabled && response.hovered()) { 2.0 } else { 1.0 }, edge)));
+    (rect, response, p)
+}
+
+/// Anti-aliasing as tiles: a staircase edge smoothed in as many steps as the samples.
+fn msaa_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    ui.horizontal(|ui| {
+        for m in MSAA {
+            let ok = app.msaa_supported.is_empty() || app.msaa_supported.contains(&m);
+            let on = app.preferences.msaa == m;
+            let (rect, response, p) = tile(ui, t, egui::vec2(84.0, 84.0), on, ok);
+            let area = egui::Rect::from_min_max(rect.min + egui::vec2(10.0, 10.0), egui::pos2(rect.right() - 10.0, rect.bottom() - 26.0));
+            let steps = 4usize;
+            for k in 0..steps {
+                let x0 = area.left() + area.width() * k as f32 / steps as f32;
+                let top = area.top() + area.height() * (k as f32 + 0.5) / steps as f32;
+                let col = if ok { t.accent } else { t.text_dim };
+                p.rect_filled(egui::Rect::from_min_max(egui::pos2(x0, top), egui::pos2(x0 + area.width() / steps as f32 + 0.5, area.bottom())), 0.0, col);
+                if m > 1 {
+                    // The smoothing: a half-tone cell on each step's corner.
+                    p.rect_filled(egui::Rect::from_min_max(egui::pos2(x0, top - 3.0), egui::pos2(x0 + area.width() / steps as f32 + 0.5, top)), 0.0, col.gamma_multiply(0.45));
+                }
+            }
+            let label = if m == 1 { crate::i18n::tr_label("Off").to_string() } else { format!("{m}×") };
+            p.text(egui::pos2(rect.center().x, rect.bottom() - 12.0), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.0), ui.visuals().text_color());
+            if ok && response.clicked() {
+                app.preferences.msaa = m;
+            }
+            if !ok {
+                response.on_hover_text(app.tr("settings.msaa_unsupported"));
+            }
+        }
+    });
+}
+
+/// Orbit around: tiles drawing a cube and where the turn happens.
+fn orbit_around_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    let modes = [(OrbitAround::Origin, "Origin"), (OrbitAround::ViewCentre, "View centre"), (OrbitAround::Cursor, "Under cursor")];
+    ui.horizontal(|ui| {
+        for (mode, name) in modes {
+            let on = app.preferences.orbit_around == mode;
+            let (rect, response, p) = tile(ui, t, egui::vec2(124.0, 98.0), on, true);
+            let c = rect.center() + egui::vec2(6.0, -8.0);
+            let r = 20.0;
+            let hex: Vec<egui::Pos2> =
+                (0..6).map(|k| { let a = std::f32::consts::FRAC_PI_3 * k as f32 - std::f32::consts::FRAC_PI_2; c + egui::vec2(a.cos(), a.sin()) * r }).collect();
+            let ink = egui::Stroke::new(1.6, t.text_dim);
+            p.add(egui::Shape::closed_line(hex.clone(), ink));
+            for k in [1usize, 3, 5] {
+                if let Some(v) = hex.get(k) {
+                    p.line_segment([c, *v], ink);
+                }
+            }
+            // The pivot (a dot with an arc turning about it).
+            let pivot = match mode {
+                OrbitAround::Origin => rect.left_bottom() + egui::vec2(20.0, -30.0),
+                OrbitAround::ViewCentre => c,
+                _ => c + egui::vec2(r + 6.0, 8.0),
+            };
+            let arc: Vec<egui::Pos2> = (0..=16)
+                .map(|k| { let a = std::f32::consts::PI * (0.1 + 0.8 * k as f32 / 16.0); pivot + egui::vec2(a.cos() * 13.0, a.sin() * 6.0) })
+                .collect();
+            p.add(egui::Shape::line(arc, egui::Stroke::new(1.8, t.accent)));
+            p.circle_filled(pivot, 3.0, t.accent);
+            let label = match mode {
+                OrbitAround::Origin => "Origin",
+                OrbitAround::ViewCentre => "View centre",
+                _ => name,
+            };
+            p.text(egui::pos2(rect.center().x, rect.bottom() - 12.0), egui::Align2::CENTER_CENTER, crate::i18n::tr_label(label), egui::FontId::proportional(13.0), ui.visuals().text_color());
+            if response.clicked() {
+                app.preferences.orbit_around = mode;
+            }
+        }
+    });
+}
+
+/// The mouse with the buttons the chosen mapping uses lit, and what each binding does.
+fn nav_mapping_table(app: &SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    let preset = nav_preset(&app.preferences.nav);
+    let uses = |b: NavButton| preset.bindings.iter().any(|x| x.button == b);
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(96.0, 132.0), egui::Sense::hover());
+        let p = ui.painter_at(rect);
+        let body = rect.shrink2(egui::vec2(10.0, 4.0));
+        p.rect_filled(body, 40.0, t.viewport_top);
+        let top = egui::Rect::from_min_max(body.min, egui::pos2(body.max.x, body.top() + body.height() * 0.45));
+        let (l, r) = (
+            egui::Rect::from_min_max(top.min + egui::vec2(3.0, 3.0), egui::pos2(top.center().x - 2.0, top.bottom())),
+            egui::Rect::from_min_max(egui::pos2(top.center().x + 2.0, top.top() + 3.0), egui::pos2(top.max.x - 3.0, top.bottom())),
+        );
+        let lit = |on: bool| if on { t.accent.gamma_multiply(0.55) } else { t.viewport_top.gamma_multiply(0.7) };
+        p.rect_filled(l, 20.0, lit(uses(Left)));
+        p.rect_filled(r, 20.0, lit(uses(Right)));
+        let wheel = egui::Rect::from_center_size(egui::pos2(top.center().x, top.top() + top.height() * 0.45), egui::vec2(10.0, 24.0));
+        p.rect_filled(wheel, 5.0, if uses(Middle) { t.accent } else { t.text_dim });
+        let outline = [body.left_top(), body.right_top(), body.right_bottom(), body.left_bottom()];
+        p.add(egui::Shape::closed_line(outline.to_vec(), egui::Stroke::new(1.0, t.origin_plane_edge)));
+        ui.vertical(|ui| {
+            let chip = |ui: &mut egui::Ui, text: String| {
+                ui.label(egui::RichText::new(text).size(t.font_small).color(t.text).background_color(t.viewport_top));
+            };
+            for b in preset.bindings {
+                ui.horizontal(|ui| {
+                    let mut keys = Vec::new();
+                    if b.keys.shift {
+                        keys.push("Shift");
+                    }
+                    if b.keys.ctrl {
+                        keys.push("Ctrl");
+                    }
+                    if b.keys.alt {
+                        keys.push("Alt");
+                    }
+                    let button = match b.button {
+                        Left => "Left drag",
+                        Middle => "Middle drag",
+                        Right => "Right drag",
+                    };
+                    let text = keys.into_iter().chain(std::iter::once(button)).collect::<Vec<_>>().join(" + ");
+                    chip(ui, text);
+                    let does = match b.mode {
+                        NavMode::Orbit => "Orbit",
+                        NavMode::Pan => "Pan",
+                        NavMode::Zoom => "Zoom",
+                    };
+                    ui.label(crate::i18n::tr_label(does));
+                });
+            }
+            for (key, what) in [("Wheel", "Zoom, toward the cursor"), ("Left click", "Select"), ("Right click", "Context menu")] {
+                ui.horizontal(|ui| {
+                    chip(ui, key.to_string());
+                    ui.label(crate::i18n::tr_label(what));
+                });
+            }
+        });
     });
 }
 
