@@ -14,4 +14,4 @@ jobs:
       - name: Delete-face and remove-round tests
         run: cargo test -p solidcraft-kernel --lib delete_face -- --nocapture 2>&1 | tail -60
       - name: Doc crate builds
-        run: cargo check -p solidcraft-doc 2>&1 | tail -30
+        run: cargo check -p solidcraft-doc -p solidcraft-engine -p solidcraft-ui-egui 2>&1 | tail -40
