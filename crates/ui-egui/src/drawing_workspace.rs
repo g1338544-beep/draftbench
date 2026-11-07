@@ -3357,7 +3357,13 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_ch"), &mut app.drawing.custom_h, "297", false, 8).changed();
                     }
                     ui.label("Sheet scale (all views)");
-                    dirty |= scale_picker(ui, "drawing_sheet_scale", &mut app.drawing.sheet_scale);
+                    if scale_picker(ui, "drawing_sheet_scale", &mut app.drawing.sheet_scale) {
+                        dirty = true;
+                        // "All views": the standard views drop their own scale (even one set earlier, like 1:2) and follow the sheet's.
+                        for v in app.drawing.placed.iter_mut().filter(|v| v.view < 6 && v.detail.is_none()) {
+                            v.scale.clear();
+                        }
+                    }
                     ui.label("Sheet number · Revision");
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_sheet_no"), &mut app.drawing.sheet_no, "1", false, 8).changed();
                     dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_rev"), &mut app.drawing.revision, "A", false, 8).changed();
