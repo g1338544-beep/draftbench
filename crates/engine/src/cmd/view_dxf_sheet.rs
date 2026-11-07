@@ -148,7 +148,8 @@ fn manual(
         // projected edges. `at` blank means the middle of the bodies along the axis.
         // A cutting line drawn by the user on the Top view: x1, y1, x2, y2 in model mm. The section looks at the
         // vertical plane through it, reading along the line.
-        let flip = p.get("section_flip").and_then(Value::as_bool).unwrap_or(false);
+        // The sheet-wide switch and a click on this section's arrow both turn it round; both together turn it back.
+        let flip = p.get("section_flip").and_then(Value::as_bool).unwrap_or(false) != item.get("flip").and_then(Value::as_bool).unwrap_or(false);
         let section_line: Option<[f64; 4]> = item.get("section").and_then(|sec| sec.get("line")).and_then(Value::as_array).and_then(|a| {
             let n: Vec<f64> = a.iter().filter_map(Value::as_f64).collect();
             match n[..] {

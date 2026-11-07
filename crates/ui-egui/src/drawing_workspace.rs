@@ -101,6 +101,8 @@ struct PlacedView {
     cap: (f32, f32),
     /// Where the section letters sit at the two ends of the cutting line: their move from the automatic spot (mm).
     letter_off: [f32; 4],
+    /// The section's cutting line is turned round: the arrows and the view look the other way.
+    flip: bool,
     /// Drawn in 3D colour behind its lines (the 3D View button): same place and scale as the view.
     colour: bool,
 }
@@ -594,7 +596,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "letter_off": v.letter_off, "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "letter_off": v.letter_off, "flip": v.flip, "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals, "style": d.style})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -864,6 +866,7 @@ impl State {
                             [g(0), g(1), g(2), g(3)]
                         })
                         .unwrap_or([0.0; 4]),
+                    flip: v.get("flip").and_then(serde_json::Value::as_bool).unwrap_or(false),
                 });
             }
         }
@@ -1250,6 +1253,9 @@ fn params(st: &State) -> Value {
             if v.cap != (0.0, 0.0) {
                 o["cap"] = json!([v.cap.0, v.cap.1]);
             }
+            if v.flip {
+                o["flip"] = json!(true);
+            }
             if v.letter_off != [0.0; 4] {
                 o["letter_off"] = json!(v.letter_off);
             }
@@ -1493,6 +1499,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         letter: String::new(),
         cap: (0.0, 0.0),
         letter_off: [0.0; 4],
+        flip: false,
         colour: false,
     });
     app.drawing.selected = Some(n);
@@ -1559,6 +1566,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         letter: String::new(),
         cap: (0.0, 0.0),
         letter_off: [0.0; 4],
+        flip: false,
         colour: false,
     });
     let mut p = params(&app.drawing);
@@ -2045,6 +2053,42 @@ fn erase_line(app: &mut SolveApp, a: Pos2, b: Pos2) {
     app.drawing.dirty_marks = true;
 }
 
+/// The section view a letter stands for (its own letter, or the automatic one by order).
+fn section_view_for(placed: &[PlacedView], c: char) -> Option<usize> {
+    let mut count = 0usize;
+    for (i, v) in placed.iter().enumerate() {
+        let is_section = v.section.is_some() || v.section_line.is_some() || v.section_path.is_some();
+        let auto = char::from(b'A' + count.min(25) as u8);
+        if is_section || v.detail.is_some() {
+            count += 1;
+        }
+        let own = v.letter.trim().chars().next().filter(|c| c.is_ascii_alphanumeric()).map_or(auto, |c| c.to_ascii_uppercase());
+        if is_section && own == c {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// The section whose cutting-line arrow is under `s`: a short dimension-layer stroke next to the section's letter.
+fn arrow_hit(sheet: &Sheet, placed: &[PlacedView], s: Pos2) -> Option<usize> {
+    for (layer, shape) in sheet.items.iter().take(200_000) {
+        let (Layer::Dim, Shape::Line(a, b)) = (layer, shape) else { continue };
+        if (*b - *a).length() > 10.0 || dist_to_segment(s, (*a, *b)) > 2.5 {
+            continue;
+        }
+        for (_, t) in sheet.items.iter().take(200_000) {
+            let Shape::Text(at, _, text, _, _) = t else { continue };
+            let mut chars = text.chars();
+            let (Some(c), None) = (chars.next(), chars.next()) else { continue };
+            if c.is_ascii_alphanumeric() && (at.distance(*a) < 14.0 || at.distance(*b) < 14.0) && let Some(i) = section_view_for(placed, c) {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
 /// The section letter under `s` on the sheet: the view whose cutting line it marks and which end it is at.
 fn letter_hit(sheet: &Sheet, placed: &[PlacedView], s: Pos2) -> Option<(usize, usize)> {
     let mut seen = [0usize; 128];
@@ -2063,17 +2107,8 @@ fn letter_hit(sheet: &Sheet, placed: &[PlacedView], s: Pos2) -> Option<(usize, u
         if (s.x - at.x).abs() > h.max(3.0) || (s.y - at.y).abs() > h.max(3.0) * 1.5 {
             continue;
         }
-        let mut count = 0usize;
-        for (i, v) in placed.iter().enumerate() {
-            let is_section = v.section.is_some() || v.section_line.is_some() || v.section_path.is_some();
-            let auto = char::from(b'A' + count.min(25) as u8);
-            if is_section || v.detail.is_some() {
-                count += 1;
-            }
-            let own = v.letter.trim().chars().next().filter(|c| c.is_ascii_alphanumeric()).map_or(auto, |c| c.to_ascii_uppercase());
-            if is_section && own == c {
-                return Some((i, n % 2));
-            }
+        if let Some(i) = section_view_for(placed, c) {
+            return Some((i, n % 2));
         }
     }
     None
@@ -4177,6 +4212,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             refresh(app);
         }
     }
+    // A click on a section's cutting-line arrow turns the section round.
+    if app.drawing.dim_tool.is_none()
+        && app.drawing.proj_tool.is_none()
+        && app.drawing.cline_tool.is_none()
+        && !app.drawing.mark_tool
+        && !app.drawing.erase_tool
+        && app.drawing.letter_drag.is_none()
+        && response.clicked_by(egui::PointerButton::Primary)
+        && let Some(s) = response.interact_pointer_pos().and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q)))
+        && let Some(sheet) = app.drawing.sheet.as_ref()
+        && let Some(v) = arrow_hit(sheet, &app.drawing.placed, s)
+        && let Some(p) = app.drawing.placed.get_mut(v)
+    {
+        p.flip = !p.flip;
+        refresh(app);
+    }
     // Dragging a title block text: it follows the pointer, and letting go keeps it there.
     if let (Some((index, from, dx0, dy0)), Some(m)) = (app.drawing.cell_drag, &map) {
         if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)) {
@@ -5161,6 +5212,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     letter: String::new(),
                     cap: (0.0, 0.0),
                     letter_off: [0.0; 4],
+                    flip: false,
                     colour: app.drawing.placed.get(parent).is_some_and(|v| v.colour),
                     rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
                         (true, 2 | 3, 1 | 5) => if dx >= 0.0 { 1 } else { 3 },
@@ -6048,6 +6100,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             letter: String::new(),
             cap: (0.0, 0.0),
             letter_off: [0.0; 4],
+            flip: false,
             colour: false,
         });
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
@@ -6075,6 +6128,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             letter: String::new(),
             cap: (0.0, 0.0),
             letter_off: [0.0; 4],
+            flip: false,
             colour: false,
         });
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
@@ -6101,6 +6155,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             letter: String::new(),
             cap: (0.0, 0.0),
             letter_off: [0.0; 4],
+            flip: false,
             colour: false,
         });
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
