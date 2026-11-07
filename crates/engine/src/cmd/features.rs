@@ -1853,15 +1853,16 @@ fn extrude_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
         o.insert("operation".into(), json!("new"));
     }
     let before: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
-    s.execute("solid.extrude", &q)?;
-    let made = s
-        .model
-        .state()
-        .bodies
-        .iter()
-        .map(|b| b.name.clone())
-        .find(|n| !before.contains(n))
-        .ok_or_else(|| bad(cmd, "the extrusion made no body"))?;
+    let r = s.execute("solid.extrude", &q)?;
+    // The body the extrusion made: as it reports, else the one that was not there before.
+    let made = r
+        .get("created_bodies")
+        .and_then(Value::as_array)
+        .and_then(|a| a.first())
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| s.model.state().bodies.iter().map(|b| b.name.clone()).find(|n| !before.contains(n)))
+        .ok_or_else(|| bad(cmd, format!("the extrusion made no body{}", r.get("warning").and_then(Value::as_str).map(|w| format!(" ({w})")).unwrap_or_default())))?;
     // Everything beyond the surface, along the extrusion, goes.
     cut_slab(s, &surface, &made, along, slab)?;
     Ok(json!({"body": made}))
@@ -1886,14 +1887,14 @@ fn split_by_surface(s: &mut Session, p: &Value) -> Result<Value> {
     let (dir, reach) = surface_axis(s, &surface, &[body.as_str()]).ok_or_else(|| bad(cmd, "not supported yet: this surface has no single side to cut (it faces every way)"))?;
     let sign = if bool_(p, "reverse").unwrap_or(false) { -1.0 } else { 1.0 };
     let before: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
-    s.execute("solid.move", &json!({"bodies": [body.clone()], "translate": [0, 0, 0], "copy": true}))?;
-    let copy = s
-        .model
-        .state()
-        .bodies
-        .iter()
-        .map(|b| b.name.clone())
-        .find(|n| !before.contains(n))
+    let r = s.execute("solid.move", &json!({"bodies": [body.clone()], "translate": [0, 0, 0], "copy": true}))?;
+    let copy = r
+        .get("created_bodies")
+        .and_then(Value::as_array)
+        .and_then(|a| a.first())
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| s.model.state().bodies.iter().map(|b| b.name.clone()).find(|n| !before.contains(n)))
         .ok_or_else(|| bad(cmd, "the copy of the body could not be made"))?;
     // The slab on the chosen side is cut out of the body, and the slab on the other side out of the copy.
     cut_slab(s, &surface, &body, dir, reach * sign)?;
