@@ -2893,6 +2893,25 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .collect();
             let _ = app.run("select.set", json!({ "items": items, "add": add }));
         }
+        // Double-click a face: select every face joined to it smoothly (across tangent edges), so a
+        // surface that runs on as one sheet lights up whole, not one piece at a time.
+        if resp.double_clicked()
+            && !held
+            && !dim_edit
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && !app.ui.pick_bodies
+            && let Some(Hit::Face { body, point, .. }) = app.viewport.hover.clone()
+            && let Some(b) = crate::open_meshing::shown_world(app).body(&body).cloned()
+        {
+            let items: Vec<Sel> = solidcraft_engine::doc::tangent_face_chain(&b, &[point])
+                .into_iter()
+                .map(|(index, point)| Sel::Face { body: body.clone(), index, point })
+                .collect();
+            if items.len() > 1 {
+                let _ = app.run("select.set", json!({ "items": items, "add": add }));
+            }
+        }
         // Double-click a part: its row lights up in the browser on the left, opened and scrolled to.
         if resp.double_clicked()
             && !held

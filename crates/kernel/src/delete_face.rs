@@ -414,13 +414,38 @@ fn remove_round(body: &Body, face: usize) -> Result<Body> {
         if rc < rop { (rc, rop + 0.25 * span, a1) } else { ((rop - 0.5 * span).max(0.0), rc, a1) }
     };
     let (lo, hi) = (tp.min(a1), tp.max(a1));
-    let mut tool = cylinder(origin + axis * lo, axis, outer, hi - lo)?;
-    if inner > 1e-6 {
-        let core = cylinder(origin + axis * (lo - span), axis, inner, hi - lo + 2.0 * span)?;
-        tool = boolean(&tool, &core, BoolOp::Cut)?.ok_or_else(|| fail("the ring that restores the corner came out empty"))?;
-    }
     let op = if convex { BoolOp::Union } else { BoolOp::Cut };
-    boolean(body, &tool, op)?.ok_or_else(|| fail("removing the round left nothing"))
+    // The tool's wall at the cylinder's radius lies on the body's own wall, which the boolean
+    // may fail to intersect; then the tool is made a hair smaller on that side (a step of
+    // a few thousandths of the round's size is left at the wall).
+    let mut last: Option<KernelError> = None;
+    for k in [0.0, 2e-3, 2e-2] {
+        let delta = k * span;
+        let (inner, outer) = {
+            let (mut i, mut o) = (inner, outer);
+            if (o - rc).abs() < 1e-12 {
+                o -= delta;
+            }
+            if (i - rc).abs() < 1e-12 {
+                i += delta;
+            }
+            (i, o)
+        };
+        let made = (|| -> Result<Option<Body>> {
+            let mut tool = cylinder(origin + axis * lo, axis, outer, hi - lo)?;
+            if inner > 1e-6 {
+                let core = cylinder(origin + axis * (lo - span), axis, inner, hi - lo + 2.0 * span)?;
+                tool = boolean(&tool, &core, BoolOp::Cut)?.ok_or_else(|| fail("the ring that restores the corner came out empty"))?;
+            }
+            boolean(body, &tool, op)
+        })();
+        match made {
+            Ok(Some(b)) => return Ok(b),
+            Ok(None) => last = Some(fail("removing the round left nothing")),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| fail("the corner could not be restored")))
 }
 
 /// Remove the rounds among `faces` (fillets and chamfers between a plane and a coaxial
