@@ -3667,6 +3667,23 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 need(1, "the splitting plane")?;
             }
             let body = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
+            // Trim Body with a whole surface body of any shape: the surface is thickened across the part that
+            // goes (as thick as the two bodies are big) and cut out, so the cut follows the surface exactly.
+            if d.extra.get("trim").and_then(Value::as_bool).unwrap_or(false)
+                && let Some(Sel::Body { name }) = sels(d, 1).first()
+            {
+                let st = s.world_state();
+                let tool = st.body(name).ok_or("pick a surface body as the trimming tool")?;
+                if !tool.body.is_surface() {
+                    return Err("pick a surface body, a plane or a face as the trimming tool".into());
+                }
+                let target = st.body(&body).ok_or("pick the body to trim")?;
+                let reach = (tool.mesh().bounds().union(&target.mesh().bounds())).max - (tool.mesh().bounds().union(&target.mesh().bounds())).min;
+                let thick = (reach.len() * 1.5).max(1.0);
+                // The surface's normal side goes; Reverse Direction trims the other side.
+                let signed = if d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false) { -thick } else { thick };
+                return Ok(vec![("surface.thicken".into(), json!({"bodies": [name], "thickness": signed, "operation": "cut", "targets": [body]}))]);
+            }
             // A plane, a planar face's plane, or any other face (its surface extended).
             let p = if let Some(axis) = wcs_axis {
                 let w = s.wcs.unwrap_or(solidcraft_engine::cmd::wcs::Wcs::WORLD);
@@ -3716,7 +3733,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         return Err("pick a surface body, a plane, a face or a sketch line".into());
                     }
                     if tb.body.face_count() != 1 {
-                        return Err("not supported yet: a surface of several faces; pick one of its faces as the tool".into());
+                        return Err("not supported yet: Split Body with a surface of several faces; use Trim Body, or pick one face of the surface".into());
                     }
                     let m = tb.mesh();
                     let at = m.triangles.first().and_then(|t| m.tri(t)).map(|[a, b, c]| (a + b + c) / 3.0).ok_or("the surface has no faces to cut with")?;
