@@ -20,12 +20,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --release -p solidcraft
+        run: cargo build --profile release-pc -p solidcraft
       - name: Package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path pack | Out-Null
-          Copy-Item target/release/solidcraft.exe pack/DraftNew.exe
+          Copy-Item target/release-pc/solidcraft.exe pack/DraftNew.exe
           Compress-Archive -Path pack/* -DestinationPath draftbench-windows.zip
       - uses: actions/upload-artifact@v4
         with:
