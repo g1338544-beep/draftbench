@@ -1,0 +1,644 @@
+{
+  "format": "solidcraft/1",
+  "name": "Electric car (simplified)",
+  "units": "mm",
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "Body",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Body"
+      ],
+      "corner": [
+        -2200.0,
+        -900.0,
+        300.0
+      ],
+      "length": "4400",
+      "width": "1800",
+      "height": "520",
+      "operation": "new_body"
+    },
+    {
+      "id": 2,
+      "name": "Cabin",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Cabin"
+      ],
+      "corner": [
+        -950.0,
+        -780.0,
+        820.0
+      ],
+      "length": "1900",
+      "width": "1560",
+      "height": "470",
+      "operation": "new_body"
+    },
+    {
+      "id": 3,
+      "name": "Windscreen",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Windscreen"
+      ],
+      "corner": [
+        950.0,
+        -740.0,
+        830.0
+      ],
+      "length": "60",
+      "width": "1480",
+      "height": "430",
+      "operation": "new_body"
+    },
+    {
+      "id": 4,
+      "name": "Rear window",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Rear window"
+      ],
+      "corner": [
+        -1010.0,
+        -740.0,
+        830.0
+      ],
+      "length": "60",
+      "width": "1480",
+      "height": "430",
+      "operation": "new_body"
+    },
+    {
+      "id": 5,
+      "name": "Side glass L",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Side glass L"
+      ],
+      "corner": [
+        -880.0,
+        -800.0,
+        860.0
+      ],
+      "length": "1760",
+      "width": "22",
+      "height": "380",
+      "operation": "new_body"
+    },
+    {
+      "id": 6,
+      "name": "Side glass R",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Side glass R"
+      ],
+      "corner": [
+        -880.0,
+        778.0,
+        860.0
+      ],
+      "length": "1760",
+      "width": "22",
+      "height": "380",
+      "operation": "new_body"
+    },
+    {
+      "id": 7,
+      "name": "Battery pack",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Battery pack"
+      ],
+      "corner": [
+        -1300.0,
+        -700.0,
+        170.0
+      ],
+      "length": "2600",
+      "width": "1400",
+      "height": "130",
+      "operation": "new_body"
+    },
+    {
+      "id": 8,
+      "name": "Front bumper",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Front bumper"
+      ],
+      "corner": [
+        2200.0,
+        -860.0,
+        330.0
+      ],
+      "length": "80",
+      "width": "1720",
+      "height": "200",
+      "operation": "new_body"
+    },
+    {
+      "id": 9,
+      "name": "Rear bumper",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Rear bumper"
+      ],
+      "corner": [
+        -2280.0,
+        -860.0,
+        330.0
+      ],
+      "length": "80",
+      "width": "1720",
+      "height": "200",
+      "operation": "new_body"
+    },
+    {
+      "id": 10,
+      "name": "Headlight L",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Headlight L"
+      ],
+      "corner": [
+        2190.0,
+        -760.0,
+        640.0
+      ],
+      "length": "20",
+      "width": "330",
+      "height": "70",
+      "operation": "new_body"
+    },
+    {
+      "id": 11,
+      "name": "Headlight R",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Headlight R"
+      ],
+      "corner": [
+        2190.0,
+        430.0,
+        640.0
+      ],
+      "length": "20",
+      "width": "330",
+      "height": "70",
+      "operation": "new_body"
+    },
+    {
+      "id": 12,
+      "name": "Light bar rear",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Light bar rear"
+      ],
+      "corner": [
+        -2210.0,
+        -780.0,
+        650.0
+      ],
+      "length": "20",
+      "width": "1560",
+      "height": "60",
+      "operation": "new_body"
+    },
+    {
+      "id": 13,
+      "name": "Mirror L",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Mirror L"
+      ],
+      "corner": [
+        820.0,
+        -980.0,
+        860.0
+      ],
+      "length": "160",
+      "width": "100",
+      "height": "70",
+      "operation": "new_body"
+    },
+    {
+      "id": 14,
+      "name": "Mirror R",
+      "suppressed": false,
+      "type": "box",
+      "body_names": [
+        "Mirror R"
+      ],
+      "corner": [
+        820.0,
+        880.0,
+        860.0
+      ],
+      "length": "160",
+      "width": "100",
+      "height": "70",
+      "operation": "new_body"
+    },
+    {
+      "id": 15,
+      "name": "Charge port",
+      "suppressed": false,
+      "type": "sphere",
+      "body_names": [
+        "Charge port"
+      ],
+      "center": [
+        -2200.0,
+        640.0,
+        720.0
+      ],
+      "radius": "45",
+      "operation": "new_body"
+    },
+    {
+      "id": 16,
+      "name": "Tyre FL",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Tyre FL"
+      ],
+      "base": [
+        1350.0,
+        -940.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "340",
+      "height": "240",
+      "operation": "new_body"
+    },
+    {
+      "id": 17,
+      "name": "Rim FL",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Rim FL"
+      ],
+      "base": [
+        1350.0,
+        -950.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "225",
+      "height": "260",
+      "operation": "new_body"
+    },
+    {
+      "id": 18,
+      "name": "Hub FL",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Hub FL"
+      ],
+      "base": [
+        1350.0,
+        -960.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "60",
+      "height": "270",
+      "operation": "new_body"
+    },
+    {
+      "id": 19,
+      "name": "Tyre FR",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Tyre FR"
+      ],
+      "base": [
+        1350.0,
+        700.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "340",
+      "height": "240",
+      "operation": "new_body"
+    },
+    {
+      "id": 20,
+      "name": "Rim FR",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Rim FR"
+      ],
+      "base": [
+        1350.0,
+        690.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "225",
+      "height": "260",
+      "operation": "new_body"
+    },
+    {
+      "id": 21,
+      "name": "Hub FR",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Hub FR"
+      ],
+      "base": [
+        1350.0,
+        690.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "60",
+      "height": "270",
+      "operation": "new_body"
+    },
+    {
+      "id": 22,
+      "name": "Tyre RL",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Tyre RL"
+      ],
+      "base": [
+        -1350.0,
+        -940.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "340",
+      "height": "240",
+      "operation": "new_body"
+    },
+    {
+      "id": 23,
+      "name": "Rim RL",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Rim RL"
+      ],
+      "base": [
+        -1350.0,
+        -950.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "225",
+      "height": "260",
+      "operation": "new_body"
+    },
+    {
+      "id": 24,
+      "name": "Hub RL",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Hub RL"
+      ],
+      "base": [
+        -1350.0,
+        -960.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "60",
+      "height": "270",
+      "operation": "new_body"
+    },
+    {
+      "id": 25,
+      "name": "Tyre RR",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Tyre RR"
+      ],
+      "base": [
+        -1350.0,
+        700.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "340",
+      "height": "240",
+      "operation": "new_body"
+    },
+    {
+      "id": 26,
+      "name": "Rim RR",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Rim RR"
+      ],
+      "base": [
+        -1350.0,
+        690.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "225",
+      "height": "260",
+      "operation": "new_body"
+    },
+    {
+      "id": 27,
+      "name": "Hub RR",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Hub RR"
+      ],
+      "base": [
+        -1350.0,
+        690.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "60",
+      "height": "270",
+      "operation": "new_body"
+    },
+    {
+      "id": 28,
+      "name": "Arch FL",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Arch FL"
+      ],
+      "base": [
+        1350.0,
+        -960.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "400",
+      "height": "380",
+      "operation": "new_body"
+    },
+    {
+      "id": 29,
+      "name": "Arch RL",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Arch RL"
+      ],
+      "base": [
+        -1350.0,
+        -960.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "400",
+      "height": "380",
+      "operation": "new_body"
+    },
+    {
+      "id": 30,
+      "name": "Arch FR",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Arch FR"
+      ],
+      "base": [
+        1350.0,
+        580.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "400",
+      "height": "380",
+      "operation": "new_body"
+    },
+    {
+      "id": 31,
+      "name": "Arch RR",
+      "suppressed": false,
+      "type": "cylinder",
+      "body_names": [
+        "Arch RR"
+      ],
+      "base": [
+        -1350.0,
+        580.0,
+        340.0
+      ],
+      "axis": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "radius": "400",
+      "height": "380",
+      "operation": "new_body"
+    },
+    {
+      "id": 32,
+      "name": "Wheel arches",
+      "suppressed": false,
+      "type": "combine",
+      "target": "Body",
+      "tools": [
+        "Arch FL",
+        "Arch RL",
+        "Arch FR",
+        "Arch RR"
+      ],
+      "operation": "cut",
+      "keep_tools": false
+    }
+  ],
+  "next_id": 33
+}
