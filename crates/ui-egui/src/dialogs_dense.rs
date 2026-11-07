@@ -948,11 +948,14 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             choice_row(ui, "Operation", "pr_op", operation, &OP_LABELS);
         }
         Kind::Combine { operation, keep_tools } => {
-            form_row(ui, "Operation", |ui| {
-                let mut op = operation.saturating_sub(1);
-                combo(ui, "cb_op", &OP_LABELS[1..], &mut op);
-                *operation = op + 1;
-            });
+            // Cavity always cuts; only Combine chooses the operation.
+            if !d.extra.get("cavity").and_then(Value::as_bool).unwrap_or(false) {
+                form_row(ui, "Operation", |ui| {
+                    let mut op = operation.saturating_sub(1);
+                    combo(ui, "cb_op", &OP_LABELS[1..], &mut op);
+                    *operation = op + 1;
+                });
+            }
             ui_kit::section(ui, "combine_options", "Options", true, |ui| {
                 let mut new_component = d.extra.get("new_component").and_then(Value::as_bool).unwrap_or(false);
                 let before = new_component;

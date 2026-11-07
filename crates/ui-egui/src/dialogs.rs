@@ -767,6 +767,15 @@ impl Dialog {
                 Kind::Combine { operation: 1, keep_tools: false },
                 vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
             ),
+            // Cavity: the design bodies are cut out of the mold block and stay where they are.
+            "solid.cavity" => {
+                let mut d = Dialog::new(
+                    Kind::Combine { operation: 2, keep_tools: true },
+                    vec![SelInput::new("Mold Body", BODIES, false), SelInput::new("Design Bodies", BODIES, true)],
+                );
+                d.extra.insert("cavity".into(), json!(true));
+                d
+            }
             _ => {
                 let (kind, inputs) = Kind::simple_start(id)
                     .or_else(|| crate::dialogs_assembly::start(app, id))
@@ -1668,6 +1677,14 @@ fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
 }
 
+/// The window's heading: Cavity is a Combine window with its own name.
+fn dialog_title(k: &Kind, extra: &serde_json::Map<String, Value>) -> &'static str {
+    if matches!(k, Kind::Combine { .. }) && extra.get("cavity").and_then(Value::as_bool).unwrap_or(false) {
+        return "CAVITY";
+    }
+    title(k)
+}
+
 fn title(k: &Kind) -> &'static str {
     match k {
         Kind::Sketch => "CREATE SKETCH",
@@ -2327,7 +2344,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Dragged by its title band, the dialog keeps that offset from its docked place while it
     // is open (#1335), kept inside the viewport.
-    let moved = crate::frame::dock_offset(ctx, title(&d.kind));
+    let moved = crate::frame::dock_offset(ctx, dialog_title(&d.kind, &d.extra));
     let docked = egui::pos2(side.anchor_x(vp), top);
     let drag_bounds = crate::shell::tool_drag_rect(app, vp);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
@@ -2339,7 +2356,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut enter = false;
     let wide = matches!(&d.kind, Kind::Motion(k) if k.wide());
 
-    let raw_title = title(&d.kind);
+    let raw_title = dialog_title(&d.kind, &d.extra);
     let heading = if d.editing.is_some() { crate::i18n::format("dialog.edit_title", &[("title", tr(raw_title))]) } else { tr(raw_title).to_string() };
     let frame = crate::ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     // OK is offered once the inputs make a feature.
@@ -2362,7 +2379,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
         _ => ("OK", "Cancel"),
     };
-    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
+    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", dialog_title(&d.kind, &d.extra))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
     let panel = if matches!(d.kind, Kind::Appearance(_)) {
         panel.width(t.form_card_width + t.form_label_width + t.space_6)
@@ -2385,7 +2402,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
-        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", title(&d.kind))), "delete", &heading)
+        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", dialog_title(&d.kind, &d.extra))), "delete", &heading)
             .tone(crate::ui_kit::Tone::Danger)
             .actions("Delete", "Cancel", None)
             .detail(&detail)
@@ -2409,7 +2426,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let heading = crate::ui_kit::FeatureOptions {
                 icon,
                 title: label,
-                drag_key: title(&d.kind),
+                drag_key: dialog_title(&d.kind, &d.extra),
                 moved,
                 docked,
                 apply_label: repeatable.then_some("Apply"),
@@ -3043,7 +3060,7 @@ pub(crate) fn feature_frame(s: &Session, component: u64) -> solidcraft_engine::d
 
 /// The feature dialog's current operation name for a reviewed issue draft.
 pub(crate) fn report_title(d: &Dialog) -> String {
-    title(&d.kind).to_string()
+    dialog_title(&d.kind, &d.extra).to_string()
 }
 
 /// The commands OK runs (an edit rebuilds its feature in place); the live preview runs the same.
@@ -3899,10 +3916,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(1, "tool bodies")?;
             let target = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
             let tools: Vec<String> = sels(d, 1).body_names().into_iter().filter(|n| *n != target).collect();
-            (
-                "solid.combine",
-                json!({"target": target, "tools": tools, "operation": OPS.get(*operation).copied().unwrap_or("join"), "keep_tools": keep_tools}),
-            )
+            if d.extra.get("cavity").and_then(Value::as_bool).unwrap_or(false) {
+                ("solid.cavity", json!({"target": target, "tools": tools, "keep_tools": keep_tools}))
+            } else {
+                (
+                    "solid.combine",
+                    json!({"target": target, "tools": tools, "operation": OPS.get(*operation).copied().unwrap_or("join"), "keep_tools": keep_tools}),
+                )
+            }
         }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
