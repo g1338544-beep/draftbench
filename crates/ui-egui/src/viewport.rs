@@ -2161,11 +2161,13 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         };
         let on = sel.iter().any(|x| matches!(x, Sel::Axis { name: n } if n == name)) || matches!(hover, Some(Hit::Axis { name: n }) if n == name);
         let w = if on { 4.0 } else { 2.0 };
-        sc.guide_line([0.0; 3], (dir * size).to_f32(), c4(col), w);
+        // Drawn over the model: the origin shows in every display style (shaded, hidden-line, wireframe,
+        // inside a body) for as long as it is not turned off.
+        sc.line([0.0; 3], (dir * size).to_f32(), c4(col), w, true);
         let dash = size * 0.08;
         let mut a = size + dash;
         while a < size * AXIS_LEN {
-            sc.guide_line((dir * a).to_f32(), (dir * (a + dash)).to_f32(), c4(col), w * 0.75);
+            sc.line((dir * a).to_f32(), (dir * (a + dash)).to_f32(), c4(col), w * 0.75, true);
             a += dash * 2.0;
         }
     }
