@@ -5017,22 +5017,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.drawing.scale_edit = None;
             }
             if changed {
-                // The views projected from this one, and the one it was projected from, follow its scale.
+                // Every other standard (orthographic) view follows the scale, aligned or placed one by one;
+                // the isometric view and detail views keep their own.
                 let scale = app.drawing.placed[i].scale.clone();
-                let mut group = vec![i];
-                for _ in 0..app.drawing.placed.len() {
-                    let before = group.len();
-                    for (j, v) in app.drawing.placed.iter().enumerate() {
-                        let linked = v.align.is_some_and(|(parent, _)| group.contains(&parent))
-                            || group.iter().any(|g| app.drawing.placed.get(*g).and_then(|w| w.align).is_some_and(|(parent, _)| parent == j));
-                        if linked && !group.contains(&j) {
-                            group.push(j);
-                        }
-                    }
-                    if group.len() == before {
-                        break;
-                    }
-                }
+                let group: Vec<usize> = (0..app.drawing.placed.len())
+                    .filter(|j| *j == i || app.drawing.placed.get(*j).is_some_and(|v| v.view < 6 && v.detail.is_none()))
+                    .collect();
                 for j in group {
                     if let Some(v) = app.drawing.placed.get_mut(j)
                         && v.detail.is_none()
