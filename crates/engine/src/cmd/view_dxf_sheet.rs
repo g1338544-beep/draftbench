@@ -120,9 +120,9 @@ fn manual(
     let mut infos: std::collections::BTreeMap<usize, ViewInfo> = std::collections::BTreeMap::new();
     // Views a cutting line can be drawn on, and the sections to draw: (angles, x, y, centre, scale, lo, hi) and (axis, position, angles, letter).
     let mut frames: Vec<((f64, f64), f64, f64, Vec2, f64, Vec2, Vec2)> = Vec::new();
-    let mut cuts: Vec<(usize, f64, (f64, f64), char, Option<([f64; 4], (f64, f64))>)> = Vec::new();
+    let mut cuts: Vec<(usize, f64, (f64, f64), char, Option<([f64; 4], (f64, f64))>, [f64; 4])> = Vec::new();
     // Stepped cutting lines: the points, the angles of the view they were drawn on, the section's angles and its letter.
-    let mut cut_paths: Vec<(Vec<Vec2>, (f64, f64), (f64, f64), char)> = Vec::new();
+    let mut cut_paths: Vec<(Vec<Vec2>, (f64, f64), (f64, f64), char, [f64; 4])> = Vec::new();
     let mut centre_used = false;
     // Detail views: (circle u, v, radius, the view's angles, letter) so the circle and letter are drawn on the view it comes from.
     let mut details: Vec<([f64; 3], (f64, f64), char)> = Vec::new();
@@ -389,6 +389,12 @@ fn manual(
         let auto_letter = char::from(b'A' + list.iter().take(index).filter(|it| it.get("section").is_some() || it.get("detail").is_some()).count().min(25) as u8);
         // The user's own letter (one letter or digit) replaces the automatic one.
         let letter = item.get("letter").and_then(Value::as_str).and_then(|t| t.trim().chars().next()).filter(|c| c.is_ascii_alphanumeric()).map_or(auto_letter, |c| c.to_ascii_uppercase());
+        // Where the user dragged the section letters to: their shift from the automatic spot, per end (mm).
+        let letter_off: [f64; 4] = {
+            let v: Vec<f64> = item.get("letter_off").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).filter(|v| v.is_finite()).collect()).unwrap_or_default();
+            let g = |i: usize| v.get(i).copied().unwrap_or(0.0).clamp(-500.0, 500.0);
+            [g(0), g(1), g(2), g(3)]
+        };
         match section {
             None => {
                 if let Some(d) = detail {
@@ -398,10 +404,10 @@ fn manual(
             }
             Some(_) if section_path.is_some() => {
                 if let Some(pts) = &section_path {
-                    cut_paths.push((pts.clone(), view.angles(), angles, letter));
+                    cut_paths.push((pts.clone(), view.angles(), angles, letter, letter_off));
                 }
             }
-            Some((axis, _)) => cuts.push((axis, section_at, angles, letter, section_line.map(|l| (l, view.angles())))),
+            Some((axis, _)) => cuts.push((axis, section_at, angles, letter, section_line.map(|l| (l, view.angles())), letter_off)),
         }
         if section.is_some() {
             let mut segments: Vec<(Vec2, Vec2)> = all.lines.iter().take(cut_count).map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
@@ -647,7 +653,7 @@ fn manual(
     }
     // The cutting line of each section on the views it crosses: a chain line with arrows toward the
     // direction of sight, and the section's letter at both ends.
-    for (axis, at, sec_angles, letter, sec_line) in &cuts {
+    for (axis, at, sec_angles, letter, sec_line, loff) in &cuts {
         let sec_cam = Camera { target: Vec3::ZERO, yaw: sec_angles.0, pitch: sec_angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
         let (_, _, back) = sec_cam.basis();
         let e = match axis {
@@ -689,19 +695,20 @@ fn manual(
             // Heavy stubs at both ends, as on a drawing sheet: the cutting line's ends are drawn thick.
             line("VISIBLE", a, Vec2::new(a.x + dir.x * 6.0, a.y + dir.y * 6.0), &mut entities);
             line("VISIBLE", b, Vec2::new(b.x - dir.x * 6.0, b.y - dir.y * 6.0), &mut entities);
-            for end in [a, b] {
+            for (k, end) in [a, b].into_iter().enumerate() {
+                let (ox, oy) = (loff.get(2 * k).copied().unwrap_or(0.0), loff.get(2 * k + 1).copied().unwrap_or(0.0));
                 let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
                 line("DIM", end, tip, &mut entities);
                 for k in [-1.0, 1.0] {
                     let back_pt = Vec2::new(tip.x - sight.x * 3.0 - sight.y * 0.9 * k, tip.y - sight.y * 3.0 + sight.x * 0.9 * k);
                     line("DIM", tip, back_pt, &mut entities);
                 }
-                text("TEXT", Vec2::new(end.x - dir.x * 0.0 - sight.x * 4.0, end.y - sight.y * 4.0 - th * 0.3), th, letter.to_string(), &mut entities);
+                text("TEXT", Vec2::new(end.x - dir.x * 0.0 - sight.x * 4.0 + ox, end.y - sight.y * 4.0 - th * 0.3 + oy), th, letter.to_string(), &mut entities);
             }
         }
     }
     // A stepped cutting line: chain line along every piece, heavy at the ends and the bends, arrows and letters at the ends.
-    for (pts, from, sec_angles, letter) in &cut_paths {
+    for (pts, from, sec_angles, letter, loff) in &cut_paths {
         let sec_cam = Camera { target: Vec3::ZERO, yaw: sec_angles.0, pitch: sec_angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
         let (_, _, back) = sec_cam.basis();
         for (angles, x, y, c, scale, _, _) in &frames {
@@ -734,13 +741,14 @@ fn manual(
                 let (Some(end), Some(other)) = (end, if k == 0 { sheet_pts.get(1) } else { sheet_pts.get(n.saturating_sub(2)) }) else { continue };
                 let Some(dir) = unit(Vec2::new(end.x - other.x, end.y - other.y)) else { continue };
                 let end = Vec2::new(end.x + dir.x * 6.0, end.y + dir.y * 6.0);
+                let (ox, oy) = (loff.get(2 * k).copied().unwrap_or(0.0), loff.get(2 * k + 1).copied().unwrap_or(0.0));
                 let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
                 line("DIM", end, tip, &mut entities);
                 for kk in [-1.0, 1.0] {
                     let back_pt = Vec2::new(tip.x - sight.x * 3.0 - sight.y * 0.9 * kk, tip.y - sight.y * 3.0 + sight.x * 0.9 * kk);
                     line("DIM", tip, back_pt, &mut entities);
                 }
-                text("TEXT", Vec2::new(end.x - sight.x * 4.0, end.y - sight.y * 4.0 - th * 0.3), th, letter.to_string(), &mut entities);
+                text("TEXT", Vec2::new(end.x - sight.x * 4.0 + ox, end.y - sight.y * 4.0 - th * 0.3 + oy), th, letter.to_string(), &mut entities);
             }
         }
     }

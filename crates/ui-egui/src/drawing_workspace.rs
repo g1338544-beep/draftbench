@@ -99,6 +99,8 @@ struct PlacedView {
     letter: String,
     /// How far the caption was dragged from its place (sheet mm).
     cap: (f32, f32),
+    /// Where the section letters sit at the two ends of the cutting line: their move from the automatic spot (mm).
+    letter_off: [f32; 4],
     /// Drawn in 3D colour behind its lines (the 3D View button): same place and scale as the view.
     colour: bool,
 }
@@ -351,6 +353,8 @@ pub struct State {
     caption_edit: Option<usize>,
     /// A caption being dragged: the view, the pointer at the start and the caption's move then.
     cap_drag: Option<(usize, Pos2, f32, f32)>,
+    /// A section letter being dragged: the view, which end of the cutting line, the pointer at the start and the letters' move then.
+    letter_drag: Option<(usize, usize, Pos2, [f32; 4])>,
     caption_buf: String,
     /// Whether a view placed from the Base View window shows its hidden lines (dashed).
     base_dashed: bool,
@@ -516,6 +520,7 @@ impl Default for State {
             caption_sel: None,
             caption_edit: None,
             cap_drag: None,
+            letter_drag: None,
             caption_buf: String::new(),
             base_dashed: true,
             base_shaded: false,
@@ -589,7 +594,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "letter_off": v.letter_off, "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals, "style": d.style})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -851,6 +856,14 @@ impl State {
                     letter: v.get("letter").and_then(serde_json::Value::as_str).map(|t| t.chars().take(1).collect()).unwrap_or_default(),
                     colour: v.get("colour").and_then(serde_json::Value::as_bool).unwrap_or(false),
                     cap: v.get("cap").and_then(serde_json::Value::as_array).and_then(|a| Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32))).filter(|(x, y)| x.is_finite() && y.is_finite()).unwrap_or((0.0, 0.0)),
+                    letter_off: v
+                        .get("letter_off")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|a| {
+                            let g = |i: usize| a.get(i).and_then(serde_json::Value::as_f64).filter(|x| x.is_finite()).unwrap_or(0.0) as f32;
+                            [g(0), g(1), g(2), g(3)]
+                        })
+                        .unwrap_or([0.0; 4]),
                 });
             }
         }
@@ -1237,6 +1250,9 @@ fn params(st: &State) -> Value {
             if v.cap != (0.0, 0.0) {
                 o["cap"] = json!([v.cap.0, v.cap.1]);
             }
+            if v.letter_off != [0.0; 4] {
+                o["letter_off"] = json!(v.letter_off);
+            }
             if let Some((yaw, pitch)) = v.custom {
                 o["yaw"] = json!(yaw);
                 o["pitch"] = json!(pitch);
@@ -1476,6 +1492,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         label: None,
         letter: String::new(),
         cap: (0.0, 0.0),
+        letter_off: [0.0; 4],
         colour: false,
     });
     app.drawing.selected = Some(n);
@@ -1541,6 +1558,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         label: None,
         letter: String::new(),
         cap: (0.0, 0.0),
+        letter_off: [0.0; 4],
         colour: false,
     });
     let mut p = params(&app.drawing);
@@ -2025,6 +2043,40 @@ fn erase_line(app: &mut SolveApp, a: Pos2, b: Pos2) {
     }
     app.drawing.sel_centre = None;
     app.drawing.dirty_marks = true;
+}
+
+/// The section letter under `s` on the sheet: the view whose cutting line it marks and which end it is at.
+fn letter_hit(sheet: &Sheet, placed: &[PlacedView], s: Pos2) -> Option<(usize, usize)> {
+    let mut seen = [0usize; 128];
+    for (_, shape) in sheet.items.iter().take(200_000) {
+        let Shape::Text(at, h, t, _, _) = shape else { continue };
+        let mut chars = t.chars();
+        let (Some(c), None) = (chars.next(), chars.next()) else { continue };
+        if !c.is_ascii_alphanumeric() {
+            continue;
+        }
+        let slot = c as usize;
+        let n = seen.get(slot).copied().unwrap_or(0);
+        if let Some(x) = seen.get_mut(slot) {
+            *x += 1;
+        }
+        if (s.x - at.x).abs() > h.max(3.0) || (s.y - at.y).abs() > h.max(3.0) * 1.5 {
+            continue;
+        }
+        let mut count = 0usize;
+        for (i, v) in placed.iter().enumerate() {
+            let is_section = v.section.is_some() || v.section_line.is_some() || v.section_path.is_some();
+            let auto = char::from(b'A' + count.min(25) as u8);
+            if is_section || v.detail.is_some() {
+                count += 1;
+            }
+            let own = v.letter.trim().chars().next().filter(|c| c.is_ascii_alphanumeric()).map_or(auto, |c| c.to_ascii_uppercase());
+            if is_section && own == c {
+                return Some((i, n % 2));
+            }
+        }
+    }
+    None
 }
 
 fn dist_to_segment(p: Pos2, (a, b): (Pos2, Pos2)) -> f32 {
@@ -3915,6 +3967,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
+            && let Some((v, k)) = letter_hit(sheet, &app.drawing.placed, s)
+        {
+            // A section letter at the end of a cutting line: drag it anywhere.
+            let orig = app.drawing.placed.get(v).map_or([0.0; 4], |p| p.letter_off);
+            app.drawing.letter_drag = Some((v, k, s, orig));
+            app.drawing.selected = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = pointer
             && let Some(i) = free_text_hit(&app.drawing.texts, ui_text_height(&app.drawing), s)
         {
             // A text placed on the sheet: drag it anywhere.
@@ -4090,6 +4151,29 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if response.drag_stopped() || !response.dragged() {
             app.drawing.cap_drag = None;
+            refresh(app);
+        }
+    }
+    // Dragging a section letter: it follows the pointer, and letting go keeps it there.
+    if let (Some((v, k, from, orig)), Some(m)) = (app.drawing.letter_drag, &map) {
+        let mut moved = false;
+        if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
+            && let Some(p) = app.drawing.placed.get_mut(v)
+        {
+            let mut o = orig;
+            if let Some(x) = o.get_mut(2 * k) {
+                *x = ((*x + s.x - from.x) * 10.0).round() / 10.0;
+            }
+            if let Some(y) = o.get_mut(2 * k + 1) {
+                *y = ((*y + s.y - from.y) * 10.0).round() / 10.0;
+            }
+            moved = p.letter_off != o;
+            p.letter_off = o;
+        }
+        if response.drag_stopped() || !response.dragged() {
+            app.drawing.letter_drag = None;
+            refresh(app);
+        } else if moved {
             refresh(app);
         }
     }
@@ -4886,7 +4970,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.letter_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -5076,6 +5160,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     label: None,
                     letter: String::new(),
                     cap: (0.0, 0.0),
+                    letter_off: [0.0; 4],
                     colour: app.drawing.placed.get(parent).is_some_and(|v| v.colour),
                     rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
                         (true, 2 | 3, 1 | 5) => if dx >= 0.0 { 1 } else { 3 },
@@ -5962,6 +6047,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             label: None,
             letter: String::new(),
             cap: (0.0, 0.0),
+            letter_off: [0.0; 4],
             colour: false,
         });
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
@@ -5988,6 +6074,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             label: None,
             letter: String::new(),
             cap: (0.0, 0.0),
+            letter_off: [0.0; 4],
             colour: false,
         });
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
@@ -6013,6 +6100,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             label: None,
             letter: String::new(),
             cap: (0.0, 0.0),
+            letter_off: [0.0; 4],
             colour: false,
         });
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
