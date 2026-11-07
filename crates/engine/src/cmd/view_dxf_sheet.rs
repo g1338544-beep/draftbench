@@ -306,6 +306,9 @@ fn manual(
                         0.0
                     } else {
                         let deg = ((y2 - y1).atan2(x2 - x1) - img.1.atan2(img.0)).to_degrees() % 360.0;
+                        // A line within a few degrees of an axis is that axis: no stray tilt.
+                        let nearest = (deg / 90.0).round() * 90.0;
+                        let deg = if (deg - nearest).abs() <= 8.0 { nearest } else { deg };
                         if deg.abs() < 0.05 { 0.0 } else { deg }
                     }
                 }

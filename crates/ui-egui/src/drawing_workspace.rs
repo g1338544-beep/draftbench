@@ -1483,13 +1483,32 @@ fn add_view(app: &mut SolveApp, view: usize) {
 }
 
 /// The chosen view alone on a blank sheet, for the ghost that follows the pointer while the Base View is open.
+/// The side a section view lies on for a cutting line running along the unit direction `u`: the line's
+/// perpendicular, snapped to the sheet's axes when the line is within a few degrees of one (a hand-drawn
+/// "level" line is level), and the right or lower of its two sides.
+fn section_side((ux, uy): (f32, f32)) -> (f32, f32) {
+    let (mut nx, mut ny) = (uy, -ux);
+    if nx.abs() <= 0.1 {
+        (nx, ny) = (0.0, ny.signum());
+    } else if ny.abs() <= 0.1 {
+        (nx, ny) = (nx.signum(), 0.0);
+    }
+    if nx < 0.0 || (nx == 0.0 && ny > 0.0) {
+        nx = -nx;
+        ny = -ny;
+    }
+    (nx, ny)
+}
+
 /// A cutting line's two ends in the order that puts its view on the right or below: the view lies on the
 /// side opposite the arrows, and the arrows look to the left of the line as it runs from the first end.
 fn section_ends(a: Pos2, b: Pos2) -> (Pos2, Pos2) {
     let d = b - a;
     let len = d.length().max(1e-6);
-    let (nx, ny) = (d.y / len, -d.x / len);
-    if nx < -1e-4 || (nx.abs() <= 1e-4 && ny > 0.0) { (b, a) } else { (a, b) }
+    let u = (d.x / len, d.y / len);
+    let (sx, sy) = section_side(u);
+    // The view must be on the side opposite the arrows, (uy, -ux) for this order of the ends.
+    if u.1 * sx - u.0 * sy < 0.0 { (b, a) } else { (a, b) }
 }
 
 /// Where a section view lies for a cutting line running along `d` (sheet mm) across a view with the centre
@@ -1497,18 +1516,7 @@ fn section_ends(a: Pos2, b: Pos2) -> (Pos2, Pos2) {
 /// line gives a view that follows the slant (right of the view for an up-down line, below it for a level one).
 fn section_spot(d: egui::Vec2, (x, y, w, h): (f32, f32, f32, f32)) -> Pos2 {
     let len = d.length().max(1e-6);
-    let (ux, uy) = (d.x / len, d.y / len);
-    let (mut nx, mut ny) = (uy, -ux);
-    if nx < -1e-4 || (nx.abs() <= 1e-4 && ny > 0.0) {
-        nx = -nx;
-        ny = -ny;
-    }
-    if nx.abs() <= 1e-4 {
-        nx = 0.0;
-    }
-    if ny.abs() <= 1e-4 {
-        ny = 0.0;
-    }
+    let (nx, ny) = section_side((d.x / len, d.y / len));
     let reach = nx.abs() * w / 2.0 + ny.abs() * h / 2.0 + 45.0;
     pos2(x + nx * reach, y + ny * reach)
 }
