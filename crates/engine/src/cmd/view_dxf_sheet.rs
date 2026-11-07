@@ -183,6 +183,7 @@ fn manual(
             Some((axis, sec.get("at").and_then(Value::as_f64).filter(|v| v.is_finite())))
         }) };
         let mut section_at = 0.0;
+        let mut cut_count = usize::MAX;
         let all = if let Some((axis, at)) = section {
             section_at = at.unwrap_or_else(|| middle(scene, axis));
             let cut = match line_plane {
@@ -199,7 +200,21 @@ fn manual(
                     hi = Vec2::new(hi.x.max(q.x), hi.y.max(q.y));
                 }
             }
-            std::rc::Rc::new(Projected { lines: cut.into_iter().map(|(a, b)| (a, b, false)).collect(), lo, hi })
+            let behind = match line_plane {
+                Some((normal, offset, angles)) => behind_edges(scene, angles, normal, offset, &cut),
+                None => {
+                    let normal = match axis {
+                        0 => Vec3::new(1.0, 0.0, 0.0),
+                        1 => Vec3::new(0.0, 1.0, 0.0),
+                        _ => Vec3::new(0.0, 0.0, 1.0),
+                    };
+                    behind_edges(scene, custom.unwrap_or_else(|| view.angles()), normal, section_at, &cut)
+                }
+            };
+            cut_count = cut.len();
+            let mut lines: Vec<(Vec2, Vec2, bool)> = cut.into_iter().map(|(a, b)| (a, b, false)).collect();
+            lines.extend(behind.into_iter().map(|(a, b)| (a, b, false)));
+            std::rc::Rc::new(Projected { lines, lo, hi })
         } else {
             view_lines(scene, parts, view, custom, key)?
         };
@@ -291,7 +306,7 @@ fn manual(
             Some((axis, _)) => cuts.push((axis, section_at, angles, letter, section_line.map(|l| (l, view.angles())))),
         }
         if section.is_some() {
-            let segments: Vec<(Vec2, Vec2)> = all.lines.iter().map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
+            let segments: Vec<(Vec2, Vec2)> = all.lines.iter().take(cut_count).map(|(a, b, _)| (to_sheet(*a), to_sheet(*b))).collect();
             hatch(&segments, 3.0, &mut entities);
         }
         let centres_on = section.is_none() && detail.is_none() && quarter == 0 && item.get("center").and_then(Value::as_bool).unwrap_or(true);
@@ -694,6 +709,63 @@ fn cut_plane(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, offs
                 && (a - b).len() > 1e-9
             {
                 out.push((Vec2::new(a.dot(right), a.dot(up)), Vec2::new(b.dot(right), b.dot(up))));
+            }
+        }
+    }
+    out
+}
+
+/// Edges of the bodies that lie behind the cutting plane (on the far side from the viewer), projected like the cut
+/// and left out where the cut material covers them: what a section view shows beyond its hatched faces.
+fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, offset: f64, cut: &[(Vec2, Vec2)]) -> Vec<(Vec2, Vec2)> {
+    let cam = Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+    let (right, up, back) = cam.basis();
+    // The viewer sits on the `back` side of the plane; the far side is where `back` reads less than at the plane.
+    let at_plane = back.dot(normal * offset);
+    let inside = |q: Vec2| -> bool {
+        let mut odd = false;
+        for (a, b) in cut {
+            if (a.y > q.y) != (b.y > q.y) {
+                let x = a.x + (q.y - a.y) / (b.y - a.y) * (b.x - a.x);
+                if x > q.x {
+                    odd = !odd;
+                }
+            }
+        }
+        odd
+    };
+    let mut out = Vec::new();
+    for placed in &scene.placements {
+        let Some(mesh) = scene.meshes.get(placed.mesh) else { continue };
+        for (i, edge) in mesh.edges.iter().enumerate() {
+            if mesh.seams.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            for w in edge.windows(2) {
+                if out.len() > 100_000 {
+                    return out;
+                }
+                let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
+                let a = solidcraft_doc::apply_point(&placed.transform, *a);
+                let b = solidcraft_doc::apply_point(&placed.transform, *b);
+                let (da, db) = (back.dot(a) - at_plane, back.dot(b) - at_plane);
+                if da > 1e-6 && db > 1e-6 {
+                    continue;
+                }
+                // Keep the part on the far side.
+                let (a, b) = match (da > 1e-6, db > 1e-6) {
+                    (true, false) => (a + (b - a) * ((da - 1e-6) / (da - db)), b),
+                    (false, true) => (a, a + (b - a) * ((-da + 1e-6) / (db - da))),
+                    _ => (a, b),
+                };
+                if !(a.is_finite() && b.is_finite()) {
+                    continue;
+                }
+                let (pa, pb) = (Vec2::new(a.dot(right), a.dot(up)), Vec2::new(b.dot(right), b.dot(up)));
+                if (pa.x - pb.x).hypot(pa.y - pb.y) < 1e-6 || inside(Vec2::new((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0)) {
+                    continue;
+                }
+                out.push((pa, pb));
             }
         }
     }
