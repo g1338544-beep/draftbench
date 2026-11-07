@@ -1120,8 +1120,9 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
 /// result's history is over `[body]`: the face and each edge the one it was moved from.
 pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     body.require_brep("extend")?;
-    if !(distance.is_finite() && distance > 0.0) {
-        return Err(KernelError::Invalid("the extension distance must be positive".into()));
+    // A negative distance shrinks: the chosen edges move inward.
+    if !(distance.is_finite() && distance != 0.0) {
+        return Err(KernelError::Invalid("the extension distance must not be zero".into()));
     }
     let faces: Vec<mt::Face> = body.solid.face_iter().cloned().collect();
     let [face] = faces.as_slice() else { return Err(KernelError::Invalid("not supported yet: extending a surface of more than one face".into())) };
@@ -1165,6 +1166,23 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
             let (Some(prev), Some(cur)) = (lines.get((i + m - 1) % m), lines.get(i)) else { continue };
             let p = meet(*prev, *cur).unwrap_or(cur.0);
             corners.push(mt::Vertex::new(p3(p)));
+        }
+        if distance < 0.0 {
+            // Shrinking too far turns the outline inside out: the area keeps its sign or the shrink is refused.
+            let area = |pts: &[Vec3]| -> f64 {
+                let mut sum = Vec3::new(0.0, 0.0, 0.0);
+                for i in 0..pts.len() {
+                    if let (Some(p), Some(q)) = (pts.get(i), pts.get((i + 1) % pts.len())) {
+                        sum = sum + p.cross(*q);
+                    }
+                }
+                sum.dot(n) / 2.0
+            };
+            let before: Vec<Vec3> = edges.iter().map(|e| from_p3(e.front().point())).collect();
+            let after: Vec<Vec3> = corners.iter().map(|c| from_p3(c.point())).collect();
+            if area(&before) * area(&after) <= 0.0 || area(&after).abs() < 1e-9 {
+                return Err(KernelError::Invalid("the surface is not that big: shrink it by less".into()));
+            }
         }
         let mut rec = Rebuild::default();
         let wire: mt::Wire = (0..m)

@@ -28,6 +28,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_move")
         .enabled(in_sketch)
         .params("wire: drawn 3D curve or point id, index?: fit point (default 0), to: [x,y,z] | by: [dx,dy,dz]; points joined to it move too"),
+    CommandSpec::new("sketch.copy3d", "Copy 3D Curves", copy3d)
+        .icon("sketch_move")
+        .enabled(in_sketch)
+        .params("wires: [drawn 3D curve or point ids]; by: [dx,dy,dz] the shift of each copy, or from + to: [x,y,z] world points (the copy lands where `to` is); count?: copies, each shifted once more (default 1, at most 100). The copies are new, free 3D curves (needs 3D Sketch on)"),
 ];
 
 fn points(cmd: &str, p: &Value, min: usize) -> Result<Vec<Vec3>> {
@@ -147,6 +151,51 @@ fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(sk.move_drawn_point(&wire, index, to)?)
     })?;
     Ok(json!({"moved": n, "sketch": info}))
+}
+
+fn copy3d(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.copy3d";
+    let ids: Vec<String> = p.get("wires").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+    if ids.is_empty() || ids.len() > 1000 {
+        return Err(bad(cmd, "`wires` must list 1 to 1000 drawn 3D curve or point ids"));
+    }
+    let parse = |name| p.get(name).map(|v| vec3(v).ok_or_else(|| bad(cmd, format!("`{name}` must be [x,y,z]")))).transpose();
+    let delta = match (parse("by")?, parse("from")?, parse("to")?) {
+        (Some(d), _, _) => d,
+        (None, Some(f), Some(t)) => t - f,
+        _ => return Err(bad(cmd, "give `by`, or `from` and `to`")),
+    };
+    if !delta.is_finite() || delta.len() > 1e6 {
+        return Err(bad(cmd, "the shift must be a finite distance"));
+    }
+    let count = p.get("count").and_then(Value::as_u64).map_or(1, |c| c.clamp(1, 100)) as usize;
+    if ids.len() * count > 1000 {
+        return Err(bad(cmd, "at most 1000 copies at a time"));
+    }
+    let inverse = inverse_owner_frame(s, p, cmd)?;
+    let (made, info) = edit(s, p, cmd, false, |sk, _| {
+        needs_3d(sk, cmd)?;
+        let mut sources: Vec<(Vec<Vec3>, WireSpace)> = Vec::new();
+        for id in &ids {
+            let w = sk
+                .wire_index(id)
+                .and_then(|w| sk.wires.get(w))
+                .filter(|w| !w.fit.is_empty())
+                .ok_or_else(|| bad(cmd, format!("`{id}` is not a drawn 3D curve or point")))?;
+            sources.push((w.fit.clone(), w.space));
+        }
+        let mut made: Vec<String> = Vec::new();
+        for k in 1..=count {
+            for (fit, space) in &sources {
+                let step = if *space == WireSpace::Component { solidcraft_doc::apply_vector(&inverse, delta) } else { delta };
+                let d = step * (k as f64);
+                let pts: Vec<Vec3> = fit.iter().map(|q| *q + d).collect();
+                made.push(sk.add_drawn_wire_in(&pts, *space)?);
+            }
+        }
+        Ok(made)
+    })?;
+    Ok(json!({"curves": made, "sketch": info}))
 }
 
 #[cfg(test)]

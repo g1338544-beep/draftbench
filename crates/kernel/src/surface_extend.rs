@@ -105,8 +105,12 @@ pub fn extend_surface(body: &Body, at: &[Vec3], opts: &ExtendOptions) -> Result<
         return Err(KernelError::Invalid("an edge point is not finite".into()));
     }
     match opts.limit {
-        ExtendLimit::Distance(d) if !(d.is_finite() && d > 0.0 && d <= 1e6) => {
-            return Err(KernelError::Invalid("the extension distance must be positive".into()));
+        ExtendLimit::Distance(d) if !(d.is_finite() && d != 0.0 && d.abs() <= 1e6) => {
+            return Err(KernelError::Invalid("the extension distance must not be zero".into()));
+        }
+        // A negative distance shrinks the surface; that works on a flat surface with straight edges.
+        ExtendLimit::Distance(d) if d < 0.0 && !(opts.mode == ExtendMode::Natural && opts.neighbours && plain_planar(body)) => {
+            return Err(KernelError::Invalid("not supported yet: shrinking a surface that is not a flat face with straight edges (use Trim)".into()));
         }
         ExtendLimit::Bounds if opts.mode != ExtendMode::Natural => {
             return Err(KernelError::Invalid("only a natural extension goes back to the surface's bounds".into()));
