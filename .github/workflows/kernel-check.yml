@@ -1,0 +1,17 @@
+# Runs selected kernel tests on the kernel-fix branch (side branch for checking kernel changes before main).
+name: Kernel check
+on:
+  push:
+    branches: [kernel-fix]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Delete-face and remove-round tests
+        run: cargo test -p solidcraft-kernel --lib delete_face -- --nocapture 2>&1 | tail -60
+      - name: Doc crate builds
+        run: cargo check -p solidcraft-doc 2>&1 | tail -30
