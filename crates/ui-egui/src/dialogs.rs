@@ -664,7 +664,7 @@ impl Dialog {
             }
             "solid.split_body" => Dialog::new(
                 Kind::Split,
-                vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
+                vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES | BODIES, false)],
             ),
             // Trim Body is a split that throws the other side away: the third pick is a planar
             // face on the part to keep.
@@ -672,7 +672,7 @@ impl Dialog {
                 Kind::Split,
                 vec![
                     SelInput::new("Body to trim", BODIES, false),
-                    SelInput::new("Trimming tool", PLANES | FACES | AXES, false),
+                    SelInput::new("Trimming tool", PLANES | FACES | AXES | BODIES, false),
                     SelInput::new("Face on the part to keep (optional)", PLANAR_FACES, false),
                 ],
             ),
@@ -3708,7 +3708,21 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     };
                     json!({"body": body, "sketch": sketch, "line": id})
                 }
-                _ => return Err("pick a plane, a face or a sketch line".into()),
+                // A whole surface body as the tool: its (single) face's surface, extended.
+                Some(Sel::Body { name }) => {
+                    let st = s.world_state();
+                    let tb = st.body(name).ok_or("pick a surface body, a plane, a face or a sketch line")?;
+                    if !tb.body.is_surface() {
+                        return Err("pick a surface body, a plane, a face or a sketch line".into());
+                    }
+                    if tb.body.face_count() != 1 {
+                        return Err("not supported yet: a surface of several faces; pick one of its faces as the tool".into());
+                    }
+                    let m = tb.mesh();
+                    let at = m.triangles.first().and_then(|t| m.tri(t)).map(|[a, b, c]| (a + b + c) / 3.0).ok_or("the surface has no faces to cut with")?;
+                    json!({"body": body, "tool": {"body": name, "point": pt(at)}})
+                }
+                _ => return Err("pick a plane, a face, a surface body or a sketch line".into()),
             }
             };
             if d.extra.get("trim").and_then(Value::as_bool).unwrap_or(false) {
