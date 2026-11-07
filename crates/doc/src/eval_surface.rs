@@ -55,12 +55,12 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             st.bodies.retain(|b| !gone.contains(&b.name));
             Ok(())
         }
-        FeatureKind::Thicken { bodies, thickness, symmetric, operation, targets } => {
+        FeatureKind::Thicken { bodies, thickness, symmetric, operation, targets, along } => {
             let t = val(vals, thickness, Kind::Length)?;
             let mut tools = Vec::new();
             for n in bodies {
                 let b = st.body(n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                tools.push(kernel::thicken(&b.body, t, *symmetric)?);
+                tools.push(kernel::thicken_along(&b.body, t, *symmetric, along.as_ref().map(|a| a.0))?);
             }
             if tools.is_empty() {
                 return Err(DocError::Invalid("pick the surfaces to thicken".into()));

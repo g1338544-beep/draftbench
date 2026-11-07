@@ -1743,61 +1743,79 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, sketch: None, line: None })
 }
 
-/// Cut the side of `surface` that `thickness` points to off `target`. A slab offset deep into a tight curve folds over
-/// and is refused; then the other side is made instead and kept (a slab offset the other way has no such limit).
-fn cut_side(s: &mut Session, surface: &str, target: &str, thickness: f64) -> Result<()> {
-    let first = s.execute("surface.thicken", &json!({"bodies": [surface], "thickness": thickness, "operation": "cut", "targets": [target]}));
-    match first {
-        Ok(_) => Ok(()),
-        Err(_) => {
-            s.execute("surface.thicken", &json!({"bodies": [surface], "thickness": -thickness, "operation": "intersect", "targets": [target]}))?;
-            Ok(())
-        }
-    }
-}
-
-/// How deep the body reaches from the surface: the largest distance of its (sampled) corners to the surface's
-/// (sampled) points, with some room; a slab this thick covers the body on either side.
-fn depth_from_surface(s: &Session, body: &str, surface: &str) -> Option<f64> {
+/// The side of `surface` a slab goes to, and how far a slab must reach to cover the `others`: the direction the
+/// surface faces (its triangles' normals added up by area) and the extent of the surface and the others along it,
+/// with room. A slab swept straight along that direction follows the surface however it bends and never folds.
+fn surface_axis(s: &Session, surface: &str, others: &[&str]) -> Option<(Vec3, f64)> {
     let st = s.world_state();
-    let (a, b) = (st.body(body)?.mesh(), st.body(surface)?.mesh());
-    let step = |n: usize| (n / 400).max(1);
-    let samples: Vec<Vec3> = b.positions.iter().step_by(step(b.positions.len())).copied().collect();
-    let mut deepest = 0.0f64;
-    for v in a.positions.iter().step_by(step(a.positions.len())) {
-        let nearest = samples.iter().map(|q| q.dist(*v)).fold(f64::INFINITY, f64::min);
-        if nearest.is_finite() {
-            deepest = deepest.max(nearest);
-        }
+    let m = st.body(surface)?.mesh();
+    let mut sum = Vec3::ZERO;
+    let mut area = 0.0;
+    for t in &m.triangles {
+        let Some([a, b, c]) = m.tri(t) else { continue };
+        let n = (b - a).cross(c - a);
+        sum = sum + n;
+        area += n.len();
     }
-    (deepest > 0.0).then(|| deepest * 1.25 + 1.0)
+    // A surface that faces every way (a closed tube) has no one direction to sweep along.
+    if !(area > 0.0 && sum.len() > 0.05 * area) {
+        return None;
+    }
+    let dir = sum.normalized()?;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut cover = |v: &Vec3| {
+        let t = v.dot(dir);
+        lo = lo.min(t);
+        hi = hi.max(t);
+    };
+    m.positions.iter().for_each(&mut cover);
+    for o in others {
+        st.body(o)?.mesh().positions.iter().for_each(&mut cover);
+    }
+    (lo.is_finite() && hi.is_finite()).then(|| (dir, (hi - lo) * 1.2 + 1.0))
 }
 
-/// Trim Body by a surface body: the side its normal points to goes (`reverse`: the other side).
+/// Cut off `target` the slab of `surface` swept `thickness` along `along` (negative: against it).
+fn cut_slab(s: &mut Session, surface: &str, target: &str, along: Vec3, thickness: f64) -> Result<()> {
+    s.execute(
+        "surface.thicken",
+        &json!({"bodies": [surface], "thickness": thickness, "operation": "cut", "targets": [target], "along": [along.x, along.y, along.z]}),
+    )?;
+    Ok(())
+}
+
+/// Trim Body by a surface body of any shape: the side its normal points to goes (`reverse`: the other side).
+/// The surface is swept straight along its facing direction into a slab that is cut out, so the cut follows the surface exactly.
 fn trim_by_surface(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.trim_by_surface";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
     let surface = str_(p, "surface").ok_or_else(|| bad(cmd, "`surface` must name a surface body"))?.to_string();
-    if !s.world_state().body(&surface).is_some_and(|b| b.body.is_surface()) {
-        return Err(bad(cmd, format!("`{surface}` is not a surface body")));
+    {
+        let st = s.world_state();
+        if st.body(&body).is_none() {
+            return Err(bad(cmd, format!("no body `{body}`")));
+        }
+        if !st.body(&surface).is_some_and(|b| b.body.is_surface()) {
+            return Err(bad(cmd, format!("`{surface}` is not a surface body")));
+        }
     }
-    let depth = depth_from_surface(s, &body, &surface).ok_or_else(|| bad(cmd, format!("no body `{body}` or surface `{surface}`")))?;
-    let thickness = if bool_(p, "reverse").unwrap_or(false) { -depth } else { depth };
-    cut_side(s, &surface, &body, thickness)?;
+    let (dir, reach) = surface_axis(s, &surface, &[body.as_str()]).ok_or_else(|| bad(cmd, "not supported yet: this surface has no single side to cut (it faces every way)"))?;
+    let thickness = if bool_(p, "reverse").unwrap_or(false) { -reach } else { reach };
+    cut_slab(s, &surface, &body, dir, thickness)?;
     Ok(json!({"body": body}))
 }
 
 /// Extrude to Surface: the profile is extruded past the surface as a new body, and the part beyond the
-/// surface is cut off with the surface thickened across it, so the end of the body follows the surface.
+/// surface is cut off with the surface swept straight along the extrusion, so the end of the body follows the surface.
 fn extrude_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.extrude_to_surface";
     let surface = str_(p, "surface").ok_or_else(|| bad(cmd, "`surface` must name a surface body"))?.to_string();
-    let point = p.get("to").and_then(vec3).ok_or_else(|| bad(cmd, "`to` must be [x, y, z] on the surface"))?;
+    p.get("to").and_then(vec3).ok_or_else(|| bad(cmd, "`to` must be [x, y, z] on the surface"))?;
     let sketch = p.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`sketch` must be a sketch feature id"))?;
     if !matches!(str_(p, "operation"), None | Some("new")) {
         return Err(bad(cmd, "not supported yet: Up To Surface with Join, Cut or Intersect; extrude to a New Body, then Combine"));
     }
-    let (dist, slab, side) = {
+    let (dist, slab, along) = {
         let st = s.world_state();
         let tool = st.body(&surface).ok_or_else(|| bad(cmd, format!("no surface body `{surface}`")))?;
         if !tool.body.is_surface() {
@@ -1805,16 +1823,8 @@ fn extrude_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let origin = st.sketch(sketch).ok_or_else(|| bad(cmd, format!("no sketch {sketch}")))?.plane.origin;
         let m = tool.mesh();
-        let near = m
-            .triangles
-            .iter()
-            .filter_map(|t| m.tri(t))
-            .min_by(|a, b| ((a[0] + a[1] + a[2]) / 3.0).dist(point).total_cmp(&((b[0] + b[1] + b[2]) / 3.0).dist(point)))
-            .ok_or_else(|| bad(cmd, "the surface has no faces"))?;
-        let n = (near[1] - near[0]).cross(near[2] - near[0]).normalized().ok_or_else(|| bad(cmd, "the surface is degenerate there"))?;
-        // How far along the extrusion the surface reaches: the body is made just past its farthest point, so
-        // the slab that cuts the rest off need only be as thick as the surface is deep (a thick one folds over
-        // on a tight curve).
+        // How far along the extrusion the surface reaches: the body is made just past its farthest point, and the
+        // slab that cuts the rest off covers from the surface to there.
         let mut d = st.sketch(sketch).ok_or_else(|| bad(cmd, format!("no sketch {sketch}")))?.plane.normal();
         if str_(p, "direction") == Some("negative") {
             d = -d;
@@ -1832,8 +1842,7 @@ fn extrude_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "the surface lies behind the profile: reverse the direction"));
         }
         let dist = hi + 1.0;
-        let slab = ((dist - lo) * 1.2).max(1.0);
-        (dist, slab, (origin - point).dot(n))
+        (dist, (dist - lo) * 1.2 + 1.0, d)
     };
     let mut q = p.clone();
     if let Some(o) = q.as_object_mut() {
@@ -1853,15 +1862,14 @@ fn extrude_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|b| b.name.clone())
         .find(|n| !before.contains(n))
         .ok_or_else(|| bad(cmd, "the extrusion made no body"))?;
-    // The side of the surface away from the profile goes.
-    let thickness = if side < 0.0 { slab } else { -slab };
-    cut_side(s, &surface, &made, thickness)?;
+    // Everything beyond the surface, along the extrusion, goes.
+    cut_slab(s, &surface, &made, along, slab)?;
     Ok(json!({"body": made}))
 }
 
-/// Split by Surface: the body is cut in two along a surface body of any shape. A copy of the body is made,
-/// then the surface is thickened across one side (as thick as the two are big) and cut out of the body, and
-/// across the other side and cut out of the copy, so the two parts meet exactly along the surface.
+/// Split by Surface: the body is cut in two along a surface body of any shape. A copy of the body is made; the
+/// surface, swept straight along its facing direction, is cut out of the body on one side and out of the copy on
+/// the other, so the two parts meet exactly along the surface.
 fn split_by_surface(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.split_by_surface";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
@@ -1875,7 +1883,7 @@ fn split_by_surface(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("`{surface}` is not a surface body")));
         }
     }
-    let thick = depth_from_surface(s, &body, &surface).ok_or_else(|| bad(cmd, "the bodies have no size"))?;
+    let (dir, reach) = surface_axis(s, &surface, &[body.as_str()]).ok_or_else(|| bad(cmd, "not supported yet: this surface has no single side to cut (it faces every way)"))?;
     let sign = if bool_(p, "reverse").unwrap_or(false) { -1.0 } else { 1.0 };
     let before: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
     s.execute("solid.move", &json!({"bodies": [body.clone()], "translate": [0, 0, 0], "copy": true}))?;
@@ -1887,15 +1895,9 @@ fn split_by_surface(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|b| b.name.clone())
         .find(|n| !before.contains(n))
         .ok_or_else(|| bad(cmd, "the copy of the body could not be made"))?;
-    // One slab on the chosen side: it is cut out of the body and kept of the copy; if that side folds over on a
-    // tight curve, the slab on the other side is kept of the body and cut out of the copy instead.
-    let first = s.execute("surface.thicken", &json!({"bodies": [surface.clone()], "thickness": thick * sign, "operation": "cut", "targets": [body.clone()]}));
-    if first.is_ok() {
-        s.execute("surface.thicken", &json!({"bodies": [surface], "thickness": thick * sign, "operation": "intersect", "targets": [copy.clone()]}))?;
-    } else {
-        s.execute("surface.thicken", &json!({"bodies": [surface.clone()], "thickness": -thick * sign, "operation": "intersect", "targets": [body.clone()]}))?;
-        s.execute("surface.thicken", &json!({"bodies": [surface], "thickness": -thick * sign, "operation": "cut", "targets": [copy.clone()]}))?;
-    }
+    // The slab on the chosen side is cut out of the body, and the slab on the other side out of the copy.
+    cut_slab(s, &surface, &body, dir, reach * sign)?;
+    cut_slab(s, &surface, &copy, dir, -reach * sign)?;
     Ok(json!({"bodies": [body, copy]}))
 }
 

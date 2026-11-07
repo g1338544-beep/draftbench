@@ -842,6 +842,10 @@ impl Dialog {
                 let picked = match (&d.kind, sel) {
                     (Kind::Fillet { chain, .. }, _) => fillet_edges(s, sel, *chain),
                     (Kind::Measure { .. }, _) => vec![crate::viewport::measurement_selection(s, sel)],
+                    // A face of a surface body as the splitting or trimming tool is the whole surface.
+                    (Kind::Split, Sel::Face { body, .. }) if s.world_state().body(body).is_some_and(|x| x.body.is_surface()) => {
+                        vec![Sel::Body { name: body.to_string() }]
+                    }
                     _ if inp.multi => crate::viewport::grouped_selection(s, sel),
                     _ => vec![sel.clone()],
                 };

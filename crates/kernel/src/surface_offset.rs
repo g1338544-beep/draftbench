@@ -68,6 +68,11 @@ impl FaceMover {
         Ok(FaceMover { face: face.clone(), how })
     }
 
+    /// A mover that shifts every point of `face` by `v` times the distance (a slab swept straight along `v`).
+    pub(crate) fn shifted(face: &mt::Face, v: Vec3) -> FaceMover {
+        FaceMover { face: face.clone(), how: How::Exact(Offset::Shift { v }) }
+    }
+
     /// Where the point `p` of the face goes at distance `d`.
     pub(crate) fn point(&self, p: Vec3, d: f64) -> Result<Vec3> {
         match &self.how {

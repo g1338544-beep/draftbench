@@ -724,6 +724,8 @@ pub fn stitch(bodies: &[&Body], tol: f64) -> Result<Body> {
 pub(crate) enum Offset {
     Plane { n: Vec3 },
     Cylinder { o: Vec3, axis: UnitVec3, r: f64, out: f64 },
+    /// Every point moves the same way, `v` times the distance (a slab swept straight along a direction).
+    Shift { v: Vec3 },
 }
 
 impl Offset {
@@ -736,6 +738,7 @@ impl Offset {
     pub(crate) fn map(&self, p: Vec3, d: f64) -> Vec3 {
         match *self {
             Offset::Plane { n } => p + n * d,
+            Offset::Shift { v } => p + v * d,
             // Scaled about the axis (control points of a NURBS circle stay exact).
             Offset::Cylinder { o, axis, r, out } => {
                 let v = p - o;
@@ -832,7 +835,36 @@ const THICKEN_TOLERANCE: f64 = 0.01;
 /// that would fold a face over is refused. Neighbouring faces must meet smoothly (their offsets
 /// agree).
 pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
+    thicken_along(body, thickness, symmetric, None)
+}
+
+/// Like `thicken`, but with `along` set the faces are moved straight along that direction instead of along
+/// their normals: `thickness` is then the distance along `along` (negative: against it). The slab follows the
+/// surface exactly, however tightly it bends, so it never folds over; the direction must point to the side the
+/// faces' normals point to (it is turned round for them if it points the other way).
+pub fn thicken_along(body: &Body, thickness: f64, symmetric: bool, along: Option<Vec3>) -> Result<Body> {
     body.require_brep("thicken")?;
+    let shift = match along {
+        Some(a) => Some(a.normalized().ok_or_else(|| KernelError::Invalid("the direction has no length".into()))?),
+        None => None,
+    };
+    // Faces move along their outward normals; a direction against the first face's normal is turned round,
+    // with the distance, so that the slab's faces keep their orientation.
+    let (shift, thickness) = match shift {
+        Some(a) => {
+            let n = body.solid.face_iter().next().and_then(|f| {
+                let p = f.absolute_boundaries().iter().flat_map(|w| w.vertex_iter().map(|v| v.point()).collect::<Vec<_>>()).next()?;
+                let s = f.oriented_surface();
+                let (u, v) = s.search_nearest_parameter(p, None, 50)?;
+                Some(from_p3(mt::Point3::new(0.0, 0.0, 0.0) + s.normal(u, v)))
+            });
+            match n {
+                Some(n) if n.dot(a) < 0.0 => (Some(a * -1.0), -thickness),
+                _ => (Some(a), thickness),
+            }
+        }
+        None => (None, thickness),
+    };
     if !(thickness.is_finite() && thickness.abs() > 1e-9) {
         return Err(KernelError::Invalid("thickness must be non-zero".into()));
     }
@@ -847,8 +879,13 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
         }
         // Planes and circular cylinders move exactly; other faces onto surfaces fitted within the
         // offset tolerance (Offset Surface's).
-        let offs: Vec<crate::surface_offset::FaceMover> =
-            faces.iter().map(|f| crate::surface_offset::FaceMover::new(f, &[lo, hi], THICKEN_TOLERANCE)).collect::<Result<_>>()?;
+        let offs: Vec<crate::surface_offset::FaceMover> = faces
+            .iter()
+            .map(|f| match shift {
+                Some(v) => Ok(crate::surface_offset::FaceMover::shifted(f, v)),
+                None => crate::surface_offset::FaceMover::new(f, &[lo, hi], THICKEN_TOLERANCE),
+            })
+            .collect::<Result<_>>()?;
         let near = |a: Vec3, b: Vec3| a.dist(b) <= tol * 1e3;
         // Each side's copies of every vertex and edge. Faces that move one to the same place share
         // the copy (they meet smoothly there); across a sharp edge each face has its own.

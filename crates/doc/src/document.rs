@@ -1300,6 +1300,10 @@ pub enum FeatureKind {
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
+        /// Move the faces straight along this direction instead of along their normals (the slab follows the
+        /// surface however it bends, so it never folds over); `thickness` is then the distance along it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        along: Option<Position>,
     },
     /// A surface body swept straight along the sketch normal from open curve chains and the
     /// boundaries of profiles: walls only, no caps.

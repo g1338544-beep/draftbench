@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.thicken", "Thicken", thicken)
         .at("SURFACE", "CREATE")
         .icon("surface_thicken")
-        .params("bodies: [surface names]; thickness: expr (negative: against the normal); symmetric?: bool; operation?: new|join|cut|intersect; targets?"),
+        .params("bodies: [surface names]; thickness: expr (negative: against the normal); symmetric?: bool; operation?: new|join|cut|intersect; targets?; along?: [x, y, z] (move the faces straight along this direction instead of along their normals: the slab follows the surface however it bends, thickness is the distance along it)"),
     CommandSpec::new("surface.extend", "Extend", extend)
         .at("SURFACE", "MODIFY")
         .icon("surface_extend")
@@ -562,6 +562,10 @@ fn thicken(s: &mut Session, p: &Value) -> Result<Value> {
         symmetric: bool_(p, "symmetric").unwrap_or(false),
         operation: operation(p, cmd)?,
         targets: string_list(p, "targets").into_iter().map(BodyName).collect(),
+        along: match p.get("along").filter(|v| !v.is_null()) {
+            None => None,
+            Some(v) => Some(Position(vec3(v).filter(|d| d.len() > 1e-9).ok_or_else(|| bad(cmd, "`along` must be a direction [x, y, z]"))?)),
+        },
     };
     add_feature(s, p, kind)
 }
