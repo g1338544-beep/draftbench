@@ -68,4 +68,6 @@ cmd("solid.extrude", distance=24, direction="symmetric", operation="new_body", b
 
 cmd("solid.cylinder", base=[0, -60, 0], axis="Y", radius=34, height=120, operation="new_body", body_name="Hub cap")
 
-json.dump({"commands": C}, open(sys.argv[1], "w"), indent=1)
+import os
+limit = int(os.environ.get("LIMIT", "0")) or len(C)
+json.dump({"commands": C[:limit]}, open(sys.argv[1], "w"), indent=1)
