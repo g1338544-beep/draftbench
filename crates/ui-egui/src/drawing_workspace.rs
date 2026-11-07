@@ -6163,10 +6163,10 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
     }
     let near = |v: f32, list: &[f32]| list.iter().copied().any(|t| (t - v).abs() <= tol * 0.35);
     for (q, _) in sheet.rounds().circles.iter().take(400) {
-        if near(p.x, &[q.x]) {
+        if near(p.x, &[q.x]) && !guides.iter().any(|g| (g[0].x - q.x).abs() < 0.05 && (g[0].x - g[1].x).abs() < 1e-3) {
             guides.push([pos2(q.x, p.y - 400.0), pos2(q.x, p.y + 400.0)]);
         }
-        if near(p.y, &[q.y]) {
+        if near(p.y, &[q.y]) && !guides.iter().any(|g| (g[0].y - q.y).abs() < 0.05 && (g[0].y - g[1].y).abs() < 1e-3) {
             guides.push([pos2(p.x - 400.0, q.y), pos2(p.x + 400.0, q.y)]);
         }
     }
@@ -6182,13 +6182,18 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
                 let u = vec2(m.to_radians().cos(), m.to_radians().sin());
                 guides.push([f - u * 400.0, f + u * 400.0]);
             }
+            // Only the hole the pointer lines up with best: several nearly parallel guides would pile up.
+            let mut best: Option<(f32, egui::Vec2)> = None;
             for (q, _) in sheet.rounds().circles.iter().take(400) {
                 let e = *q - f;
                 let el = e.length();
-                if el > tol && (d.x * e.y - d.y * e.x).abs() <= 0.026 * len * el && d.dot(e) > 0.0 {
-                    let u = e / el;
-                    guides.push([f - u * 400.0, f + u * 400.0]);
+                let off = (d.x * e.y - d.y * e.x).abs() / (len * el).max(1e-9);
+                if el > tol && off <= 0.026 && d.dot(e) > 0.0 && best.is_none_or(|(b, _)| off < b) {
+                    best = Some((off, e / el));
                 }
+            }
+            if let Some((_, u)) = best {
+                guides.push([f - u * 400.0, f + u * 400.0]);
             }
         }
     }
