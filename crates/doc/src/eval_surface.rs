@@ -67,11 +67,17 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             apply_op(st, f, tools, *operation, &crate::plain(targets))
         }
-        FeatureKind::SurfaceTrim { body, plane, tool, keep, keep_more, curves, with, keep_with, stitch, extend } => {
+        FeatureKind::SurfaceTrim { body, plane, tool, keep, keep_more, curves, with, keep_with, stitch, extend, remove } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let picks: Vec<Vec3> = std::iter::once(keep.0).chain(keep_more.iter().map(|p| p.0)).collect();
-            let keeps = if keep_more.is_empty() { kernel::TrimKeep::Side(keep.0) } else { kernel::TrimKeep::Regions(&picks) };
+            let keeps = if *remove {
+                kernel::TrimKeep::Remove(&picks)
+            } else if keep_more.is_empty() {
+                kernel::TrimKeep::Side(keep.0)
+            } else {
+                kernel::TrimKeep::Regions(&picks)
+            };
             if let Some(other) = with {
                 return mutual_trim(st, i, other, keeps, &crate::plain(keep_with), *stitch, *extend);
             }

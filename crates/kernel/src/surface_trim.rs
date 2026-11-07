@@ -25,13 +25,15 @@ pub enum TrimKeep<'a> {
     /// The regions the points pick (a region: the pieces that hang together once the tool has
     /// cut the body, each picked by the piece nearest a point).
     Regions(&'a [Vec3]),
+    /// The regions the points pick are taken away and everything else stays.
+    Remove(&'a [Vec3]),
 }
 
 impl TrimKeep<'_> {
     fn points(&self) -> &[Vec3] {
         match self {
             TrimKeep::Side(p) => std::slice::from_ref(p),
-            TrimKeep::Regions(at) => at,
+            TrimKeep::Regions(at) | TrimKeep::Remove(at) => at,
         }
     }
 
@@ -66,6 +68,17 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
     let (split, _) = crate::splitface::split_any(body, &all, tool)?;
     let one_side = match keep {
         TrimKeep::Side(p) if crate::splitface::field_count(tool)? == 1 => Some(crate::splitface::side_of_point(tool, p)?),
+        TrimKeep::Remove(at) if crate::splitface::field_count(tool)? == 1 => {
+            let mut sides = Vec::with_capacity(at.len());
+            for p in at {
+                sides.push(crate::splitface::side_of_point(tool, *p)?);
+            }
+            let first = sides.first().copied().unwrap_or(0.0);
+            if sides.iter().any(|x| (*x >= 0.0) != (first >= 0.0)) {
+                return Err(KernelError::Invalid("nothing is left: the points to remove are on both sides of the tool".into()));
+            }
+            Some(-first)
+        }
         _ => None,
     };
     let picked = match one_side {
@@ -85,10 +98,11 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
             }
             None => {
                 let (region, count) = crate::splitface::regions(&split, tool)?;
-                let mut wanted = vec![false; count];
+                let remove = matches!(keep, TrimKeep::Remove(_));
+                let mut wanted = vec![remove; count];
                 for f in &picked {
                     if let Some(w) = region.get(*f).and_then(|r| wanted.get_mut(*r)) {
-                        *w = true;
+                        *w = !remove;
                     }
                 }
                 for (f, r) in split.solid.face_iter().zip(&region) {

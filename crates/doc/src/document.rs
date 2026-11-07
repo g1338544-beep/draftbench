@@ -1574,6 +1574,9 @@ pub enum FeatureKind {
         stitch: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         extend: bool,
+        /// The picked points are the regions to take away (everything else stays), not the ones to keep.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        remove: bool,
     },
     Move {
         bodies: Vec<BodyName>,

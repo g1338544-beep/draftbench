@@ -92,6 +92,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 extend: bool,
                 stitch: bool,
                 direction: Option<Vec3>,
+                /// The picked regions are taken away; the rest stays.
+                remove: bool,
             },
             /// `holes`: an index into [`UNTRIM_HOLES`].
             Untrim {
@@ -186,7 +188,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         Surf::Trim { .. } => vec![
             SelInput::new("Surface", BODIES, false),
             SelInput::new("Trimming tool (plane, face or curves)", PLANES | FACES | CURVES, true),
-            SelInput::new("Keep (points on it)", FACES, true).places(),
+            SelInput::new("Regions to keep, or to remove (points on them)", FACES, true).places(),
             SelInput::new("Other surface (mutual trim)", BODIES, false),
             SelInput::new("Keep of the other surface", FACES, true).places(),
         ],
@@ -209,7 +211,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.unstitch" => Surf::Unstitch,
         "surface.reverse_normal" => Surf::ReverseNormal,
         "surface.ruled" => Surf::Ruled { distance: "10 mm".into(), mode: 1, angle: "5 deg".into(), flip: false, round: false, chain: true },
-        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None },
+        "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, remove: false },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
         "solid.split_face" => Surf::SplitFace,
         _ => Surf::simple_start(id)?.0,
@@ -304,8 +306,8 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
                 *join = op == 1;
             });
         }
-        Surf::Trim { extend, stitch, .. } => {
-            ui_kit::options(ui, "trim_options", &mut [("Extend to meet", extend), ("Stitch the kept pieces", stitch)]);
+        Surf::Trim { extend, stitch, remove, .. } => {
+            ui_kit::options(ui, "trim_options", &mut [("Remove the picked regions (keep the rest)", remove), ("Extend to meet", extend), ("Stitch the kept pieces", stitch)]);
         }
         Surf::Sweep(opts) => enter |= crate::dialogs_sweep::rows(ui, opts, "ss"),
         Surf::Loft { rail_fit } => crate::dialogs_sweep::rail_fit_row(ui, "sl", rail_fit),
@@ -713,9 +715,9 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             let edges: Vec<Value> = items(inputs, 0).edge_points().into_iter().map(pt).collect();
             ("surface.extend", json!({"body": body, "edges": edges}))
         }
-        Surf::Trim { extend, stitch, direction } => {
+        Surf::Trim { extend, stitch, direction, remove } => {
             need(0, "the surface to trim")?;
-            need(2, "what to keep (points on it)")?;
+            need(2, "the regions to keep or remove (points on them)")?;
             let body = items(inputs, 0).body_names().into_iter().next().unwrap_or_default();
             // One point keeps its side, several the regions they pick.
             let points = |i: usize| -> Option<Value> {
@@ -727,7 +729,10 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                     _ => Some(json!(pts)),
                 }
             };
-            let mut p = json!({"body": body, "keep": points(2).ok_or("pick what to keep")?});
+            let mut p = json!({"body": body, "keep": points(2).ok_or("pick the regions to keep or remove")?});
+            if *remove {
+                p["remove"] = json!(true);
+            }
             if let Some(other) = items(inputs, 3).body_names().into_iter().next() {
                 need(4, "what to keep of the other surface")?;
                 p["with"] = json!(other);
@@ -1037,7 +1042,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             }
             return Some((Kind::Surface(k), ins, extra));
         }
-        FeatureKind::SurfaceTrim { body, plane, tool, keep, keep_more, curves, with, keep_with, stitch, extend } => {
+        FeatureKind::SurfaceTrim { body, plane, tool, keep, keep_more, curves, with, keep_with, stitch, extend, remove } => {
             let faces = |pts: &mut dyn Iterator<Item = &Position>| -> Vec<Sel> { pts.filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect() };
             let tools: Vec<Sel> = match (with, curves) {
                 (Some(_), _) => Vec::new(),
@@ -1051,7 +1056,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 (None, None) => tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
             };
             (
-                Surf::Trim { extend: *extend, stitch: *stitch, direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)) },
+                Surf::Trim { extend: *extend, stitch: *stitch, direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)), remove: *remove },
                 vec![
                     vec![Sel::Body { name: body.to_string() }],
                     tools,
