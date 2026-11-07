@@ -118,20 +118,26 @@ pub(crate) fn circle_centres(app: &SolveApp) -> Vec<Vec3> {
                 return out;
             }
             budget -= 1;
+            // A full circle or an arc (a hole may be one edge or two halves): the circle through
+            // the first, middle and last points, when every point lies on it.
             let n = e.len();
-            let (Some(first), Some(last)) = (e.first(), e.last()) else { continue };
-            if n < 9 || first.dist(*last) > 1e-6 * (1.0 + first.len()) {
+            let (Some(&p0), Some(&p1), Some(&p2)) = (e.first(), e.get(n / 2), e.last()) else { continue };
+            if n < 5 {
                 continue;
             }
-            let pts = &e[..n - 1];
-            let c = pts.iter().fold(Vec3::ZERO, |a, p| a + *p) / pts.len() as f64;
-            let r = pts.iter().map(|p| p.dist(c)).sum::<f64>() / pts.len() as f64;
-            if !(r.is_finite() && r > 1e-6) {
+            let (u, v) = (p1 - p0, p2 - p0);
+            let w = u.cross(v);
+            let w2 = w.dot(w);
+            if !(w2.is_finite() && w2 > 1e-12) {
                 continue;
             }
-            let (Some(a), Some(q)) = (pts.first(), pts.get(pts.len() / 4)) else { continue };
-            let Some(normal) = (*a - c).cross(*q - c).normalized() else { continue };
-            let round = pts.iter().all(|p| (p.dist(c) - r).abs() <= 2e-3 * r + 1e-6 && (*p - c).dot(normal).abs() <= 2e-3 * r + 1e-6);
+            let c = p0 + (w.cross(u) * v.dot(v) + v.cross(w) * u.dot(u)) / (2.0 * w2);
+            let r = p0.dist(c);
+            if !(r.is_finite() && r > 1e-6 && r < 1e6) {
+                continue;
+            }
+            let normal = w / w2.sqrt();
+            let round = e.iter().all(|p| (p.dist(c) - r).abs() <= 3e-3 * r + 1e-6 && (*p - c).dot(normal).abs() <= 3e-3 * r + 1e-6);
             if round && !out.iter().any(|o| o.dist(c) < 1e-6) {
                 out.push(c);
             }
