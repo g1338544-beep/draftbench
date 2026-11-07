@@ -962,7 +962,9 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
     for placed in &scene.placements {
         let Some(mesh) = scene.meshes.get(placed.mesh) else { continue };
         for (i, edge) in mesh.edges.iter().enumerate() {
-            if mesh.seams.get(i).copied().unwrap_or(false) {
+            // Seams of one smooth surface (a bore split in two, a cylinder's seam line) and tangent joins are
+            // not edges of the part: `visibility` was taken from the mesh before its seam flags were dropped.
+            if !placed.visibility.get(i).copied().unwrap_or(true) {
                 continue;
             }
             for w in edge.windows(2) {
