@@ -65,6 +65,8 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                 }
                 // A thin extrude's curves extrude along their sketch's normal.
                 Kind::Extrude { .. } => Some(ss.plane.normal()),
+                // A surface extrude of curves goes the same way: its length gets the drag arrow.
+                Kind::Surface(_) => Some(ss.plane.normal()),
                 _ => None,
             };
             (ss.plane.to_world(mid), dir)
