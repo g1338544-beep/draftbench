@@ -84,6 +84,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 angle: String,
                 flip: bool,
                 round: bool,
+                /// Follow the tangent edges: one pick takes the whole outline it belongs to.
+                chain: bool,
             },
             /// `direction`: the stored sweep direction of trimming curves (none: the sketch's normal).
             Trim {
@@ -206,7 +208,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.patch" => Surf::Patch { continuity: 0 },
         "surface.unstitch" => Surf::Unstitch,
         "surface.reverse_normal" => Surf::ReverseNormal,
-        "surface.ruled" => Surf::Ruled { distance: "10 mm".into(), mode: 0, angle: "5 deg".into(), flip: false, round: false },
+        "surface.ruled" => Surf::Ruled { distance: "10 mm".into(), mode: 1, angle: "5 deg".into(), flip: false, round: false, chain: true },
         "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
         "solid.split_face" => Surf::SplitFace,
@@ -247,7 +249,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             enter |= expr_row(ui, "Distance", distance);
             ui_kit::options(ui, "offset_options", &mut [("Tangent chain", chain)]);
         }
-        Surf::Ruled { distance, mode, angle, flip, round } => {
+        Surf::Ruled { distance, mode, angle, flip, round, chain } => {
             enter |= expr_row(ui, "Distance", distance);
             choice_row(ui, "Type", "ru_mode", mode, &RULED_MODES.map(|(label, _)| label));
             if RULED_MODES.get(*mode).is_some_and(|(_, m)| *m == "angle") {
@@ -258,7 +260,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
                 ui_kit::segmented(ui, &mut corner, &["Mitre", "Round"], Default::default());
                 *round = corner == 1;
             });
-            ui_kit::options(ui, "ruled_options", &mut [("Flip", flip)]);
+            ui_kit::options(ui, "ruled_options", &mut [("Flip", flip), ("Follow tangent edges (whole outline)", chain)]);
         }
         Surf::Extrude { distance, direction } => {
             enter |= expr_row(ui, "Distance", distance);
@@ -638,9 +640,26 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
             ("surface.offset", p)
         }
-        Surf::Ruled { distance, mode, angle, flip, round } => {
+        Surf::Ruled { distance, mode, angle, flip, round, chain } => {
             need(0, "the edges to rule from")?;
-            let (body, edges) = body_and_edges(items(inputs, 0))?;
+            // One edge stands for its whole tangent outline (a closed rim gives the surface all the way round).
+            let mut picks: Vec<Sel> = items(inputs, 0).to_vec();
+            if *chain {
+                for x in items(inputs, 0) {
+                    if let Sel::Edge { body, index, .. } = x
+                        && let Some(b) = app.session.world_state().body(body)
+                    {
+                        let m = b.mesh();
+                        for i in m.tangent_chain(*index, 2f64.to_radians()) {
+                            let known = picks.iter().any(|y| matches!(y, Sel::Edge { body: bb, index: j, .. } if bb == body && *j == i));
+                            if !known && let Some(e) = m.edges.get(i) {
+                                picks.push(Sel::Edge { body: body.clone(), index: i, point: crate::selection::polyline_mid(e) });
+                            }
+                        }
+                    }
+                }
+            }
+            let (body, edges) = body_and_edges(&picks)?;
             let mode = RULED_MODES.get(*mode).map_or("normal", |(_, m)| *m);
             let mut p = json!({"body": body, "edges": edges, "distance": distance, "mode": mode});
             if mode == "angle" {
@@ -962,6 +981,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 angle: angle.as_deref().map(str::to_string).unwrap_or_else(|| "5 deg".into()),
                 flip: *flip,
                 round: *corners == RuledCorners::Round,
+                chain: false,
             };
             let mut ins = inputs(&k);
             let fill = [edges.iter().filter_map(edge).collect(), face.and_then(|p| crate::dialogs::face_sel(s, p.0)).into_iter().collect()];
