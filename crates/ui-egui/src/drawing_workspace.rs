@@ -4690,7 +4690,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if app.drawing.flines.len() < MAX_FREE_LINES {
                     // The line starts at the pointer; without one, beside the picked line.
                     let (ox, oy) = match (hover, line) {
-                        (Some(h), _) => (f64::from(h.x), f64::from(h.y)),
+                        (Some(h), _) => (h.x, h.y),
                         (None, Some(l)) => (l[0] + 5.0, l[1] + 5.0),
                         (None, None) => (60.0, 60.0),
                     };
