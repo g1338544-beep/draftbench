@@ -367,7 +367,7 @@ fn remove_round(body: &Body, face: usize) -> Result<Body> {
     let mut rc: Option<f64> = None;
     for n in face_neighbours(body, face) {
         let Some(g) = body.solid.face_iter().nth(n) else { continue };
-        if let Some((nrm, d)) = face_plane(g, tol)
+        if let Some((nrm, d)) = face_plane(g, tol.max(size * 1e-5))
             && nrm.dot(axis).abs() > 1.0 - 1e-6
         {
             plane = Some((t_of(nrm * d), nrm.dot(axis).signum()));
@@ -379,8 +379,37 @@ fn remove_round(body: &Body, face: usize) -> Result<Body> {
             }
         }
     }
+    // Faces made by an earlier Boolean may not share their edges with the round: look for the
+    // plane and the cylinder a torus is tangent to by where they are.
+    if (plane.is_none() || rc.is_none())
+        && let FaceSurface::Torus { major, minor, .. } = surf
+    {
+        let loose = size * 1e-5;
+        for n in 0..body.face_count() {
+            let Some(g) = body.solid.face_iter().nth(n) else { continue };
+            if plane.is_none()
+                && let Some((nrm, d)) = face_plane(g, loose)
+                && nrm.dot(axis).abs() > 1.0 - 1e-6
+                && ((t_of(nrm * d)).abs() - minor).abs() < minor * 1e-3 + loose
+            {
+                plane = Some((t_of(nrm * d), nrm.dot(axis).signum()));
+            } else if rc.is_none()
+                && let Some(FaceSurface::Cylinder { origin: co, axis: ca, radius }) = face_surface(body, n)
+            {
+                let off = co - origin;
+                let radial = off - axis * off.dot(axis);
+                if ca.dot(axis).abs() > 1.0 - 1e-6 && radial.len() < loose.max(1e-6 * radius) && ((radius - major).abs() - minor).abs() < minor * 1e-3 + loose {
+                    rc = Some(radius);
+                }
+            }
+        }
+    }
     let (Some((tp, sigma)), Some(rc)) = (plane, rc) else {
-        return Err(fail("the round does not run between a plane and a cylinder with the same axis"));
+        return Err(fail(format!(
+            "the round does not run between a plane and a cylinder with the same axis (plane {}, cylinder {})",
+            plane.is_some(),
+            rc.is_some()
+        )));
     };
     // The opposite corner of the rectangle.
     let (rop, top) = match surf {
