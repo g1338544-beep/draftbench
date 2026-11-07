@@ -286,7 +286,16 @@ fn manual(
             Some(d) => d % 360.0,
             // Cut along any line: the view is projected along the cut, so the cutting line's direction in
             // the section (where it runs in the cut plane) lies along the line's direction on the sheet.
-            None => match (section_line, line_plane) {
+            None => match (
+                section_line.or_else(|| {
+                    // A stepped line turns by its longest piece, the one its plane was taken from.
+                    let pts = section_path.as_ref()?;
+                    pts.windows(2)
+                        .filter_map(|w| if let [a, b] = w { Some([a.x, a.y, b.x, b.y]) } else { None })
+                        .max_by(|u, v| (u[2] - u[0]).hypot(u[3] - u[1]).total_cmp(&(v[2] - v[0]).hypot(v[3] - v[1])))
+                }),
+                line_plane,
+            ) {
                 (Some([x1, y1, x2, y2]), Some((_, _, ang))) if quarter == 0 => {
                     let basis = |a: (f64, f64)| Camera { target: Vec3::ZERO, yaw: a.0, pitch: a.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() }.basis();
                     let (r, u, _) = basis(view.angles());
