@@ -36,8 +36,8 @@ pub fn inputs(mode: usize) -> Vec<SelInput> {
         FREE => v.push(SelInput::new("Pivot", POINTS, false)),
         ROTATE => v.push(SelInput::new("Axis", AXES | EDGES, false)),
         POINT_TO_POINT => {
+            // Only the From point is picked; where it goes is typed (To X, Y, Z) and the body follows the numbers.
             v.push(SelInput::new("From", POINTS, false));
-            v.push(SelInput::new("To", POINTS, false));
         }
         POINT_TO_POSITION => v.push(SelInput::new("Point", POINTS, false)),
         _ => {}
@@ -238,9 +238,11 @@ fn typed_point(app: &SolveApp, d: &Dialog, key: &str) -> Option<Vec3> {
     Some(Vec3::new(len(app, x).ok()?, len(app, y).ok()?, len(app, z).ok()?))
 }
 
-/// The From (1) or To (2) point of a Point to Point move: the numbers typed, else the pick.
+/// The From (1) or To (2) point of a Point to Point move: the numbers typed, else the pick. The To point
+/// has no pick: it is the numbers in the To rows, the origin until they are changed.
 fn point_of(app: &SolveApp, d: &Dialog, i: usize) -> Option<Vec3> {
-    typed_point(app, d, if i == 1 { "from_xyz" } else { "to_xyz" }).or_else(|| sel_point(app, items(d, i).first()))
+    let typed = typed_point(app, d, if i == 1 { "from_xyz" } else { "to_xyz" }).or_else(|| sel_point(app, items(d, i).first()));
+    if i == 2 { typed.or(Some(Vec3::ZERO)) } else { typed }
 }
 
 /// Point to Point: the X, Y, Z of the picked From and To points, from the origin, as numbers that can be

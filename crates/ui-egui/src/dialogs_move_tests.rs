@@ -91,11 +91,9 @@ fn point_to_point_takes_the_origin_point() {
     }
     let corner = h.call("ui.at", json!({ "world": [hi.x, hi.y, hi.z] }))["result"].clone();
     h.step(&json!({ "click": corner })).unwrap();
-    h.app.dialog.as_mut().unwrap().active = 2;
-    let origin = h.call("ui.at", json!({ "world": [0, 0, 0] }))["result"].clone();
-    h.step(&json!({ "click": origin })).unwrap();
+    // The To point is typed, not picked: left at the origin by default.
     let d = h.app.dialog.clone().unwrap();
-    assert_eq!(d.inputs[2].items, vec![Sel::Vertex { body: String::new(), point: Vec3::ZERO }], "the origin is the To point");
+    assert_eq!(d.inputs.len(), 2, "Point to Point has Bodies and From picks only");
     let p = params(&h.app, &d).unwrap();
     assert_eq!(p["translate"], json!([mm(-hi.x), mm(-hi.y), mm(-hi.z)]), "the corner goes onto the origin");
 }
