@@ -352,17 +352,24 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             if let Some(s) = proj.to_screen(*p) {
                 painter.circle_filled(s, 5.0, accent);
                 painter.circle_stroke(s, 7.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
-                painter.text(s + vec2(9.0, -9.0), egui::Align2::LEFT_BOTTOM, *name, egui::FontId::proportional(Tokens::get().font_body), accent);
+                // The point's distance from the origin along each axis, so it can be read off and typed.
+                painter.text(s + vec2(9.0, -9.0), egui::Align2::LEFT_BOTTOM, format!("{name}  {}", coords_text(*p)), egui::FontId::proportional(Tokens::get().font_body), accent);
             }
         }
-        if let Some(s) = crate::dialogs_move::hover_point(app, &d).and_then(|p| proj.to_screen(p)) {
+        if let Some(h) = crate::dialogs_move::hover_point(app, &d)
+            && let Some(s) = proj.to_screen(h)
+        {
             painter.circle_stroke(s, 6.0, egui::Stroke::new(2.0, accent));
             painter.circle_filled(s, 2.0, accent);
+            painter.text(s + vec2(9.0, 16.0), egui::Align2::LEFT_TOP, coords_text(h), egui::FontId::proportional(Tokens::get().font_body), accent);
         }
         if let [(a, _), (b, _)] = markers.as_slice()
             && let (Some(sa), Some(sb)) = (proj.to_screen(*a), proj.to_screen(*b))
         {
             painter.line_segment([sa, sb], egui::Stroke::new(1.5, accent));
+            let (dx, dy, dz) = (b.x - a.x, b.y - a.y, b.z - a.z);
+            let text = format!("Move  X {}  Y {}  Z {}  (length {})", mm_text(dx), mm_text(dy), mm_text(dz), mm_text((dx * dx + dy * dy + dz * dz).sqrt()));
+            painter.text(sa.lerp(sb, 0.5) + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, text, egui::FontId::proportional(Tokens::get().font_body), accent);
         }
         // Read the triad again after the drag, so the box follows it in the same frame. Move
         // types with no triad (Rotate, Point to Point, Point to Position) put the box on the
@@ -1509,4 +1516,16 @@ mod taper_limit_tests {
         assert_eq!(taper_limits(&[], 10.0), (-89.0, 89.0));
         assert_eq!(taper_limits(&[&rect], 0.0), (-89.0, 89.0));
     }
+}
+
+/// A length in mm with up to two decimals, no trailing zeros.
+fn mm_text(v: f64) -> String {
+    let t = format!("{v:.2}");
+    let t = t.trim_end_matches('0').trim_end_matches('.');
+    if t.is_empty() || t == "-0" { "0".to_string() } else { t.to_string() }
+}
+
+/// A point's X, Y, Z: its distance from the origin along each axis.
+fn coords_text(p: Vec3) -> String {
+    format!("X {}  Y {}  Z {}", mm_text(p.x), mm_text(p.y), mm_text(p.z))
 }
