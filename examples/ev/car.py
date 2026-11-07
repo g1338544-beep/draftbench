@@ -3,8 +3,8 @@
 import json, math, sys
 
 C = []
-def cmd(name, **params):
-    C.append({"command": name, "params": params})
+def cmd(_command, **params):
+    C.append({"command": _command, "params": params})
 
 def line(pts, closed=False, ids=None):
     p = {"points": pts}
