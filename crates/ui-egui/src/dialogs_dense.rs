@@ -247,8 +247,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             });
             let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
             let mut ext = cur;
-            form_row(ui, "Extent Type", |ui| {
-                combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
+            form_row(ui, "End Condition", |ui| {
+                combo(ui, "ex_ext", &["Blind", "Up To Surface / Face / Vertex", "Through All"], &mut ext);
                 *all = ext == 2;
                 set_to_object(&mut d.inputs, &mut d.active, ext == 1);
             });
@@ -256,10 +256,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 enter |= expr_row(ui, "Distance", distance);
             }
             if ext == 1 {
-                enter |= expr_row(ui, "To Offset", to_offset);
+                ui.small("Pick the face, surface or vertex to stop at, in the 3D view.");
+                enter |= expr_row(ui, "Offset From Surface", to_offset);
             }
             if two_sided(*direction) {
-                enter |= expr_row(ui, "Distance 2", distance2);
+                enter |= expr_row(ui, "Direction 2 Depth", distance2);
             }
             form_row(ui, "Operation", |ui| {
                 let before = *operation;
@@ -354,7 +355,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 });
             }
             if *chamfer && *ctype == 1 {
-                enter |= expr_row(ui, "Distance 2", distance2);
+                enter |= expr_row(ui, "Direction 2 Depth", distance2);
             }
             if *chamfer && *ctype == 2 {
                 enter |= expr_row(ui, "Angle", angle);

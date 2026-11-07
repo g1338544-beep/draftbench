@@ -964,7 +964,7 @@ impl Dialog {
     /// The main value (shown on the canvas too): label, kind and the expression.
     pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
         Some(match &mut self.kind {
-            Kind::Extrude { to_offset, .. } if to_object_on(&self.inputs) => ("To Offset", ValueKind::Length, to_offset),
+            Kind::Extrude { to_offset, .. } if to_object_on(&self.inputs) => ("Offset From Surface", ValueKind::Length, to_offset),
             Kind::Extrude { distance, .. } => ("Distance", ValueKind::Length, distance),
             Kind::Revolve { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Fillet { radius, chamfer, .. } => {
