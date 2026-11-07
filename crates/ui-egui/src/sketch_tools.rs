@@ -600,6 +600,9 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         dim_history: Vec::new(),
         dims_stage: usize::MAX,
         dims_focus: false,
+        tangent: None,
+        arc: false,
+        away: false,
     })
 }
 

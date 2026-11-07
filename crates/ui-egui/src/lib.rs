@@ -929,6 +929,23 @@ impl SolveApp {
             }
             return;
         }
+        // 3D Line, 3D Spline and 3D Point need no plane and no open sketch: the first one opens a 3D sketch
+        // (on XY, whose plane is never asked for) with the 3D option on, and starts the drawing tool, so
+        // points are placed freely in the 3D view by snapping to model points, edges and faces.
+        if matches!(id, "sketch.line3d" | "sketch.spline3d" | "sketch.point3d") {
+            if self.session.active_sketch.is_none() && self.run("sketch.create", json!({"plane": "XY"})).is_err() {
+                return;
+            }
+            if !sketch3d::active(self) {
+                let _ = self.run("sketch.options", json!({"sketch_3d": true}));
+            }
+            self.start(match id {
+                "sketch.line3d" => "sketch.line",
+                "sketch.spline3d" => "sketch.spline.fit_point",
+                _ => "sketch.point",
+            });
+            return;
+        }
         // A disabled command starts nothing, however it was reached. The toolbar greys its
         // button, but a shortcut, the command palette and the control channel all land here.
         // Its reason goes to the status line, so the refusal is never silent.

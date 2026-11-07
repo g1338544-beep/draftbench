@@ -87,6 +87,12 @@ pub struct Tool {
     pub dim_history: Vec<crate::sketch_dims::DimBox>,
     pub dims_stage: usize,
     pub dims_focus: bool,
+    /// Line tool, SolidWorks style: the direction the chain leaves its last point, whether the next segment is a
+    /// tangent arc (toggled by returning the pointer to the chain's end), and whether the pointer has left that
+    /// point since the last toggle.
+    pub tangent: Option<Vec2>,
+    pub arc: bool,
+    pub away: bool,
 }
 
 impl Tool {
@@ -133,6 +139,9 @@ impl Tool {
             dim_history: Vec::new(),
             dims_stage: usize::MAX,
             dims_focus: false,
+            tangent: None,
+            arc: false,
+            away: false,
         })
     }
 }
@@ -197,8 +206,28 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     } else {
         sketch_point_at(app, proj, pos)
     };
+    let upp = app.viewport.rect.map(|r| 2.0 * app.cam.half_height() / f64::from(r.height().max(1.0)));
+    let mut note = None;
     if let Some(t) = app.tool.as_mut() {
         t.hover = h;
+        // Back on the chain's end once: tangent arc; again: line (the pointer must leave it between).
+        if t.cmd == "sketch.line"
+            && t.pts.len() == 1
+            && t.tangent.is_some()
+            && let (Some(upp), Some(hv), Some(start)) = (upp, t.hover.as_ref().map(|x| x.0), t.pts.first().map(|x| x.0))
+        {
+            let px = hv.dist(start) / upp.max(1e-12);
+            if px > 28.0 {
+                t.away = true;
+            } else if px < 9.0 && t.away {
+                t.away = false;
+                t.arc = !t.arc;
+                note = Some(if t.arc { "Tangent arc: click its end (move back to the start for a line)" } else { "Line" });
+            }
+        }
+    }
+    if let Some(msg) = note {
+        app.set_status(msg, false);
     }
 }
 
@@ -358,11 +387,23 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
             let (a, b) = (tool.pts[tool.pts.len() - 2].clone(), tool.pts[tool.pts.len() - 1].clone());
             let angled = crate::sketch_dims::has_locked(&tool, "Angle");
             let dimensioned = tool.dims.iter().any(|dimension| dimension.locked);
-            if let Ok(v) = draw(app, &tool, json!({"points": [arg(&a), arg(&b)], "infer": !angled})) {
+            let arc_start = if tool.arc { tool.tangent } else { None };
+            let drawn = match arc_start {
+                Some(_) => app.run("sketch.arc.tangent", json!({"start": arg(&a), "end": xy(&b)})),
+                None => draw(app, &tool, json!({"points": [arg(&a), arg(&b)], "infer": !angled})),
+            };
+            if let Ok(v) = drawn {
                 let curves: Vec<String> = v["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect();
                 // Chain: the next segment starts at this one's end point.
                 if let Some(id) = curves.first() {
-                    if angled {
+                    // The direction the next segment is tangent to.
+                    tool.tangent = match arc_start.and_then(|t0| tangent_arc(a.0, t0, b.0)) {
+                        Some((_, t1)) => Some(t1),
+                        None => (b.0 - a.0).normalized(),
+                    };
+                    tool.arc = false;
+                    tool.away = false;
+                    if angled || arc_start.is_some() {
                         crate::inference::clear();
                     } else {
                         // Endpoint inference is part of this drawing. Preserve its original
@@ -396,6 +437,31 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
         }
     }
     app.tool = Some(tool);
+}
+
+/// The tangent arc from `s` leaving along `t` to `e`: points along it and the direction it arrives in.
+pub fn tangent_arc(s: Vec2, t: Vec2, e: Vec2) -> Option<(Vec<Vec2>, Vec2)> {
+    let n = Vec2::new(-t.y, t.x);
+    let d = e - s;
+    let den = 2.0 * n.dot(d);
+    if !den.is_finite() || den.abs() < 1e-9 * d.len().max(1e-9) || d.len() < 1e-9 {
+        return None;
+    }
+    let k = d.dot(d) / den;
+    let c = s + n * k;
+    let r = k.abs();
+    let (v0, v1) = (s - c, e - c);
+    let sigma = if (v0.x * t.y - v0.y * t.x) >= 0.0 { 1.0 } else { -1.0 };
+    let (a0, a1) = (v0.y.atan2(v0.x), v1.y.atan2(v1.x));
+    let tau = std::f64::consts::TAU;
+    let mut sweep = (a1 - a0) * sigma;
+    sweep = sweep.rem_euclid(tau);
+    let pts = (0..=48).map(|i| {
+        let a = a0 + sigma * sweep * f64::from(i) / 48.0;
+        c + Vec2::new(a.cos(), a.sin()) * r
+    });
+    let t1 = Vec2::new(-v1.y, v1.x).normalized()? * sigma;
+    Some((pts.collect(), t1))
 }
 
 /// Geometry and typed constraints are committed atomically, as one undo step.
@@ -917,6 +983,15 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         paint_sketch_path(&[ss.plane.to_world(a), ss.plane.to_world(b)], crate::sketch_palette::mode(app), painter, proj, stroke);
     };
     match (t.cmd, pts.as_slice()) {
+        ("sketch.line", [last]) if t.arc && t.tangent.is_some_and(|t0| tangent_arc(*last, t0, h).is_some()) => {
+            if let Some((arc, _)) = t.tangent.and_then(|t0| tangent_arc(*last, t0, h)) {
+                for w in arc.windows(2) {
+                    if let [p, q] = w {
+                        line(*p, *q);
+                    }
+                }
+            }
+        }
         ("sketch.line", [.., last]) => {
             line(*last, h);
             // Horizontal/vertical inference marker.
