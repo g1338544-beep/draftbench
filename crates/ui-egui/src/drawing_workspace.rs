@@ -4517,6 +4517,62 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // Keyboard: Ctrl+C copies the picked text or line, Ctrl+V adds a new one (every paste is another
+    // copy, never a replacement), Ctrl+D duplicates it.
+    if !ui.ctx().egui_wants_keyboard_input() && app.drawing.ft_edit.is_none() {
+        let (copy_key, paste_key, dup_key) = ui.input(|i| {
+            (
+                i.events.iter().any(|e| matches!(e, egui::Event::Copy)),
+                i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))),
+                i.modifiers.command && i.key_pressed(egui::Key::D),
+            )
+        });
+        let text = app.drawing.ft_sel.and_then(|i| app.drawing.texts.get(i).cloned());
+        let line = app.drawing.fl_sel.and_then(|i| app.drawing.flines.get(i).copied());
+        let hover = response.hover_pos().and_then(|q| m.to_sheet(q));
+        let mut changed = false;
+        if copy_key {
+            if let Some(t) = &text {
+                ui.ctx().copy_text(t.text.clone());
+                app.drawing.cell_clip = Some(join_cell(0.0, 0.0, t.k, t.font, &t.text));
+                app.drawing.fl_clip = None;
+            } else if let Some(l) = line {
+                app.drawing.fl_clip = Some([l[2] - l[0], l[3] - l[1]]);
+            }
+        }
+        if dup_key {
+            if let Some(t) = text.clone().filter(|_| app.drawing.texts.len() < MAX_FREE_TEXTS) {
+                app.drawing.texts.push(FreeText { x: t.x + 6.0, y: t.y - 6.0, ..t });
+                app.drawing.ft_sel = Some(app.drawing.texts.len() - 1);
+                changed = true;
+            } else if let Some(l) = line.filter(|_| app.drawing.flines.len() < MAX_FREE_LINES) {
+                app.drawing.flines.push([l[0] + 5.0, l[1] + 5.0, l[2] + 5.0, l[3] + 5.0]);
+                app.drawing.fl_sel = Some(app.drawing.flines.len() - 1);
+                changed = true;
+            }
+        }
+        if paste_key {
+            if let (Some([dx, dy]), Some(l)) = (app.drawing.fl_clip, line) {
+                if app.drawing.flines.len() < MAX_FREE_LINES {
+                    let (ox, oy) = (l[0] + 5.0, l[1] + 5.0);
+                    app.drawing.flines.push([ox, oy, ox + dx, oy + dy]);
+                    app.drawing.fl_sel = Some(app.drawing.flines.len() - 1);
+                    changed = true;
+                }
+            } else if app.drawing.cell_clip.is_some() {
+                // Where the pointer is; each further paste steps aside so none hides another.
+                let at = match (hover, &text) {
+                    (Some(h), _) => h,
+                    (None, Some(t)) => pos2(t.x + 6.0, t.y - 6.0),
+                    (None, None) => pos2(60.0, 60.0),
+                };
+                changed |= paste_free_text(&mut app.drawing, at);
+            }
+        }
+        if changed {
+            refresh(app);
+        }
+    }
     // Menu of a free line: copy it, make another like it, delete it.
     let mut fl_act: Option<u8> = None;
     if let Some((_, i)) = app.drawing.fl_menu {
