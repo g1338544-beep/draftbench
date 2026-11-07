@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Copy 3D Curves</title>
+  <path d="M6.8 50.8C10.8 26.8 26.8 56.8 34.8 34.8" fill="none" stroke="#6f879c" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6.8 50.8L26.8 32.8" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="0.1 6.5"/>
+  <path d="M34.8 34.8L54.8 16.8" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="0.1 6.5"/>
+  <circle cx="6.8" cy="50.8" r="3.4" fill="#6f879c"/>
+  <circle cx="34.8" cy="34.8" r="3.4" fill="#6f879c"/>
+  <path d="M26.8 32.8C30.8 8.8 46.8 38.8 54.8 16.8" fill="none" stroke="#ffffff" stroke-width="7.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26.8 32.8C30.8 8.8 46.8 38.8 54.8 16.8" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="26.8" cy="32.8" r="5.8" fill="#ffffff"/>
+  <circle cx="26.8" cy="32.8" r="3.4" fill="#236ead"/>
+  <circle cx="54.8" cy="16.8" r="5.8" fill="#ffffff"/>
+  <circle cx="54.8" cy="16.8" r="3.4" fill="#236ead"/>
+</svg>

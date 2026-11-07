@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Stepped Section</title>
+  <path d="M14 16L50 16A4 4 0 0 1 54 20L54 44A4 4 0 0 1 50 48L14 48A4 4 0 0 1 10 44L10 20A4 4 0 0 1 14 16Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 8L24 30L40 30L40 56" fill="none" stroke="#ffffff" stroke-width="7.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 8L24 30L40 30L40 56" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 4L18.5 13L29.5 13Z" fill="#236ead" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40 60L34.5 51L45.5 51Z" fill="#236ead" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -155,7 +155,7 @@ surface = [
 ]
 sketch = [
   "arc3", "arc_center", "arc_slot", "arc_slot_center", "arc_tangent",
-  "blend", "circle", "circle2", "circle3", "circle_tt",
+  "sketch_copy3d", "blend", "circle", "circle2", "circle3", "circle_tt",
   "circle_ttt", "conic", "constrainer", "dimension", "ellipse",
   "extend", "finish", "fit_section", "include",
   "intersect", "intersection_curve", "iso_curve", "line", "line_mid",

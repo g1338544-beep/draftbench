@@ -29,7 +29,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params("wire: drawn 3D curve or point id, index?: fit point (default 0), to: [x,y,z] | by: [dx,dy,dz]; points joined to it move too"),
     CommandSpec::new("sketch.copy3d", "Copy 3D Curves", copy3d)
-        .icon("sketch_move")
+        .icon("sketch_copy3d")
         .enabled(in_sketch)
         .params("wires: [drawn 3D curve or point ids]; by: [dx,dy,dz] the shift of each copy, or from + to: [x,y,z] world points (the copy lands where `to` is); count?: copies, each shifted once more (default 1, at most 100). The copies are new, free 3D curves (needs 3D Sketch on)"),
 ];
