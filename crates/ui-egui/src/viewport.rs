@@ -2241,7 +2241,15 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
             Sel::SketchCurve { id } => {
-                if let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
+                // The sketch being edited, else the one that has the curve (a Trim or Extrude dialog picks
+                // curves of a sketch that is not open): a picked curve always shows its pick colour.
+                let found = app
+                    .session
+                    .active_sketch
+                    .and_then(|sid| st.sketch(sid))
+                    .filter(|ss| ss.sketch.curve_index(id).is_some())
+                    .or_else(|| st.sketches.iter().find(|ss| ss.sketch.curve_index(id).is_some()));
+                if let Some(ss) = found
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
                     for pts in &crate::sketch_display::curve_sample(app, ss.feature, ci, &ss.plane, &display_proj(app)).parts {
