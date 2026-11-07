@@ -1467,12 +1467,8 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             );
         }
         PAGE_DESIGN => {
-            ui_kit::row(ui, app.tr_label("Default modelling orientation"), |ui| {
-                let mut selected = usize::from(app.preferences.up_axis == "y");
-                if ui_kit::segmented(ui, &mut selected, &[crate::i18n::tr_label("Z up"), crate::i18n::tr_label("Y up")], Default::default()) {
-                    app.preferences.up_axis = if selected == 1 { "y" } else { "z" }.into();
-                }
-            });
+            ui_kit::text(ui, app.tr_label("Default modelling orientation"), ui_kit::Text::Inline);
+            orientation_tiles(app, ui, t);
             ui_kit::text(
                 ui,
                 crate::i18n::tr_label("Which axis points up in the views (axis view, Home, Look At). Designs are unchanged."),
@@ -1680,6 +1676,35 @@ fn display_quality_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             );
             if response.clicked() {
                 app.preferences.display_quality = q.id().into();
+            }
+        }
+    });
+}
+
+/// The two orientations as tiles, each drawing the axes the way that choice shows them (the up axis straight up).
+fn orientation_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    let y_up = app.preferences.up_axis == "y";
+    ui.horizontal(|ui| {
+        for (is_y, name) in [(false, "Z up"), (true, "Y up")] {
+            let (rect, response) = ui.allocate_exact_size(egui::vec2(120.0, 104.0), egui::Sense::click());
+            let on = y_up == is_y;
+            let p = ui.painter_at(rect);
+            p.rect_filled(rect, 6.0, t.viewport_top);
+            let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
+            p.add(egui::Shape::closed_line(corners.to_vec(), egui::Stroke::new(if on || response.hovered() { 2.0 } else { 1.0 }, if on { t.accent } else { t.origin_plane_edge })));
+            let o = rect.center() + egui::vec2(0.0, 4.0);
+            let len = 34.0;
+            // Up, the axis to the right and the one coming toward the viewer, in the colours of the view triad.
+            let (up, right, toward) = if is_y { (1usize, 0usize, 2usize) } else { (2, 1, 0) };
+            let dirs = [(up, egui::vec2(0.0, -len)), (right, egui::vec2(len * 0.87, -len * 0.5)), (toward, egui::vec2(len * 0.87, len * 0.5))];
+            for (axis, d) in dirs {
+                let col = t.triad.get(axis).copied().unwrap_or(t.accent);
+                p.line_segment([o, o + d], egui::Stroke::new(2.0, col));
+                p.text(o + d * 1.25, egui::Align2::CENTER_CENTER, ["X", "Y", "Z"][axis.min(2)], egui::FontId::proportional(11.0), col);
+            }
+            p.text(egui::pos2(rect.center().x, rect.bottom() - 12.0), egui::Align2::CENTER_CENTER, crate::i18n::tr_label(name), egui::FontId::proportional(13.0), ui.visuals().text_color());
+            if response.clicked() {
+                app.preferences.up_axis = if is_y { "y" } else { "z" }.into();
             }
         }
     });
