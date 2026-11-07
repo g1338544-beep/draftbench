@@ -1040,6 +1040,41 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
             }
         }
     }
+    // A line that spans the section from one smooth stretch of the outline to another (a circular edge where two
+    // bore faces of one radius meet, seen edge-on across the hole) is no edge of the part: where the outline runs
+    // straight through both of its ends, nothing changes there and the line is left out. A step or corner keeps it.
+    if out.len().saturating_mul(cut.len()) <= 40_000_000 {
+        let tol = 0.02;
+        let smooth = |p: Vec2| -> bool {
+            let mut dirs: Vec<Vec2> = Vec::new();
+            for (a, b) in cut {
+                let (da, db) = (a.dist(p), b.dist(p));
+                if da <= tol && db > tol {
+                    dirs.push(Vec2::new(b.x - a.x, b.y - a.y));
+                } else if db <= tol && da > tol {
+                    dirs.push(Vec2::new(a.x - b.x, a.y - b.y));
+                } else if da > tol && db > tol {
+                    // Through the inside of a longer segment.
+                    let (d, l2) = (Vec2::new(b.x - a.x, b.y - a.y), (b.x - a.x).powi(2) + (b.y - a.y).powi(2));
+                    if l2 > 1e-12 {
+                        let t = ((p.x - a.x) * d.x + (p.y - a.y) * d.y) / l2;
+                        let q = Vec2::new(a.x + d.x * t, a.y + d.y * t);
+                        if t > 0.0 && t < 1.0 && q.dist(p) <= tol {
+                            return true;
+                        }
+                    }
+                }
+            }
+            match dirs.as_slice() {
+                [d1, d2] => {
+                    let (l1, l2) = (d1.len(), d2.len());
+                    l1 > 1e-9 && l2 > 1e-9 && (d1.x * d2.y - d1.y * d2.x).abs() <= 1e-3 * l1 * l2 && d1.x * d2.x + d1.y * d2.y < 0.0
+                }
+                _ => false,
+            }
+        };
+        out.retain(|(a, b)| !(smooth(*a) && smooth(*b)));
+    }
     out
 }
 
