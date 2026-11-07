@@ -669,7 +669,7 @@ pub(super) fn face_contains(m: &solidcraft_geom::Mesh, fi: usize, p: Vec3, tol: 
     })
 }
 
-fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn create_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.create";
     // These name the plane, so they belong inside `plane`. Next to it they were ignored and the
     // sketch went to XY (or the plane given) without a word.
@@ -2733,7 +2733,7 @@ fn options_json(v: &solidcraft_sketch::SketchView) -> Value {
     })
 }
 
-fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.options";
     let keys = [
         "show_profile",

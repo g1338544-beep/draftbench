@@ -12,15 +12,20 @@ use crate::params::{bad, req_vec3, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.line3d", "3D Line", line3d).icon("line").params(concat!(
+    CommandSpec::new("sketch.create3d", "3D Sketch", create3d)
+        .icon("sketch")
+        .params("(none) opens a 3D sketch: no plane to pick, lines, splines and points are placed freely in the 3D view (its drawing plane is XY)"),
+    CommandSpec::new("sketch.line3d", "3D Line", line3d).icon("line").enabled(in_sketch).params(concat!(
         "points: [[x,y,z]…] world points (2 or more): one 3D line per segment, joined end to end (needs 3D Sketch on)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline3d", "3D Spline", spline3d)
         .icon("spline")
+        .enabled(in_sketch)
         .params(concat!("points: [[x,y,z]…] world fit points (2 or more): a smooth 3D curve through them (needs 3D Sketch on)", created_doc!())),
     CommandSpec::new("sketch.point3d", "3D Point", point3d)
         .icon("point")
+        .enabled(in_sketch)
         .params(concat!("point: [x,y,z] world point (needs 3D Sketch on)", created_doc!())),
     CommandSpec::new("sketch.move3d", "Move 3D Point", move3d)
         .icon("sketch_move")
@@ -78,6 +83,12 @@ fn inverse_owner_frame(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_d
     }
     let frame = if owner == s.active_component { s.active_component_frame() } else { s.placed_document().component_transform(owner) };
     solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(cmd, "the sketch owner placement is not invertible"))
+}
+
+fn create3d(s: &mut Session, _p: &Value) -> Result<Value> {
+    let out = super::sketch::create_sketch(s, &json!({"plane": "XY"}))?;
+    super::sketch::sketch_options(s, &json!({"sketch_3d": true}))?;
+    Ok(out)
 }
 
 fn line3d(s: &mut Session, p: &Value) -> Result<Value> {
