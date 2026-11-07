@@ -113,6 +113,16 @@ fn ruled(surface: &mt::Surface, orientation: bool, work: &mut usize) -> Option<[
     None
 }
 
+/// Whether faces `a` and `b` have the same normal (as they face) at the start, middle and end of the edge `line`.
+fn joined_smoothly(faces: &[&mt::Face], a: usize, b: usize, line: &[Vec3]) -> bool {
+    let (Some(fa), Some(fb)) = (faces.get(a), faces.get(b)) else { return false };
+    let (Some(first), Some(mid), Some(last)) = (line.first(), line.get(line.len() / 2), line.last()) else { return false };
+    [first, mid, last].iter().all(|p| match (crate::surface_ruled::normal_at(fa, **p), crate::surface_ruled::normal_at(fb, **p)) {
+        (Some(na), Some(nb)) => na.dot(nb) >= 1.0 - 1e-9,
+        _ => false,
+    })
+}
+
 fn on_boundary(boundaries: &[Boundary; 2], a: Vec3, b: Vec3) -> Option<Boundary> {
     boundaries.iter().find_map(|boundary| {
         let tolerance = roundoff(&[a, b, boundary.a, boundary.b]);
@@ -197,6 +207,8 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
         let mapped = face.try_mapped(|_| Some(()), |_| Some(()), |surface| ruled(surface, face.orientation(), &mut work));
         boundaries.push(mapped.map(|face| face.surface()));
     }
+    let surface = body.is_surface();
+    let faces: Vec<&mt::Face> = if surface { body.solid.face_iter().collect() } else { Vec::new() };
     let mut out = vec![false; mesh.edges.len()];
     let mut sharp = vec![false; mesh.edges.len()];
     // Same first-occurrence order as tessellate().edges; never remove/reindex it.
@@ -229,7 +241,18 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
             }
             continue;
         }
-        let (Some(Some(ba)), Some(Some(bb))) = (boundaries.get(*a as usize), boundaries.get(*b as usize)) else { continue };
+        let (Some(Some(ba)), Some(Some(bb))) = (boundaries.get(*a as usize), boundaries.get(*b as usize)) else {
+            // A surface body (ruled, offset, sewn strips): where two faces meet with the very same normal all along
+            // their edge, the join is no edge of the shape, however the faces were made.
+            if surface
+                && charge(&mut work, 700).is_some()
+                && joined_smoothly(&faces, *a as usize, *b as usize, line)
+                && let Some(flag) = out.get_mut(current)
+            {
+                *flag = true;
+            }
+            continue;
+        };
         // Curve is inspected by borrowing. Only exact straight rulings qualify;
         // a bowed/twisted edge with matching endpoints must remain visible.
         let mapped = edge.try_mapped(

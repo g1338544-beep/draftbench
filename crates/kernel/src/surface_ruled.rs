@@ -346,7 +346,7 @@ impl Strip {
 }
 
 /// The unit normal of `face` (as it faces) at its point nearest `p`.
-fn normal_at(face: &mt::Face, p: Vec3) -> Option<Vec3> {
+pub(crate) fn normal_at(face: &mt::Face, p: Vec3) -> Option<Vec3> {
     let surface = face.oriented_surface();
     let (u, v) = surface.search_nearest_parameter(p3(p), None, 100)?;
     from_p3(mt::Point3::new(0.0, 0.0, 0.0) + surface.normal(u, v)).normalized()
