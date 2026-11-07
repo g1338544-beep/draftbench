@@ -1901,7 +1901,7 @@ fn segment_in_rect(a: Pos2, b: Pos2, r: [f32; 4]) -> bool {
 }
 
 /// Erase the centre lines and marks inside the frame (x0, y0, x1, y1): a click-sized frame takes the line under it.
-fn erase_centre(app: &mut SolveApp, mut r: [f32; 4]) {
+fn erase_centre(app: &mut SolveApp, mut r: [f32; 4], any_line: bool) {
     let grow = 1.0;
     if r[2] - r[0] < 0.5 && r[3] - r[1] < 0.5 {
         r = [r[0] - grow, r[1] - grow, r[2] + grow, r[3] + grow];
@@ -1910,7 +1910,8 @@ fn erase_centre(app: &mut SolveApp, mut r: [f32; 4]) {
     app.drawing.clines.retain(|c| !segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r));
     app.drawing.ccircles.retain(|c| !ring_in_rect(pos2(c[0], c[1]), c[2], r));
     if app.drawing.centre_cut.len() < 400 {
-        app.drawing.centre_cut.push([r[0], r[1], r[2], r[3], 0.0]);
+        // The fifth number: 0 centre lines only, 1 one exact line, 2 every line the frame touches.
+        app.drawing.centre_cut.push([r[0], r[1], r[2], r[3], if any_line { 2.0 } else { 0.0 }]);
     }
     app.drawing.sel_centre = None;
     app.drawing.dirty_marks = true;
@@ -1970,7 +1971,7 @@ fn free_in_box(app: &SolveApp, r: [f32; 4]) -> (Vec<usize>, Vec<usize>, Vec<usiz
 /// Delete everything a selection frame holds: centre lines and marks, free lines and free texts.
 fn erase_selection(app: &mut SolveApp, r: [f32; 4]) {
     let (lines, texts, cells) = free_in_box(app, r);
-    erase_centre(app, r);
+    erase_centre(app, r, false);
     for i in cells {
         if app.drawing.cells.len() <= i {
             app.drawing.cells.resize(i + 1, String::new());
@@ -3273,7 +3274,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         });
                         dirty |= crate::ui_kit::checkbox(ui, "Bolt circle centreline", &mut app.drawing.bolt).changed();
                         dirty |= crate::ui_kit::checkbox(ui, "Section arrows point the other way", &mut app.drawing.sec_flip).changed();
-                        if !app.drawing.centre_cut.is_empty() && crate::ui_kit::button(ui, &format!("Bring back erased centre lines ({})", app.drawing.centre_cut.len()), crate::ui_kit::Button::Small).clicked() {
+                        if !app.drawing.centre_cut.is_empty() && crate::ui_kit::button(ui, &format!("Bring back erased lines ({})", app.drawing.centre_cut.len()), crate::ui_kit::Button::Small).clicked() {
                             app.drawing.centre_cut.clear();
                             dirty = true;
                         }
@@ -4004,7 +4005,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     if let Some(r) = erase_click {
-        erase_centre(app, r);
+        erase_centre(app, r, true);
     }
     if app.drawing.caption_sel.is_some() && response.clicked() {
         app.drawing.sel_dim = None;
@@ -4162,7 +4163,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if response.drag_stopped() || !response.dragged() {
             if let Some((a, b)) = app.drawing.erase.take() {
-                erase_centre(app, [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)]);
+                let any_line = app.drawing.erase_tool;
+                erase_centre(app, [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)], any_line);
             }
         }
     }
@@ -5776,7 +5778,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         painter.text(
             rect.left_top() + vec2(12.0, 10.0),
             egui::Align2::LEFT_TOP,
-            "Erase Centre: click a centre line or mark, or drag a frame over them. Esc or right-click ends.",
+            "Erase Line: click any line, circle, centre line or mark, or drag a frame over them; Bring back erased lines restores them. Esc or right-click ends.",
             egui::FontId::proportional(Tokens::get().font_body),
             Color32::from_rgb(235, 110, 110),
         );

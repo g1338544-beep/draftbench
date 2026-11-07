@@ -1499,25 +1499,40 @@ fn finish(
     // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go; a fifth
     // number of 1 means one exact line (its two ends) and nothing else.
     if let Some(cuts) = p.get("centre_cut").and_then(Value::as_array) {
-        let frames: Vec<([f64; 4], bool)> = cuts
+        // The fifth number: 0 centre lines only, 1 one exact centre line, 2 every line and circle the frame touches.
+        let frames: Vec<([f64; 4], u8)> = cuts
             .iter()
             .take(400)
             .filter_map(|c| {
                 let n: Vec<f64> = c.as_array()?.iter().filter_map(Value::as_f64).collect();
                 if n.len() >= 4 && n.iter().all(|v| v.is_finite() && v.abs() < 1e5) {
-                    Some(([n[0], n[1], n[2], n[3]], n.get(4).is_some_and(|f| *f > 0.5)))
+                    let kind = match n.get(4) {
+                        Some(f) if *f > 1.5 => 2,
+                        Some(f) if *f > 0.5 => 1,
+                        _ => 0,
+                    };
+                    Some(([n[0], n[1], n[2], n[3]], kind))
                 } else {
                     None
                 }
             })
             .collect();
         entities.retain(|e| match (&e.shape, e.layer.as_str()) {
-            (DxfShape::Line(a, b), "CENTER") => !frames.iter().any(|(r, exact)| {
-                if *exact {
+            (DxfShape::Line(a, b), "CENTER") => !frames.iter().any(|(r, kind)| {
+                if *kind == 1 {
                     let near = |p: Vec2, x: f64, y: f64| (p.x - x).abs() < 0.05 && (p.y - y).abs() < 0.05;
                     (near(*a, r[0], r[1]) && near(*b, r[2], r[3])) || (near(*a, r[2], r[3]) && near(*b, r[0], r[1]))
                 } else {
                     touches(*a, *b, *r)
+                }
+            }),
+            (DxfShape::Line(a, b), "VISIBLE" | "HIDDEN") => !frames.iter().any(|(r, kind)| *kind == 2 && touches(*a, *b, *r)),
+            (DxfShape::Circle { c, r: rad }, "VISIBLE" | "HIDDEN") => !frames.iter().any(|(r, kind)| {
+                *kind == 2 && {
+                    let (nx, ny) = (c.x.clamp(r[0], r[2]), c.y.clamp(r[1], r[3]));
+                    let near = ((nx - c.x).powi(2) + (ny - c.y).powi(2)).sqrt();
+                    let far = [(r[0], r[1]), (r[0], r[3]), (r[2], r[1]), (r[2], r[3])].iter().map(|(x, y)| ((x - c.x).powi(2) + (y - c.y).powi(2)).sqrt()).fold(0.0_f64, f64::max);
+                    near <= *rad && *rad <= far
                 }
             }),
             _ => true,
