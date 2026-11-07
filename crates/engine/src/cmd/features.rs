@@ -120,6 +120,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("split_body")
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
+    CommandSpec::new("solid.extrude_to_surface", "Extrude to Surface", extrude_to_surface)
+        .at("SOLID", "CREATE")
+        .icon("extrude")
+        .params("sketch: id; profiles: [index]; surface: name of a surface body of any shape; to: [x,y,z] a point on it; direction?; operation?: new (the only one supported): a profile extruded to a surface ends exactly on it, following its shape"),
     CommandSpec::new("solid.split_by_surface", "Split by Surface", split_by_surface)
         .at("SOLID", "MODIFY")
         .icon("split_body")
@@ -1733,6 +1737,63 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let plane = plane_param(s, p.get("plane"), cmd)?;
     add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, sketch: None, line: None })
+}
+
+/// Extrude to Surface: the profile is extruded past the surface as a new body, and the part beyond the
+/// surface is cut off with the surface thickened across it, so the end of the body follows the surface.
+fn extrude_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.extrude_to_surface";
+    let surface = str_(p, "surface").ok_or_else(|| bad(cmd, "`surface` must name a surface body"))?.to_string();
+    let point = p.get("to").and_then(vec3).ok_or_else(|| bad(cmd, "`to` must be [x, y, z] on the surface"))?;
+    let sketch = p.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`sketch` must be a sketch feature id"))?;
+    if !matches!(str_(p, "operation"), None | Some("new")) {
+        return Err(bad(cmd, "not supported yet: Up To Surface with Join, Cut or Intersect; extrude to a New Body, then Combine"));
+    }
+    let (dist, normal, side) = {
+        let st = s.world_state();
+        let tool = st.body(&surface).ok_or_else(|| bad(cmd, format!("no surface body `{surface}`")))?;
+        if !tool.body.is_surface() {
+            return Err(bad(cmd, format!("`{surface}` is not a surface body")));
+        }
+        let origin = st.sketch(sketch).ok_or_else(|| bad(cmd, format!("no sketch {sketch}")))?.plane.origin;
+        let m = tool.mesh();
+        let near = m
+            .triangles
+            .iter()
+            .filter_map(|t| m.tri(t))
+            .min_by(|a, b| ((a[0] + a[1] + a[2]) / 3.0).dist(point).total_cmp(&((b[0] + b[1] + b[2]) / 3.0).dist(point)))
+            .ok_or_else(|| bad(cmd, "the surface has no faces"))?;
+        let n = (near[1] - near[0]).cross(near[2] - near[0]).normalized().ok_or_else(|| bad(cmd, "the surface is degenerate there"))?;
+        let reach = (tool.mesh().bounds().max - tool.mesh().bounds().min).len();
+        let dist = (((point - origin).len() + reach) * 1.5).max(1.0);
+        if !dist.is_finite() {
+            return Err(bad(cmd, "the surface has no size"));
+        }
+        (dist, n, (origin - point).dot(n))
+    };
+    let _ = normal;
+    let mut q = p.clone();
+    if let Some(o) = q.as_object_mut() {
+        for k in ["to", "to_offset", "surface", "through_all"] {
+            o.remove(k);
+        }
+        o.insert("distance".into(), json!(dist));
+        o.insert("operation".into(), json!("new"));
+    }
+    let before: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    s.execute("solid.extrude", &q)?;
+    let made = s
+        .model
+        .state()
+        .bodies
+        .iter()
+        .map(|b| b.name.clone())
+        .find(|n| !before.contains(n))
+        .ok_or_else(|| bad(cmd, "the extrusion made no body"))?;
+    // The side of the surface away from the profile goes.
+    let thickness = if side < 0.0 { dist * 1.2 } else { -dist * 1.2 };
+    s.execute("surface.thicken", &json!({"bodies": [surface], "thickness": thickness, "operation": "cut", "targets": [made.clone()]}))?;
+    Ok(json!({"body": made}))
 }
 
 /// Split by Surface: the body is cut in two along a surface body of any shape. A copy of the body is made,

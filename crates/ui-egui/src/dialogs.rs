@@ -3243,7 +3243,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut out = Vec::new();
             let (sketch, idx) = profiles();
             if !sketch.is_null() {
-                out.push(("solid.extrude".to_string(), with(json!({"sketch": sketch, "profiles": idx}))));
+                // Up To Surface on a surface body of any shape: the end follows the surface.
+                let st = s.world_state();
+                let surface = if to_object_on(&d.inputs) {
+                    d.inputs.iter().find(|i| i.label == TO_OBJECT).and_then(|i| i.items.first()).and_then(|x| match x {
+                        Sel::Face { body, .. } if st.body(body).is_some_and(|b| b.body.is_surface()) => Some(body.clone()),
+                        _ => None,
+                    })
+                } else {
+                    None
+                };
+                let mut ext = with(json!({"sketch": sketch, "profiles": idx}));
+                match surface {
+                    Some(body) => {
+                        ext["surface"] = json!(body);
+                        out.push(("solid.extrude_to_surface".to_string(), ext));
+                    }
+                    None => out.push(("solid.extrude".to_string(), ext)),
+                }
             }
             // Coplanar faces of one body share one sketch and Boolean. Mixed selections
             // retain their original order and explicit face-body scope.
