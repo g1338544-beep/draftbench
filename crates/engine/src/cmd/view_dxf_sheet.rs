@@ -435,6 +435,51 @@ fn manual(
                 }
             }
         }
+        // A section cut along a drawn line: the axis of every hole the line passes through the middle of
+        // (the bore, holes cut square through) is a centre line across the view, as on a folded drawing.
+        if let (Some([x1, y1, x2, y2]), Some((_, _, ang)), None) = (section_line, line_plane, section_path.as_ref())
+            && (x2 - x1).hypot(y2 - y1) > 1e-9
+            && let Ok(base) = view_lines(scene, parts, view, None, key)
+        {
+            let basis = |a: (f64, f64)| Camera { target: Vec3::ZERO, yaw: a.0, pitch: a.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() }.basis();
+            let (r, u, _) = basis(view.angles());
+            let (rs, _, _) = basis(ang);
+            let len = (x2 - x1).hypot(y2 - y1);
+            let (sn, cs) = spin.to_radians().sin_cos();
+            let turned = |q: Vec2| {
+                let q = match quarter % 4 {
+                    1 => Vec2::new(-q.y, q.x),
+                    2 => Vec2::new(-q.x, -q.y),
+                    3 => Vec2::new(q.y, -q.x),
+                    _ => q,
+                };
+                Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs)
+            };
+            let dir = turned(Vec2::new(0.0, 1.0));
+            let mut done: Vec<f64> = Vec::new();
+            for (c, rad) in circles(&base.lines, false).iter().take(200) {
+                let off = ((x2 - x1) * (c.y - y1) - (y2 - y1) * (c.x - x1)).abs() / len;
+                if off > 0.3 || !rad.is_finite() || *rad < 0.5 {
+                    continue;
+                }
+                let p3 = Vec3::new(r.x * c.x + u.x * c.y, r.y * c.x + u.y * c.y, r.z * c.x + u.z * c.y);
+                let xi = p3.dot(rs);
+                if !xi.is_finite() || done.iter().any(|d| (d - xi).abs() < 0.05) {
+                    continue;
+                }
+                done.push(xi);
+                if let Some((a, b)) = clip_line(turned(Vec2::new(xi, 0.0)), dir, all.lo, all.hi) {
+                    let (a, b) = (to_sheet(a), to_sheet(b));
+                    let d = Vec2::new(b.x - a.x, b.y - a.y);
+                    let l = (d.x * d.x + d.y * d.y).sqrt();
+                    if l.is_finite() && l > 1.0 {
+                        let e = Vec2::new(d.x / l * 3.0, d.y / l * 3.0);
+                        line("CENTER", Vec2::new(a.x - e.x, a.y - e.y), Vec2::new(b.x + e.x, b.y + e.y), &mut entities);
+                        any_centre = true;
+                    }
+                }
+            }
+        }
         let centres_on = section.is_none() && detail.is_none() && quarter == 0 && spin == 0.0 && item.get("center").and_then(Value::as_bool).unwrap_or(true);
         if centres_on && view != StandardView::Iso {
             let here = circles(&all.lines, true);
@@ -1585,6 +1630,23 @@ fn touches(a: Vec2, b: Vec2, r: [f64; 4]) -> bool {
         }
     }
     true
+}
+
+/// The part of the line through `q` along `d` that lies inside the box `lo`..`hi`.
+fn clip_line(q: Vec2, d: Vec2, lo: Vec2, hi: Vec2) -> Option<(Vec2, Vec2)> {
+    let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (p, v, a, b) in [(q.x, d.x, lo.x, hi.x), (q.y, d.y, lo.y, hi.y)] {
+        if v.abs() < 1e-12 {
+            if p < a - 1e-9 || p > b + 1e-9 {
+                return None;
+            }
+        } else {
+            let (u0, u1) = ((a - p) / v, (b - p) / v);
+            t0 = t0.max(u0.min(u1));
+            t1 = t1.min(u0.max(u1));
+        }
+    }
+    (t0.is_finite() && t1.is_finite() && t1 > t0).then(|| (Vec2::new(q.x + d.x * t0, q.y + d.y * t0), Vec2::new(q.x + d.x * t1, q.y + d.y * t1)))
 }
 
 fn turn_by(all: &Projected, angle: f64) -> std::rc::Rc<Projected> {
