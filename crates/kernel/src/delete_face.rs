@@ -334,6 +334,185 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
     })
 }
 
+/// The faces (by index) that share an edge with face `face`.
+fn face_neighbours(body: &Body, face: usize) -> Vec<usize> {
+    let Some(f) = body.solid.face_iter().nth(face) else {
+        return Vec::new();
+    };
+    let ids: std::collections::HashSet<mt::EdgeID> = f.edge_iter().map(|e| e.id()).collect();
+    body.solid.face_iter().enumerate().filter(|(i, g)| *i != face && g.edge_iter().any(|e| ids.contains(&e.id()))).map(|(i, _)| i).collect()
+}
+
+/// Take one round (a fillet's torus, a chamfer's cone) between a plane and a coaxial cylinder
+/// off the body, restoring the sharp corner it replaced.
+///
+/// Seen in a section through the axis, the round sits in the rectangle spanned by the sharp
+/// corner (cylinder radius, plane height) and the opposite corner (tube centre, or the
+/// cone's far ends). When that opposite corner is inside the material the round took
+/// material off the corner, so a ring over the rectangle is united; when it is in the air the
+/// round added material in a concave corner, so the ring is cut away.
+fn remove_round(body: &Body, face: usize) -> Result<Body> {
+    use crate::{BoolOp, FaceSurface, boolean, cylinder, face_surface};
+    let size = body.size().max(1e-9);
+    let tol = size * 1e-6;
+    let surf = face_surface(body, face).ok_or_else(|| fail("that face is not a round"))?;
+    let (origin, axis) = match surf {
+        FaceSurface::Torus { center, axis, major, .. } if major > 0.0 => (center, axis.vec()),
+        FaceSurface::Cone { apex, axis, .. } => (apex, axis.vec()),
+        _ => return Err(fail("only fillets and chamfers between a plane and a cylinder can be removed this way")),
+    };
+    let t_of = |p: Vec3| axis.dot(p - origin);
+    // The plane and the cylinder the round runs between.
+    let mut plane: Option<(f64, f64)> = None; // height along the axis, outward sign
+    let mut rc: Option<f64> = None;
+    for n in face_neighbours(body, face) {
+        let Some(g) = body.solid.face_iter().nth(n) else { continue };
+        if let Some((nrm, d)) = face_plane(g, tol.max(size * 1e-5))
+            && nrm.dot(axis).abs() > 1.0 - 1e-6
+        {
+            plane = Some((t_of(nrm * d), nrm.dot(axis).signum()));
+        } else if let Some(FaceSurface::Cylinder { origin: co, axis: ca, radius }) = face_surface(body, n) {
+            let off = co - origin;
+            let radial = off - axis * off.dot(axis);
+            if ca.dot(axis).abs() > 1.0 - 1e-6 && radial.len() < tol.max(1e-6 * radius) {
+                rc = Some(radius);
+            }
+        }
+    }
+    // Faces made by an earlier Boolean may not share their edges with the round: look for the
+    // plane and the cylinder a torus is tangent to by where they are.
+    if (plane.is_none() || rc.is_none())
+        && let FaceSurface::Torus { major, minor, .. } = surf
+    {
+        let loose = size * 1e-5;
+        for n in 0..body.face_count() {
+            let Some(g) = body.solid.face_iter().nth(n) else { continue };
+            if plane.is_none()
+                && let Some((nrm, d)) = face_plane(g, loose)
+                && nrm.dot(axis).abs() > 1.0 - 1e-6
+                && ((t_of(nrm * d)).abs() - minor).abs() < minor * 1e-3 + loose
+            {
+                plane = Some((t_of(nrm * d), nrm.dot(axis).signum()));
+            } else if rc.is_none()
+                && let Some(FaceSurface::Cylinder { origin: co, axis: ca, radius }) = face_surface(body, n)
+            {
+                let off = co - origin;
+                let radial = off - axis * off.dot(axis);
+                if ca.dot(axis).abs() > 1.0 - 1e-6 && radial.len() < loose.max(1e-6 * radius) && ((radius - major).abs() - minor).abs() < minor * 1e-3 + loose {
+                    rc = Some(radius);
+                }
+            }
+        }
+    }
+    let (Some((tp, sigma)), Some(rc)) = (plane, rc) else {
+        return Err(fail(format!(
+            "the round does not run between a plane and a cylinder with the same axis (plane {}, cylinder {})",
+            plane.is_some(),
+            rc.is_some()
+        )));
+    };
+    // The opposite corner of the rectangle.
+    let (rop, top) = match surf {
+        FaceSurface::Torus { major, minor, .. } => {
+            if (t_of(origin) - tp).abs() > minor * 1.01 + tol || ((rc - major).abs() - minor).abs() > minor * 0.01 + tol {
+                return Err(fail("the round is not tangent to its plane and cylinder"));
+            }
+            (major, 0.0)
+        }
+        FaceSurface::Cone { half_angle, .. } => {
+            let tan = half_angle.tan();
+            if !tan.is_finite() || tan.abs() < 1e-6 || tp <= 0.0 {
+                return Err(fail("the chamfer does not meet its plane in a circle"));
+            }
+            (tp * tan.abs(), rc / tan.abs())
+        }
+        _ => return Err(fail("not a round")),
+    };
+    let span = (top - tp).abs();
+    if !span.is_finite() || span < 1e-9 || !rop.is_finite() || rop <= 0.0 || rc <= 0.0 {
+        return Err(fail("the round has no size"));
+    }
+    let ext = 0.2 * span;
+    let convex = (top - tp) * sigma < 0.0;
+    // Radial and axial extent of the tool.
+    let (inner, outer, a1) = if convex {
+        let a1 = tp - sigma * (span + ext);
+        if rc > rop { ((rop - 0.5 * span).max(0.0), rc, a1) } else { (rc, rop + 0.5 * span, a1) }
+    } else {
+        let a1 = tp + sigma * (span + ext);
+        if rc < rop { (rc, rop + 0.25 * span, a1) } else { ((rop - 0.5 * span).max(0.0), rc, a1) }
+    };
+    let (lo, hi) = (tp.min(a1), tp.max(a1));
+    let op = if convex { BoolOp::Union } else { BoolOp::Cut };
+    // The tool's wall at the cylinder's radius lies on the body's own wall, which the boolean
+    // may fail to intersect; then the tool is made a hair smaller on that side (a step of
+    // a few thousandths of the round's size is left at the wall).
+    let mut last: Option<KernelError> = None;
+    for k in [0.0, 2e-3, 2e-2] {
+        let delta = k * span;
+        let (inner, outer) = {
+            let (mut i, mut o) = (inner, outer);
+            if (o - rc).abs() < 1e-12 {
+                o -= delta;
+            }
+            if (i - rc).abs() < 1e-12 {
+                i += delta;
+            }
+            (i, o)
+        };
+        let made = (|| -> Result<Option<Body>> {
+            let mut tool = cylinder(origin + axis * lo, axis, outer, hi - lo)?;
+            if inner > 1e-6 {
+                let core = cylinder(origin + axis * (lo - span), axis, inner, hi - lo + 2.0 * span)?;
+                tool = boolean(&tool, &core, BoolOp::Cut)?.ok_or_else(|| fail("the ring that restores the corner came out empty"))?;
+            }
+            boolean(body, &tool, op)
+        })();
+        match made {
+            Ok(Some(b)) => return Ok(b),
+            Ok(None) => last = Some(fail("removing the round left nothing")),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| fail("the corner could not be restored")))
+}
+
+/// Remove the rounds among `faces` (fillets and chamfers between a plane and a coaxial
+/// cylinder), giving back the sharp corners they replaced, as a solid. Faces that are not
+/// rounds are refused; so is a body where no listed round could be removed.
+pub fn remove_rounds(body: &Body, faces: &[usize]) -> Result<Body> {
+    use crate::{FaceSurface, face_surface};
+    body.require_brep("Remove Round")?;
+    let wanted: Vec<FaceSurface> = faces
+        .iter()
+        .map(|f| face_surface(body, *f).filter(|s| matches!(s, FaceSurface::Torus { .. } | FaceSurface::Cone { .. })))
+        .collect::<Option<_>>()
+        .ok_or_else(|| fail("only fillets and chamfers can be removed this way"))?;
+    if wanted.is_empty() {
+        return Err(fail("no faces given"));
+    }
+    let tol = (body.size() * 1e-6).max(1e-9);
+    let same = |a: &FaceSurface, b: &FaceSurface| match (a, b) {
+        (FaceSurface::Torus { center: c, major: m, minor: r, .. }, FaceSurface::Torus { center: c2, major: m2, minor: r2, .. }) => {
+            c.dist(*c2) < tol && (m - m2).abs() < tol && (r - r2).abs() < tol
+        }
+        (FaceSurface::Cone { apex: v, half_angle: h, .. }, FaceSurface::Cone { apex: v2, half_angle: h2, .. }) => v.dist(*v2) < tol && (h - h2).abs() < 1e-9,
+        _ => false,
+    };
+    let mut cur = body.clone();
+    let mut done = 0;
+    for w in &wanted {
+        let found = (0..cur.face_count()).find(|i| face_surface(&cur, *i).is_some_and(|s| same(&s, w)));
+        let Some(i) = found else { continue };
+        cur = guard("remove round", || remove_round(&cur, i))?;
+        done += 1;
+    }
+    if done == 0 {
+        return Err(fail("the rounds are no longer in the body"));
+    }
+    Ok(cur)
+}
+
 #[cfg(test)]
 mod tests {
     use solidcraft_geom::Vec3;
@@ -446,5 +625,28 @@ mod tests {
         // One face of a box: the sides cannot close it.
         let top = faces_where(&plate, |p| (p.z - 10.0).abs() < 1e-9);
         assert!(delete_faces(&plate, &top).is_err());
+    }
+
+    /// A flange disc with a hub: fillets at the hub root (concave) and on the rim (convex), a
+    /// chamfered bore edge. Removing them gives the sharp solid back, as a solid.
+    #[test]
+    fn remove_rounds_restores_sharp_flange_corners() {
+        use crate::{FaceSurface, face_surface, remove_rounds};
+        let disc = cylinder(Vec3::ZERO, Vec3::Z, 30.0, 8.0).unwrap();
+        let hub = cylinder(Vec3::ZERO, Vec3::Z, 12.0, 20.0).unwrap();
+        let sharp = boolean(&disc, &hub, BoolOp::Union).unwrap().unwrap();
+        let sharp_vol = volume(&sharp);
+        // Concave round at the hub root, convex round on the rim.
+        let rounded = fillet(&sharp, &[Vec3::new(12.0, 0.0, 8.0), Vec3::new(30.0, 0.0, 8.0)], 2.0).unwrap();
+        assert!(rounded.face_count() > sharp.face_count());
+        let tori: Vec<usize> = (0..rounded.face_count()).filter(|i| matches!(face_surface(&rounded, *i), Some(FaceSurface::Torus { .. }))).collect();
+        assert!(tori.len() >= 2, "{tori:?}");
+        let back = remove_rounds(&rounded, &tori).unwrap();
+        assert_eq!(back.unmeshed_faces(), 0);
+        assert!((volume(&back) - sharp_vol).abs() < 1e-3 * sharp_vol, "{} vs {sharp_vol}", volume(&back));
+        assert!(back.contains(Vec3::new(29.9, 0.0, 7.9)));
+        assert!(!back.contains(Vec3::new(13.0, 0.0, 9.0)));
+        // Faces that are not rounds are refused.
+        assert!(remove_rounds(&sharp, &[0]).is_err());
     }
 }

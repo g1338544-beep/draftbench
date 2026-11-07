@@ -37,6 +37,9 @@ pub static COMMANDS: &[CommandSpec] = &[
              appearance?: library name (appearance.library) | color: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1, default 1); \
              pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (requires color/appearance and opacity 1); omitted/null uses legacy scalar shading. Neither appearance nor color (or color: null): clear, so the face follows its body, the body its component, the component its material",
     ),
+    CommandSpec::new("appearance.opacity", "Transparency", appearance_opacity).at("SOLID", "MODIFY").icon("appearance").params(
+        "opacity: 0–1 (1 = solid, 0.4 = see-through); bodies?: [names]; faces?: [{body, point: [x,y,z] on the face}]. Changes only the transparency of the picked bodies or faces and keeps their colour",
+    ),
     CommandSpec::new("appearance.library", "Appearance Library", appearance_library).icon("library")
         .noundo()
         .params("→ the built-in appearances (name, colour, opacity)"),
@@ -587,6 +590,46 @@ fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
         "components": comps,
         "appearance": look.as_ref().map(look_json),
     }))
+}
+
+/// Make bodies or faces see-through (or solid again), keeping their colour.
+fn appearance_opacity(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "appearance.opacity";
+    let o = p
+        .get("opacity")
+        .and_then(Value::as_f64)
+        .filter(|x| x.is_finite() && (0.0..=1.0).contains(x))
+        .ok_or_else(|| bad(cmd, "`opacity` must be a number from 0 to 1"))?;
+    let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+    let st = s.model.state();
+    let body_rgb = |mb: &solidcraft_doc::ModelBody| -> [u8; 3] {
+        s.doc.body_color(mb).map(|c| c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).unwrap_or([196, 199, 204])
+    };
+    let mut calls: Vec<Value> = Vec::new();
+    for b in string_list(p, "bodies") {
+        let mb = st.body(&b).ok_or_else(|| bad(cmd, format!("no body `{b}`")))?;
+        calls.push(json!({"bodies": [b], "color": hex(body_rgb(mb)), "opacity": o}));
+    }
+    if let Some(list) = p.get("faces") {
+        let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(|| bad(cmd, "`faces` must list {body, point}"))?;
+        for v in list {
+            let pt = v.get("point").and_then(crate::params::vec3).ok_or_else(|| bad(cmd, "each face needs a `point`"))?;
+            let name = v.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "each face needs its `body`"))?;
+            let mb = st.body(name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
+            let idx = solidcraft_doc::appearance::face_index_at(mb, pt);
+            let colour = idx
+                .and_then(|i| s.doc.face_colors(mb).into_iter().find(|(j, _)| *j == i).map(|(_, l)| l.color))
+                .unwrap_or_else(|| body_rgb(mb));
+            calls.push(json!({"faces": [{"body": name, "point": [pt.x, pt.y, pt.z]}], "color": hex(colour), "opacity": o}));
+        }
+    }
+    if calls.is_empty() {
+        return Err(bad(cmd, "give `bodies` or `faces`"));
+    }
+    for c in &calls {
+        appearance(s, c)?;
+    }
+    Ok(json!({"opacity": o, "changed": calls.len()}))
 }
 
 fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcraft_geom::Vec3) -> f64 {

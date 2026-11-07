@@ -449,6 +449,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         };
         item.children.push(original);
         if ["bodies", "components", "faces"].iter().any(|key| targets.get(key).and_then(Value::as_array).is_some_and(|v| !v.is_empty())) {
+            for (label, opacity) in [("Transparent 75%", 0.75), ("Transparent 50%", 0.5), ("Transparent 25%", 0.25), ("Solid (not transparent)", 1.0)] {
+                let mut params = targets.clone();
+                params["opacity"] = json!(opacity);
+                item.children.push(cmd(app, "appearance.opacity", label).with(params));
+            }
+            item.children.push(Item::sep());
             for look in crate::dialogs_appearance::builtin() {
                 let mut params = targets.clone();
                 params["appearance"] = json!(look.name);

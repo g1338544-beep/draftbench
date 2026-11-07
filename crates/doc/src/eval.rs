@@ -6199,9 +6199,13 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let left = if *heal {
                 match kernel::delete_faces(&mb.body, &all) {
                     Ok(b) => b,
-                    // Rounds or other curved neighbours can't be extended to close the gap: take the faces
-                    // off and leave the open surface, as Delete Face without healing does.
-                    Err(e) if e.to_string().contains("which is curved") => kernel::remove_faces(&mb.body, &all)?,
+                    // Rounds or other curved neighbours can't be extended to close the gap: give back
+                    // the sharp corner a fillet or chamfer replaced, and only if that is not possible
+                    // take the faces off and leave the open surface, as Delete Face without healing does.
+                    Err(e) if e.to_string().contains("which is curved") => match kernel::remove_rounds(&mb.body, &all) {
+                        Ok(b) => b,
+                        Err(_) => kernel::remove_faces(&mb.body, &all)?,
+                    },
                     Err(e) => return Err(e.into()),
                 }
             } else {
