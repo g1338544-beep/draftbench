@@ -157,7 +157,16 @@ fn collect(s: &Session, p: &Value, cmd: &str, same: bool) -> Result<(String, Vec
 fn same_size(s: &mut Session, p: &Value) -> Result<Value> {
     let (body, targets, picked) = collect(s, p, "face.same_size", true)?;
     let first = picked.first().ok_or_else(|| bad("face.same_size", "nothing picked"))?;
-    Ok(json!({"body": body, "count": targets.len(), "diameter": first.radius * 2.0, "internal": first.internal}))
+    // A point on the wall of each target (for highlighting them all in the dialog).
+    let points: Vec<Value> = targets
+        .iter()
+        .map(|r| {
+            let axis = r.axis.normalized().unwrap_or(Vec3::Z);
+            let side = axis.cross(if axis.z.abs() < 0.9 { Vec3::Z } else { Vec3::X }).normalized().unwrap_or(Vec3::X);
+            pt(r.point + axis * (0.5 * (r.start + r.end)) + side * r.radius)
+        })
+        .collect();
+    Ok(json!({"body": body, "count": targets.len(), "diameter": first.radius * 2.0, "internal": first.internal, "points": points}))
 }
 
 fn diameter(p: &Value, cmd: &str) -> Result<f64> {

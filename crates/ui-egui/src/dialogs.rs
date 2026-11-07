@@ -1080,12 +1080,40 @@ impl Dialog {
     }
 
     pub(crate) fn highlighted(&self, s: &Session) -> Vec<Sel> {
-        self.shell_faces(s).unwrap_or_else(|| self.items())
+        self.shell_faces(s).or_else(|| self.same_size_faces(s)).unwrap_or_else(|| self.items())
+    }
+
+    /// Resize Face: every hole or boss of the picked size lights up like the picked one, since all of
+    /// them change unless "Only the picked faces" is on.
+    fn same_size_faces(&self, s: &Session) -> Option<Vec<Sel>> {
+        if !matches!(self.kind, Kind::ResizeFace { .. }) || self.extra.get("only_picked").and_then(Value::as_bool) == Some(true) {
+            return None;
+        }
+        let points = self.extra.get("rz_points")?.as_array()?;
+        let name = self.extra.get("rz_body")?.as_str()?;
+        let state = s.world_state();
+        let body = state.body(name)?;
+        let mut out = self.items();
+        for p in points.iter().take(200) {
+            let c: Vec<f64> = p.as_array()?.iter().filter_map(Value::as_f64).collect();
+            let [x, y, z] = c[..] else { continue };
+            let point = Vec3::new(x, y, z);
+            if let Some(index) = solidcraft_engine::doc::appearance::face_index_at(body, point)
+                && !out.iter().any(|o| matches!(o, Sel::Face { body: b, index: i, .. } if b == name && *i == index))
+            {
+                out.push(Sel::Face { body: name.to_string(), index, point });
+            }
+        }
+        Some(out)
     }
 
     pub fn highlight_key(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         serde_json::to_string(&self.items()).unwrap_or_default().hash(&mut h);
+        if matches!(self.kind, Kind::ResizeFace { .. }) {
+            self.extra.get("rz_points").map(Value::to_string).unwrap_or_default().hash(&mut h);
+            self.extra.get("only_picked").and_then(Value::as_bool).hash(&mut h);
+        }
         self.active.hash(&mut h);
         h.finish()
     }

@@ -823,12 +823,15 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if d.extra.get("rz_key").and_then(Value::as_str) != Some(key.as_str()) {
                 d.extra.insert("rz_key".into(), json!(key));
                 d.extra.remove("rz_count");
+                d.extra.remove("rz_points");
                 if let Some(first) = points.first()
                     && let Ok(r) = app.session.execute("face.same_size", &json!({"face": first}))
                 {
                     let count = r.get("count").and_then(Value::as_u64).unwrap_or(0);
                     let dia = r.get("diameter").and_then(Value::as_f64).unwrap_or(0.0);
                     d.extra.insert("rz_count".into(), json!(count));
+                    d.extra.insert("rz_points".into(), r.get("points").cloned().unwrap_or(json!([])));
+                    d.extra.insert("rz_body".into(), r.get("body").cloned().unwrap_or(json!("")));
                     d.extra.insert("rz_internal".into(), json!(r.get("internal").and_then(Value::as_bool).unwrap_or(true)));
                     d.extra.insert("rz_diameter".into(), json!(dia));
                     let shown = format!("{:.3}", dia);
