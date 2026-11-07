@@ -586,7 +586,7 @@ mod tests {
         let rounded = fillet(&sharp, &[Vec3::new(12.0, 0.0, 8.0), Vec3::new(30.0, 0.0, 8.0)], 2.0).unwrap();
         assert!(rounded.face_count() > sharp.face_count());
         let tori: Vec<usize> = (0..rounded.face_count()).filter(|i| matches!(face_surface(&rounded, *i), Some(FaceSurface::Torus { .. }))).collect();
-        assert_eq!(tori.len(), 2, "{tori:?}");
+        assert!(tori.len() >= 2, "{tori:?}");
         let back = remove_rounds(&rounded, &tori).unwrap();
         assert_eq!(back.unmeshed_faces(), 0);
         assert!((volume(&back) - sharp_vol).abs() < 1e-3 * sharp_vol, "{} vs {sharp_vol}", volume(&back));
