@@ -214,7 +214,8 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
             p["angle"] = json!(angle);
         }
         POINT_TO_POINT => {
-            let (from, to) = (need_point(1, "the point to move from")?, need_point(2, "the point to move to")?);
+            let from = point_of(app, d, 1).ok_or("select the point to move from first")?;
+            let to = point_of(app, d, 2).ok_or("select the point to move to first")?;
             p["translate"] = num(to - from);
         }
         _ => {
@@ -229,6 +230,52 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     Ok(p)
 }
 
+/// A From / To point typed in the rows (X, Y, Z from the origin), when there is one.
+fn typed_point(app: &SolveApp, d: &Dialog, key: &str) -> Option<Vec3> {
+    let a = d.extra.get(key)?.as_array()?;
+    let v: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
+    let [x, y, z] = v[..] else { return None };
+    Some(Vec3::new(len(app, x).ok()?, len(app, y).ok()?, len(app, z).ok()?))
+}
+
+/// The From (1) or To (2) point of a Point to Point move: the numbers typed, else the pick.
+fn point_of(app: &SolveApp, d: &Dialog, i: usize) -> Option<Vec3> {
+    typed_point(app, d, if i == 1 { "from_xyz" } else { "to_xyz" }).or_else(|| sel_point(app, items(d, i).first()))
+}
+
+/// Point to Point: the X, Y, Z of the picked From and To points, from the origin, as numbers that can be
+/// changed; the move then goes to the numbers typed. A new pick replaces the numbers.
+pub fn point_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    let mut enter = false;
+    for (i, name, key) in [(1usize, "From", "from_xyz"), (2, "To", "to_xyz")] {
+        let pick = sel_point(app, items(d, i).first());
+        let sig_key = format!("{key}_pick");
+        let sig = format!("{pick:?}");
+        if d.extra.get(&sig_key).and_then(Value::as_str) != Some(sig.as_str()) {
+            d.extra.insert(sig_key, json!(sig));
+            d.extra.remove(key);
+        }
+        let mut vals: [String; 3] = match d.extra.get(key).and_then(Value::as_array) {
+            Some(a) if a.len() == 3 => {
+                let t = |k: usize| a.get(k).and_then(Value::as_str).unwrap_or("0 mm").to_string();
+                [t(0), t(1), t(2)]
+            }
+            _ => match pick {
+                Some(p) => [mm(p.x), mm(p.y), mm(p.z)],
+                None => [mm(0.0), mm(0.0), mm(0.0)],
+            },
+        };
+        let before = vals.clone();
+        for (axis, v) in ["X", "Y", "Z"].iter().zip(vals.iter_mut()) {
+            enter |= expr_row(ui, &format!("{name} {axis}"), v);
+        }
+        if vals != before {
+            d.extra.insert(key.into(), json!(vals));
+        }
+    }
+    enter
+}
+
 /// The points picked for From, To (or Pivot, Point) as the move reads them: the centre of a
 /// circle edge, the middle of a face, a vertex. Drawn as dots so the pick can be checked.
 pub fn point_markers(app: &SolveApp, d: &Dialog) -> Vec<(Vec3, &'static str)> {
@@ -239,7 +286,11 @@ pub fn point_markers(app: &SolveApp, d: &Dialog) -> Vec<(Vec3, &'static str)> {
         FREE => &["Pivot"],
         _ => &[],
     };
-    names.iter().enumerate().filter_map(|(k, n)| sel_point(app, items(d, k + 1).first()).map(|p| (p, *n))).collect()
+    names
+        .iter()
+        .enumerate()
+        .filter_map(|(k, n)| if *mode == POINT_TO_POINT { point_of(app, d, k + 1) } else { sel_point(app, items(d, k + 1).first()) }.map(|p| (p, *n)))
+        .collect()
 }
 
 /// Where a click under the pointer would put the From / To point: the centre of a circle edge,

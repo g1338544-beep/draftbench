@@ -634,6 +634,9 @@ fn extra_options(ui: &mut egui::Ui, id: &str, extra: &mut serde_json::Map<String
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
+    if matches!(d.kind, Kind::Move { mode, .. } if mode == crate::dialogs_move::POINT_TO_POINT) {
+        enter |= crate::dialogs_move::point_rows(app, d, ui);
+    }
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
