@@ -24,6 +24,7 @@ thread_local! {
     /// A triad drag: axis (None: in the sketch plane), undo depth, grab offset.
     static DRAG: RefCell<Option<(Option<Vec3>, usize, Vec3)>> = const { RefCell::new(None) };
     /// Where the cursor would put a point (for the rubber band), and its snap label.
+    static ARC: RefCell<(bool, bool, Option<Vec3>)> = const { RefCell::new((false, false, None)) };
     static HOVER: RefCell<Option<(Vec3, &'static str)>> = const { RefCell::new(None) };
 }
 
@@ -112,6 +113,9 @@ fn chain() -> Vec<Vec3> {
 }
 
 fn set_chain(cmd: Option<&'static str>, pts: Vec<Vec3>) {
+    if pts.is_empty() {
+        ARC.with(|a| *a.borrow_mut() = (false, false, None));
+    }
     CHAIN.with(|c| *c.borrow_mut() = (cmd, pts));
 }
 
@@ -119,6 +123,35 @@ fn set_chain(cmd: Option<&'static str>, pts: Vec<Vec3>) {
 pub fn on_hover(app: &SolveApp, proj: &Proj, pos: Pos2) {
     let h = if app.tool.as_ref().is_some_and(|t| takes(t.cmd)) && active(app) { point_at(app, proj, pos) } else { None };
     HOVER.with(|x| *x.borrow_mut() = h);
+    // Same as the flat Line tool: back on the chain's end once makes the next segment a tangent arc, again a line.
+    if app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.line")
+        && let Some(last) = chain().last().copied()
+        && let Some(at) = proj.to_screen(last)
+    {
+        ARC.with(|a| {
+            let mut a = a.borrow_mut();
+            if a.2.is_none() {
+                return;
+            }
+            let d = at.distance(pos);
+            if d > 28.0 {
+                a.1 = true;
+            } else if d < 9.0 && a.1 {
+                a.1 = false;
+                a.0 = !a.0;
+            }
+        });
+    }
+}
+
+/// A tangent arc from `s` leaving along `t` to `e` in 3D (in the plane of `t` and the chord): points along it and its
+/// arrival direction.
+fn arc3d(s: Vec3, t: Vec3, e: Vec3) -> Option<(Vec<Vec3>, Vec3)> {
+    let d = e - s;
+    let dp = d - t * t.dot(d);
+    let n = dp.normalized()?;
+    let (pts, t1) = crate::tools::tangent_arc(Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(d.dot(t), d.dot(n)))?;
+    Some((pts.into_iter().map(|q| s + t * q.x + n * q.y).collect(), (t * t1.x + n * t1.y).normalized()?))
 }
 
 /// A click while a drawing tool is active in a 3D sketch (true: handled here).
@@ -140,15 +173,29 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
         }
         "sketch.line" => {
             if let Some(a) = chain().last().copied() {
-                let r = match (on_plane(app, a), on_plane(app, p)) {
+                let (arc_on, _, t0) = ARC.with(|x| *x.borrow());
+                let arc = if arc_on { t0.and_then(|t0| arc3d(a, t0, p)) } else { None };
+                let next_tangent = match &arc {
+                    Some((_, t1)) => Some(*t1),
+                    None => (p - a).normalized(),
+                };
+                let r = if let Some((pts, _)) = &arc {
+                    let q: Vec<Value> = pts.iter().step_by(3).map(|v| json!([v.x, v.y, v.z])).collect();
+                    app.run("sketch.spline3d", json!({ "points": q }))
+                } else {
+                    match (on_plane(app, a), on_plane(app, p)) {
                     (Some(qa), Some(qb)) => app.run("sketch.line", json!({"points": [[qa.x, qa.y], [qb.x, qb.y]], "infer": true})),
                     _ => app.run("sketch.line3d", json!({"points": [[a.x, a.y, a.z], [p.x, p.y, p.z]]})),
+                    }
                 };
                 report(app, r);
+                ARC.with(|x| *x.borrow_mut() = (false, false, next_tangent));
             }
             let mut c = chain();
             c.push(p);
+            let keep = ARC.with(|x| *x.borrow());
             set_chain(Some(tool.cmd), c);
+            ARC.with(|x| *x.borrow_mut() = keep);
         }
         _ => {
             let mut c = chain();
@@ -225,7 +272,13 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             tk.text_dim,
         );
     }
-    if t.cmd == "sketch.spline.fit_point" && all.len() >= 2 {
+    let (arc_on, _, t0) = ARC.with(|x| *x.borrow());
+    let arc = (t.cmd == "sketch.line" && arc_on).then_some(()).and_then(|()| Some((pts.last().copied()?, t0?, hover?.0))).and_then(|(a, t0, h)| arc3d(a, t0, h));
+    if let Some((curve, _)) = arc {
+        let mut poly: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
+        poly.extend(curve.into_iter().filter_map(|p| proj.to_screen(p)));
+        painter.add(Shape::line(poly, stroke));
+    } else if t.cmd == "sketch.spline.fit_point" && all.len() >= 2 {
         let mut w: Vec<Vec3> = pts.clone();
         if let Some((h, _)) = hover {
             w.push(h);
