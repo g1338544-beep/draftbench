@@ -34,10 +34,16 @@ crate::dialog_descriptor::dialog_descriptors! {
             symmetric: bool = false => *symmetric,
             operation: usize = 0 => op_index(operation),
         } => json!({"thickness": thickness, "symmetric": symmetric, "operation": OPS.get(*operation).copied().unwrap_or("new")});
-        Extend("surface.extend", "EXTEND", [("Edges", EDGES, true)],
-            FeatureKind::SurfaceExtend { distance, .. }) {
+        Extend("surface.extend", "EXTEND", [("Edges", EDGES, true), ("Up to (point, face or plane)", VERTICES | FACES | PLANES | ORIGIN, false)],
+            FeatureKind::SurfaceExtend { distance, mode, up_to, .. }) {
             distance: String = "10 mm".into() => distance.to_string(),
-        } => json!({"distance": distance});
+            mode: usize = 0 => match mode {
+                solidcraft_engine::doc::ExtendMode::Natural => 0,
+                solidcraft_engine::doc::ExtendMode::Tangent => 1,
+                solidcraft_engine::doc::ExtendMode::Curvature => 2,
+            },
+            end: usize = 0 => if up_to.is_some() { 2 } else { 0 },
+        } => json!({"distance": distance, "mode": ["natural", "tangent", "curvature"].get((*mode).min(2)).copied().unwrap_or("natural")});
         ; custom {
             /// `direction`: an index into [`EXTRUDE_SIDES`].
             Extrude {
@@ -130,7 +136,7 @@ impl Surf {
     pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
         Some(match self {
             Surf::Thicken { thickness, .. } => ("Thickness", ValueKind::Length, thickness),
-            Surf::Extend { distance } | Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } => {
+            Surf::Extend { distance, .. } | Surf::Extrude { distance, .. } | Surf::Offset { distance, .. } | Surf::Ruled { distance, .. } => {
                 ("Distance", ValueKind::Length, distance)
             }
             Surf::Revolve { angle, .. } => ("Angle", ValueKind::Angle, angle),
@@ -236,8 +242,14 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             });
             choice_row(ui, "Operation", "th_op", operation, &OP_LABELS);
         }
-        Surf::Extend { distance } => {
-            enter |= expr_row(ui, "Distance", distance);
+        Surf::Extend { distance, mode, end } => {
+            choice_row(ui, "End condition", "ex_end", end, &["Distance", "Up to point", "Up to surface"]);
+            if *end == 0 {
+                enter |= expr_row(ui, "Distance", distance);
+            } else {
+                hint_row(ui, if *end == 1 { "Pick the point the surface should reach" } else { "Pick the face or plane the surface should reach" });
+            }
+            choice_row(ui, "Extension type", "ex_mode", mode, &["Same surface", "Linear", "Curvature"]);
         }
         Surf::Revolve { angle, symmetric, .. } => {
             enter |= expr_row(ui, "Angle", angle);
@@ -708,12 +720,44 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             need(0, "the surfaces to thicken")?;
             ("surface.thicken", json!({"bodies": items(inputs, 0).body_names()}))
         }
-        Surf::Extend { .. } => {
+        Surf::Extend { end, .. } => {
             need(0, "the edges to extend")?;
             let body =
                 items(inputs, 0).iter().find_map(|x| if let Sel::Edge { body, .. } = x { Some(body.clone()) } else { None }).unwrap_or_default();
             let edges: Vec<Value> = items(inputs, 0).edge_points().into_iter().map(pt).collect();
-            ("surface.extend", json!({"body": body, "edges": edges}))
+            let mut p = json!({"body": body, "edges": edges});
+            match *end {
+                1 => {
+                    // Up to a point: as far as the point is from the picked edges.
+                    let Some(Sel::Vertex { point, .. }) = items(inputs, 1).first() else { return Err("pick the point to extend up to".into()) };
+                    let st = app.session.world_state();
+                    let mut best: Option<f64> = None;
+                    for x in items(inputs, 0) {
+                        if let Sel::Edge { body, index, .. } = x
+                            && let Some(b) = st.body(body)
+                            && let Some(e) = b.mesh().edges.get(*index)
+                        {
+                            for w in e.windows(2) {
+                                if let [a, c] = w {
+                                    let d = *c - *a;
+                                    let len2 = d.dot(d);
+                                    let t = if len2 > 1e-18 { ((*point - *a).dot(d) / len2).clamp(0.0, 1.0) } else { 0.0 };
+                                    let dist = (*point - (*a + d * t)).len();
+                                    best = Some(best.map_or(dist, |b| b.min(dist)));
+                                }
+                            }
+                        }
+                    }
+                    let dist = best.filter(|d| d.is_finite() && *d > 1e-9).ok_or("the point is on the edge: pick one farther away")?;
+                    p["distance"] = json!(format!("{dist:.4} mm"));
+                }
+                2 => {
+                    let (_, t) = tool(app, items(inputs, 1).first())?;
+                    p["up_to"] = t;
+                }
+                _ => {}
+            }
+            ("surface.extend", p)
         }
         Surf::Trim { extend, stitch, direction, remove } => {
             need(0, "the surface to trim")?;
