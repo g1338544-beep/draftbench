@@ -43,7 +43,7 @@ crate::dialog_descriptor::dialog_descriptors! {
                 solidcraft_engine::doc::ExtendMode::Curvature => 2,
             },
             end: usize = 0 => if up_to.is_some() { 2 } else { 0 },
-        } => json!({"distance": distance, "mode": ["natural", "tangent", "curvature"].get((*mode).min(2)).copied().unwrap_or("natural")});
+        } => json!({"distance": distance, "mode": EXTEND_MODES.get((*mode).min(2)).copied().unwrap_or("natural")});
         ; custom {
             /// `direction`: an index into [`EXTRUDE_SIDES`].
             Extrude {
@@ -162,6 +162,8 @@ const BOUNDARY_OPS: [&str; 2] = ["New Body", "Join"];
 const UNTRIM_HOLES: [&str; 3] = ["All", "Picked", "None"];
 
 /// The sides a surface extrude goes to (labels, and the `direction` parameter).
+/// Extend surface modes, as `surface.extend` names them.
+const EXTEND_MODES: [&str; 3] = ["natural", "tangent", "curvature"];
 const EXTRUDE_SIDES: [(&str, &str); 3] = [("One Side", "positive"), ("Symmetric", "symmetric"), ("Flipped", "negative")];
 
 /// The ways a ruled surface leaves its edges (labels, and the `mode` parameter).
