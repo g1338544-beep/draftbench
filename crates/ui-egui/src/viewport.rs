@@ -586,7 +586,7 @@ struct BodyDraw {
 }
 
 /// Whether shaded bodies also show their tangent (smooth) edges; set from the View menu.
-static TANGENT_EDGES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static TANGENT_EDGES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl BodyDraw {
     /// Everything [`BodyDraw::build`] reads.
@@ -4178,7 +4178,7 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
             crate::prefs::graphics_preset_selector(app, ui);
             ui.separator();
             crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
-            crate::ui_kit::checkbox(ui, "Tangent edges (show every edge)", &mut app.ui.tangent_edges);
+            crate::ui_kit::checkbox(ui, "Tangent edges (show seams between smooth faces)", &mut app.ui.tangent_edges);
             crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ground shadow"), &mut app.ui.ground_shadow);
             crate::prefs::ambient_occlusion_checkbox(app, ui, "Ambient occlusion");
             ui.separator();

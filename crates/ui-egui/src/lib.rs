@@ -309,7 +309,7 @@ impl Default for UiState {
             show_browser: true,
             show_timeline: true,
             show_grid: true,
-            tangent_edges: true,
+            tangent_edges: false,
             show_origin: true,
             perspective: false,
             show_sketches: true,
