@@ -19,11 +19,11 @@ jobs:
       - name: Debug - bodies after the first steps
         run: |
           mkdir -p out
-          for n in 2 4 5; do
+          for n in 11 18 19 23; do
             LIMIT=$n python3 examples/ev/car.py out/prefix.json
             ./target/release/solidcraft-cli run out/prefix.json --save out/prefix$n.solidcraft --allow-errors 2>&1 | tee -a out/run.log || true
             ./target/release/solidcraft-cli eval out/prefix$n.solidcraft --json-out out/prefix$n-eval.json 2>&1 | tee -a out/run.log || true
-            python3 -c "import json;d=json.load(open('out/prefix$n-eval.json'));print('STEP $n bodies:',[ (b.get('name'),b.get('volume')) for b in d['bodies']], [ (t['name'],t['error']) for t in d['timeline']])" 2>&1 | tee -a out/run.log || true
+            python3 -c "import json;d=json.load(open('out/prefix$n-eval.json'));print('STEP $n bodies:',[ (b.get('name'),b.get('volume_mm3')) for b in d['bodies']], d['bodies'][:1], [ (t['name'],t['error']) for t in d['timeline']])" 2>&1 | tee -a out/run.log || true
           done
       - name: Flange drawing - do the centre lines come out?
         run: |
