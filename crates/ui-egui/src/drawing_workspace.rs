@@ -5373,7 +5373,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             if let Some(h) = hover {
-                let (at, guides) = (step_snap(h, last, tol, ui.input(|i| i.modifiers.alt)), Vec::<[Pos2; 2]>::new());
+                let at = step_snap(h, last, tol, ui.input(|i| i.modifiers.alt));
+                // Guides only: where hole centres line up with the pointer, and the level or plumb line
+                // through the previous point while the step runs square to it.
+                let (_, mut guides) = section_snap(sheet, at, None, tol);
+                if let Some(l) = last {
+                    if (at.y - l.y).abs() < 1e-4 {
+                        guides.push([pos2(l.x.min(at.x) - 30.0, l.y), pos2(l.x.max(at.x) + 30.0, l.y)]);
+                    } else if (at.x - l.x).abs() < 1e-4 {
+                        guides.push([pos2(l.x, l.y.min(at.y) - 30.0), pos2(l.x, l.y.max(at.y) + 30.0)]);
+                    }
+                }
                 for g in &guides {
                     painter.line_segment([map(g[0]), map(g[1])], Stroke::new(1.0, accent.gamma_multiply(0.6)));
                 }
