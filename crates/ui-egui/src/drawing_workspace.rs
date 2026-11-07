@@ -1476,6 +1476,31 @@ fn add_view(app: &mut SolveApp, view: usize) {
 }
 
 /// The chosen view alone on a blank sheet, for the ghost that follows the pointer while the Base View is open.
+/// Where a section view lies for a cutting line running along `d` (sheet mm) across a view with the centre
+/// and size `(x, y, w, h)`: straight across the line from it. Right of the view for an up-down line, below it
+/// for a left-right one, and for a slanted line along its perpendicular, so the view follows the slant.
+fn section_spot(d: egui::Vec2, (x, y, w, h): (f32, f32, f32, f32)) -> Pos2 {
+    let len = d.length().max(1e-6);
+    let (ux, uy) = (d.x / len, d.y / len);
+    if ux.abs().min(uy.abs()) <= 0.17 {
+        return if d.y.abs() >= d.x.abs() { pos2(x + w + 45.0, y) } else { pos2(x, y - h - 45.0) };
+    }
+    // The perpendicular on the right (and below) side.
+    let (mut nx, mut ny) = (-uy, ux);
+    if nx < 0.0 || (nx == 0.0 && ny > 0.0) {
+        nx = -nx;
+        ny = -ny;
+    }
+    let reach = nx.abs() * w / 2.0 + ny.abs() * h / 2.0 + 45.0;
+    pos2(x + nx * reach, y + ny * reach)
+}
+
+/// Whether a cutting line runs (nearly) along a sheet axis: only then the view beside a plan is turned a quarter.
+fn along_axis(d: egui::Vec2) -> bool {
+    let len = d.length().max(1e-6);
+    (d.x / len).abs().min((d.y / len).abs()) <= 0.17
+}
+
 /// The quarter turn of a section view placed beside a Top or Bottom view: as in a folded drawing,
 /// the view beside a plan runs its depth along the sheet's horizontal, so the part stands turned
 /// (the neck points left for a view on the right). A view below or above keeps its Z up.
@@ -5306,7 +5331,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             // Under the view it is cut from, or the nearest free place: never on top of another view.
                             let d = b - a;
                             // The view lies across the cutting line: right of the view for an up-down line, below it for a left-right one.
-                            let want = if d.y.abs() >= d.x.abs() { pos2(bx.1 + bx.3 + 45.0, bx.2) } else { pos2(bx.1, bx.2 - bx.4 - 45.0) };
+                            let want = section_spot(d, (bx.1, bx.2, bx.3, bx.4));
                             let at = free_spot(sheet, want, (bx.3, bx.4));
                             sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view)));
                         }
@@ -5383,7 +5408,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let path: Vec<f32> = pts.iter().flat_map(|q| model(*q)).collect();
                             // The longest piece sets the direction of the cut: the view lies across it.
                             let long = pts.windows(2).filter_map(|w| if let [p, q] = w { Some(*q - *p) } else { None }).max_by(|u, v| u.length().total_cmp(&v.length())).unwrap_or_default();
-                            let want = if long.y.abs() >= long.x.abs() { pos2(bx.1 + bx.3 + 45.0, bx.2) } else { pos2(bx.1, bx.2 - bx.4 - 45.0) };
+                            let want = section_spot(long, (bx.1, bx.2, bx.3, bx.4));
                             let at = free_spot(sheet, want, (bx.3, bx.4));
                             sec_path_new = Some((path, k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view)));
                         }
@@ -5896,7 +5921,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         begin(app);
     }
     if let Some((line, k, x, y, from)) = sec_new {
-        let rot = section_quarter(&app.drawing.placed, from, (x, y));
+        let rot = if along_axis(egui::vec2(line[2] - line[0], line[3] - line[1])) { section_quarter(&app.drawing.placed, from, (x, y)) } else { 0 };
         app.drawing.placed.push(PlacedView {
             view: from,
             x: f64::from(x),
