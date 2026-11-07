@@ -3686,23 +3686,26 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let body = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
             // Trim Body with a whole surface body of any shape: the surface is thickened across the part that
             // goes (as thick as the two bodies are big) and cut out, so the cut follows the surface exactly.
-            if let Some(Sel::Body { name }) = sels(d, 1).first() {
+            // A face of a surface body counts as the whole surface (the cut follows the surface, not one face's extension).
+            let surface_tool: Option<String> = match sels(d, 1).first() {
+                Some(Sel::Body { name }) => Some(name.to_string()),
+                Some(Sel::Face { body: b, .. }) if s.world_state().body(b).is_some_and(|x| x.body.is_surface()) => Some(b.to_string()),
+                _ => None,
+            };
+            if let Some(name) = &surface_tool {
                 let st = s.world_state();
                 let tool = st.body(name).ok_or("pick a surface body as the trimming tool")?;
                 if !tool.body.is_surface() {
                     return Err("pick a surface body, a plane or a face as the trimming tool".into());
                 }
-                let target = st.body(&body).ok_or("pick the body to trim")?;
-                let reach = (tool.mesh().bounds().union(&target.mesh().bounds())).max - (tool.mesh().bounds().union(&target.mesh().bounds())).min;
-                let thick = (reach.len() * 1.5).max(1.0);
+                st.body(&body).ok_or("pick the body to trim")?;
                 // The surface's normal side goes; Reverse Direction trims the other side.
-                let signed = if d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false) { -thick } else { thick };
+                let reverse = d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false);
                 if !d.extra.get("trim").and_then(Value::as_bool).unwrap_or(false) {
                     // Split Body: two bodies, one each side of the surface.
-                    let reverse = d.extra.get("reverse").and_then(Value::as_bool).unwrap_or(false);
                     return Ok(vec![("solid.split_by_surface".into(), json!({"body": body, "surface": name, "reverse": reverse}))]);
                 }
-                return Ok(vec![("surface.thicken".into(), json!({"bodies": [name], "thickness": signed, "operation": "cut", "targets": [body]}))]);
+                return Ok(vec![("solid.trim_by_surface".into(), json!({"body": body, "surface": name, "reverse": reverse}))]);
             }
             // A plane, a planar face's plane, or any other face (its surface extended).
             let p = if let Some(axis) = wcs_axis {
