@@ -247,7 +247,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             if *end == 0 {
                 enter |= expr_row(ui, "Distance", distance);
             } else {
-                hint_row(ui, if *end == 1 { "Pick the point the surface should reach" } else { "Pick the face or plane the surface should reach" });
+                ui.small(if *end == 1 { "Pick the point the surface should reach" } else { "Pick the face or plane the surface should reach" });
             }
             choice_row(ui, "Extension type", "ex_mode", mode, &["Same surface", "Linear", "Curvature"]);
         }
