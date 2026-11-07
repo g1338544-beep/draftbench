@@ -356,6 +356,46 @@ fn manual(
             segments.extend(section_closing.iter().map(|(a, b)| (to_sheet(*a), to_sheet(*b))));
             hatch(&segments, 3.0, &mut entities);
         }
+        // A straight section shows the axes of the holes that lie in its cutting plane (the bore, holes cut
+        // through their middle) as centre lines, turned with the view like the rest of its drawing.
+        if let Some((sec_axis, _)) = section
+            && section_path.is_none()
+            && !axes.is_empty()
+        {
+            let (n, off, ang) = match line_plane {
+                Some((n, o, a)) => (n, o, a),
+                None => {
+                    let n = match sec_axis {
+                        0 => Vec3::new(1.0, 0.0, 0.0),
+                        1 => Vec3::new(0.0, 1.0, 0.0),
+                        _ => Vec3::new(0.0, 0.0, 1.0),
+                    };
+                    (n, section_at, custom.unwrap_or_else(|| view.angles()))
+                }
+            };
+            let cam = Camera { target: Vec3::ZERO, yaw: ang.0, pitch: ang.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
+            let (rv, uv, _) = cam.basis();
+            let turned = |q: Vec2| match quarter % 4 {
+                1 => Vec2::new(-q.y, q.x),
+                2 => Vec2::new(-q.x, -q.y),
+                3 => Vec2::new(q.y, -q.x),
+                _ => q,
+            };
+            for (p0, p1) in axes.iter().take(200) {
+                if (n.dot(*p0) - off).abs() > 0.05 || (n.dot(*p1) - off).abs() > 0.05 {
+                    continue;
+                }
+                let a = to_sheet(turned(Vec2::new(p0.dot(rv), p0.dot(uv))));
+                let b = to_sheet(turned(Vec2::new(p1.dot(rv), p1.dot(uv))));
+                let d = Vec2::new(b.x - a.x, b.y - a.y);
+                let len = (d.x * d.x + d.y * d.y).sqrt();
+                if len.is_finite() && len > 1.0 {
+                    let u = Vec2::new(d.x / len * 3.0, d.y / len * 3.0);
+                    line("CENTER", Vec2::new(a.x - u.x, a.y - u.y), Vec2::new(b.x + u.x, b.y + u.y), &mut entities);
+                    any_centre = true;
+                }
+            }
+        }
         let centres_on = section.is_none() && detail.is_none() && quarter == 0 && item.get("center").and_then(Value::as_bool).unwrap_or(true);
         if centres_on && view != StandardView::Iso {
             let here = circles(&all.lines, true);
