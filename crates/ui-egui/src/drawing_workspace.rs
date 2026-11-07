@@ -3253,6 +3253,9 @@ pub fn enter(app: &mut SolveApp) -> Result<(), String> {
     app.drawing.design_camera = Some((app.cam, app.ui.perspective));
     app.ui.tab = "DRAWING".into();
     let design = app.session.doc.name.clone();
+    // Restoring the design's pages empties the sheet on screen: keep it aside, it is put back below.
+    let kept = app.drawing.sheet.take();
+    let made = kept.is_some() && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == design;
     app.drawing.switch_owner(&design);
     app.drawing.restore_design(&design);
     if app.drawing.title.is_empty() {
@@ -3261,8 +3264,8 @@ pub fn enter(app: &mut SolveApp) -> Result<(), String> {
     app.drawing.setup = app.drawing.placed.is_empty() && app.drawing.pages.len() <= 1;
     // The sheet already made for this design stays as it was, even if the 3D model changed since:
     // Update (the ribbon button) brings it up to date. Only a drawing never made is computed now.
-    let made = app.drawing.sheet.is_some() && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == design;
     if made {
+        app.drawing.sheet = kept;
         if app.drawing.drawn_rev != app.session.revision {
             app.set_status("The 3D model changed since this drawing was made. Press Update to refresh it.".to_string(), false);
         }
