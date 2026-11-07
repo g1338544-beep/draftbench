@@ -32,6 +32,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.project", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.intersect", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.include_3d", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "sketch.convert_entities", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.fit_curves_to_section", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.isoparametric_curve", scopes: NONE, bindings: ISOCURVE_ALT, audit: Audit::Implemented },
     ToolModifiers { tool: "inspect.curvature_comb", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -564,7 +565,7 @@ pub fn takes(id: &str, hit: &Hit) -> bool {
 
 fn mode(id: &str) -> Option<Mode> {
     Some(match id {
-        "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
+        "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.convert_entities" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
         "inspect.curvature_comb" | "canvas.insert" | "canvas.decal" => Mode::ModelRef,
         "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.isocurve" | "inspect.continuity" => Mode::ModelRef,
         "sketch.trim" | "sketch.extend" | "sketch.break" => Mode::CurveAt,
@@ -612,6 +613,7 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
             "sketch.intersect" => "Intersect: click faces or edges to cut with the sketch plane",
             "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
+            "sketch.convert_entities" => "Convert Entities: click model edges to copy them into the 3D sketch where they are",
             "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
             "sketch.isoparametric_curve" => "Isoparametric Curve: click a point on a face (Shift: along)",
             "inspect.curvature_comb" => "Curvature comb: click sketch curves or model edges",

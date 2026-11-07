@@ -1600,3 +1600,28 @@ fn budget_limited_cursor_progress_requests_a_frame_with_the_same_target() {
     }
     assert!(exercised, "exercise continuation after budget-limited progress");
 }
+
+#[test]
+fn convert_entities_copies_a_model_edge_into_the_3d_sketch_in_place() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let (a, b) = {
+        let st = s.model.state();
+        let mesh = st.bodies[0].mesh();
+        let e = mesh.edges.iter().enumerate().find(|(i, e)| e.len() >= 2 && !mesh.seams.get(*i).copied().unwrap_or(false)).expect("an edge").1;
+        (e[0], e[e.len() - 1])
+    };
+    let mid = (a + b) * 0.5;
+    let edge = json!({"edge": [mid.x, mid.y, mid.z]});
+    assert!(s.execute("sketch.convert_entities", &json!({"refs": [edge]})).is_err(), "needs 3D Sketch on");
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    assert!(s.execute("sketch.convert_entities", &json!({"refs": []})).is_err());
+    assert!(s.execute("sketch.convert_entities", &json!({"refs": [{"edge": [5000, 5000, 5000]}]})).is_err());
+    let r = run(&mut s, "sketch.convert_entities", json!({"refs": [edge]}));
+    let ids = curve_ids(&r);
+    assert_eq!(ids.len(), 1);
+    let sk = sketch(&s);
+    let fit = &sk.wires[sk.wire_index(&ids[0]).expect("wire")].fit;
+    assert!(fit.first().expect("p").dist(a) < 1e-6 && fit.last().expect("p").dist(b) < 1e-6, "the copy lies where the edge is");
+}

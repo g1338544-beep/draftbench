@@ -259,6 +259,7 @@ pub const SECTIONS: &[Section] = &[
             "sketch.project",
             "sketch.intersect",
             "sketch.include_3d",
+            "sketch.convert_entities",
             "sketch.intersection_curve",
             "sketch.spun_profile",
             "sketch.isoparametric_curve",

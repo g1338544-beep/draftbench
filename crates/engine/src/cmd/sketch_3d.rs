@@ -12,6 +12,14 @@ use crate::params::{bad, req_vec3, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("sketch.convert_entities", "Convert Entities", convert_entities)
+        .at("SKETCH", "CREATE")
+        .icon("sketch_copy3d")
+        .enabled(in_sketch)
+        .params(concat!(
+            "refs: [{edge: [x,y,z] a point on the model edge, body?}…] (1 to 100): copies each model edge into the 3D sketch as a drawn 3D curve exactly where the edge is (needs 3D Sketch on)",
+            created_doc!()
+        )),
     CommandSpec::new("sketch.create3d", "3D Sketch", create3d)
         .icon("sketch")
         .params("(none) opens a 3D sketch: no plane to pick, lines, splines and points are placed freely in the 3D view (its drawing plane is XY)"),
@@ -89,6 +97,52 @@ fn create3d(s: &mut Session, _p: &Value) -> Result<Value> {
     let out = super::sketch::create_sketch(s, &json!({"plane": "XY"}))?;
     super::sketch::sketch_options(s, &json!({"sketch_3d": true}))?;
     Ok(out)
+}
+
+fn convert_entities(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.convert_entities";
+    let refs = p.get("refs").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`refs` must list model edges"))?;
+    if refs.is_empty() || refs.len() > 100 {
+        return Err(bad(cmd, "`refs` must list 1 to 100 model edges"));
+    }
+    let inverse = inverse_owner_frame(s, p, cmd)?;
+    let mut curves: Vec<Vec<Vec3>> = Vec::new();
+    {
+        let st = s.model.state();
+        for r in refs {
+            let at = r.get("edge").and_then(vec3).filter(|a| a.is_finite()).ok_or_else(|| bad(cmd, "each ref needs `edge`: [x,y,z]"))?;
+            let named = r.get("body").and_then(Value::as_str).filter(|n| !n.is_empty());
+            let mut best: Option<(f64, Vec<Vec3>)> = None;
+            for b in st.bodies.iter().filter(|b| named.is_none_or(|n| b.name == n)) {
+                let mesh = b.mesh();
+                let tol = (b.body.size() * 0.02).max(1.0);
+                for (i, e) in mesh.edges.iter().enumerate() {
+                    if mesh.seams.get(i).copied().unwrap_or(false) || e.len() < 2 {
+                        continue;
+                    }
+                    let d = e.windows(2).filter_map(|w| Some(at.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
+                    if d <= tol && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                        best = Some((d, e.clone()));
+                    }
+                }
+            }
+            let (_, pts) = best.ok_or_else(|| bad(cmd, format!("no model edge at {at:?}")))?;
+            // Long polylines are thinned, keeping both ends.
+            let step = pts.len().div_ceil(400).max(1);
+            let mut thin: Vec<Vec3> = pts.iter().step_by(step).copied().collect();
+            if let (Some(last), Some(end)) = (thin.last().copied(), pts.last().copied())
+                && last.dist(end) > 1e-9
+            {
+                thin.push(end);
+            }
+            curves.push(thin.into_iter().map(|q| solidcraft_doc::apply_point(&inverse, q)).collect());
+        }
+    }
+    let (ids, info) = edit(s, p, cmd, false, |sk, _| {
+        needs_3d(sk, cmd)?;
+        curves.iter().map(|c| sk.add_drawn_wire_in(c, WireSpace::Component).map_err(Into::into)).collect::<Result<Vec<String>>>()
+    })?;
+    Ok(json!({"curves": ids, "sketch": info}))
 }
 
 fn line3d(s: &mut Session, p: &Value) -> Result<Value> {
