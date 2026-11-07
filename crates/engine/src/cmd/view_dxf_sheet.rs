@@ -319,6 +319,20 @@ fn manual(
             },
         };
         let all = if spin == 0.0 { all } else { turn_by(&all, spin.to_radians()) };
+        // The stepped section's closing edges (for the hatch) turn with the view, or the hatch breaks apart.
+        if !section_closing.is_empty() && (quarter % 4 != 0 || spin != 0.0) {
+            let (sn, cs) = spin.to_radians().sin_cos();
+            let turned = |q: Vec2| {
+                let q = match quarter % 4 {
+                    1 => Vec2::new(-q.y, q.x),
+                    2 => Vec2::new(-q.x, -q.y),
+                    3 => Vec2::new(q.y, -q.x),
+                    _ => q,
+                };
+                Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs)
+            };
+            section_closing = section_closing.iter().map(|(a, b)| (turned(*a), turned(*b))).collect();
+        }
         let (w, h) = (all.hi.x - all.lo.x, all.hi.y - all.lo.y);
         // A view projected from another keeps that view's scale unless it has its own.
         let inherited = item.get("scale_from").and_then(Value::as_u64).and_then(|i| scales.get(&(i as usize)).copied());
