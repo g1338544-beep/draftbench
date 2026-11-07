@@ -2248,7 +2248,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     .active_sketch
                     .and_then(|sid| st.sketch(sid))
                     .filter(|ss| ss.sketch.curve_index(id).is_some())
-                    .or_else(|| st.sketches.iter().find(|ss| ss.sketch.curve_index(id).is_some()));
+                    .or_else(|| st.sketches.iter().find(|ss| ss.sketch.curve_index(id).is_some()).map(|v| &**v));
                 if let Some(ss) = found
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
