@@ -736,6 +736,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             form_row(ui, "WCS axis", |ui| {
                 extra_choice(ui, &mut d.extra, "split_wcs_axis", "wcs_axis", &[("Picked tool", "none"), ("XC", "x"), ("YC", "y"), ("ZC", "z")]);
             });
+            // A face of a surface body as the tool: the whole surface, or only the picked face.
+            form_row(ui, "Surface tool", |ui| {
+                extra_choice(ui, &mut d.extra, "split_surface_part", "surface_part", &[("Whole surface", "whole"), ("Picked face only", "face")]);
+            });
             // A planar face as the tool can be moved along its normal before it cuts.
             form_row(ui, "Distance", |ui| {
                 enter |= extra_field(ui, &mut d.extra, "distance", "0 mm");

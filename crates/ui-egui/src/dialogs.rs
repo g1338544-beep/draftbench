@@ -844,10 +844,6 @@ impl Dialog {
                 let picked = match (&d.kind, sel) {
                     (Kind::Fillet { chain, .. }, _) => fillet_edges(s, sel, *chain),
                     (Kind::Measure { .. }, _) => vec![crate::viewport::measurement_selection(s, sel)],
-                    // A face of a surface body as the splitting or trimming tool is the whole surface.
-                    (Kind::Split, Sel::Face { body, .. }) if s.world_state().body(body).is_some_and(|x| x.body.is_surface()) => {
-                        vec![Sel::Body { name: body.to_string() }]
-                    }
                     _ if inp.multi => crate::viewport::grouped_selection(s, sel),
                     _ => vec![sel.clone()],
                 };
@@ -1080,7 +1076,27 @@ impl Dialog {
     }
 
     pub(crate) fn highlighted(&self, s: &Session) -> Vec<Sel> {
-        self.shell_faces(s).or_else(|| self.same_size_faces(s)).unwrap_or_else(|| self.items())
+        self.shell_faces(s).or_else(|| self.same_size_faces(s)).or_else(|| self.whole_surface(s)).unwrap_or_else(|| self.items())
+    }
+
+    /// Split / Trim Body with a face of a surface body as the tool: the whole surface lights up
+    /// unless the option to use only the picked face is on.
+    fn whole_surface(&self, s: &Session) -> Option<Vec<Sel>> {
+        if !matches!(self.kind, Kind::Split) || self.extra.get("surface_part").and_then(Value::as_str) == Some("face") {
+            return None;
+        }
+        let mut out = self.items();
+        let mut more = false;
+        for x in self.items() {
+            if let Sel::Face { body, .. } = &x
+                && s.world_state().body(body).is_some_and(|b| b.body.is_surface())
+            {
+                out.retain(|o| !matches!(o, Sel::Face { body: b2, .. } if b2 == body));
+                out.push(Sel::Body { name: body.to_string() });
+                more = true;
+            }
+        }
+        more.then_some(out)
     }
 
     /// Resize Face: every hole or boss of the picked size lights up like the picked one, since all of
@@ -1114,6 +1130,7 @@ impl Dialog {
             self.extra.get("rz_points").map(Value::to_string).unwrap_or_default().hash(&mut h);
             self.extra.get("only_picked").and_then(Value::as_bool).hash(&mut h);
         }
+        self.extra.get("surface_part").and_then(Value::as_str).hash(&mut h);
         self.active.hash(&mut h);
         h.finish()
     }
@@ -3723,7 +3740,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // A face of a surface body counts as the whole surface (the cut follows the surface, not one face's extension).
             let surface_tool: Option<String> = match sels(d, 1).first() {
                 Some(Sel::Body { name }) => Some(name.to_string()),
-                Some(Sel::Face { body: b, .. }) if s.world_state().body(b).is_some_and(|x| x.body.is_surface()) => Some(b.to_string()),
+                Some(Sel::Face { body: b, .. })
+                    if d.extra.get("surface_part").and_then(Value::as_str) != Some("face") && s.world_state().body(b).is_some_and(|x| x.body.is_surface()) =>
+                {
+                    Some(b.to_string())
+                }
                 _ => None,
             };
             if let Some(name) = &surface_tool {
