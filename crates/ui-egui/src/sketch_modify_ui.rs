@@ -867,9 +867,17 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 return Err("Select the curves or edges to project first".into());
             }
             let Some(Sel::Face { body, point, index }) = items(inputs, 1).first() else { return Err("Select the face to project onto".into()) };
+            // A sketch still open is finished first (the projection makes its own sketches), so the command works from
+            // inside a sketch too.
+            let open = app.session.active_sketch.is_some();
+            let finish_first = move |mut steps: Vec<(String, Value)>| {
+                if open {
+                    steps.insert(0, ("sketch.finish".to_string(), json!({})));
+                }
+                steps
+            };
             // Onto a flat face the picked curves and edges are copied into a new sketch on that face.
-            if app.session.active_sketch.is_none()
-                && let Some((_, normal)) = crate::dialogs::planar_face(&app.session, body, *index)
+            if let Some((_, normal)) = crate::dialogs::planar_face(&app.session, body, *index)
                 && normal.len() > 0.5
             {
                 let state = app.session.world_state();
@@ -886,18 +894,15 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 }
                 refs.extend(edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})));
                 let project = json!({"refs": refs});
-                return Ok(vec![
+                return Ok(finish_first(vec![
                     ("sketch.create".to_string(), json!({"plane": {"face": [point.x, point.y, point.z]}, "name": "Projected curves"})),
                     ("sketch.project".to_string(), project),
                     ("sketch.finish".to_string(), json!({})),
-                ]);
+                ]));
             }
             // Edges onto a curved face: copy them flat into a sketch facing the view, then project
             // that sketch's curves onto the face, as seen from the viewer.
             if !edges.is_empty() {
-                if app.session.active_sketch.is_some() {
-                    return Err("Finish the sketch first: edges project from outside a sketch".into());
-                }
                 let state = app.session.world_state();
                 let (right, up, _) = app.cam.basis();
                 let plane = json!({
@@ -919,7 +924,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 let n = state.sketches.len() + 1;
                 let source = format!("Projection source {n}");
                 let direction = if *dir == 0 { "normal" } else { "sketch" };
-                return Ok(vec![
+                return Ok(finish_first(vec![
                     ("sketch.create".to_string(), json!({"plane": plane.clone(), "name": source})),
                     ("sketch.project".to_string(), json!({"refs": refs})),
                     ("sketch.finish".to_string(), json!({})),
@@ -929,7 +934,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                         json!({"curves": [{"sketch": source}], "face": [point.x, point.y, point.z], "body": body, "direction": direction}),
                     ),
                     ("sketch.finish".to_string(), json!({})),
-                ]);
+                ]));
             }
             // The sketch the curves belong to: the one a pick came from, else the only one holding them.
             let state = app.session.world_state();
