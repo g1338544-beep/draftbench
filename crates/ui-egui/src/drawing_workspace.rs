@@ -441,6 +441,10 @@ pub struct State {
     menu_at: Option<(Option<usize>, Pos2)>,
     /// The view whose scale is being edited after a double-click.
     scale_edit: Option<usize>,
+    /// The model revision the sheet on screen was made from, and the design it belongs to: the sheet keeps
+    /// what it shows until Update is pressed, however the 3D model changes meanwhile (0 = not made yet).
+    drawn_rev: u64,
+    drawn_design: String,
     /// The Orient View window: the direction (X, Y, Z) the new view looks back along.
     orient: Option<[String; 3]>,
     /// The Sheet window shown when Drawing opens on a design with no views yet.
@@ -580,6 +584,8 @@ impl Default for State {
             drag: None,
             menu_at: None,
             scale_edit: None,
+            drawn_rev: 0,
+            drawn_design: String::new(),
             orient: None,
             setup: false,
             note_text: "NOTE".into(),
@@ -1464,6 +1470,8 @@ fn refresh(app: &mut SolveApp) {
 pub fn update(app: &mut SolveApp) {
     refresh(app);
     fit(app);
+    app.drawing.drawn_rev = app.session.revision;
+    app.drawing.drawn_design = app.session.doc.name.clone();
 }
 
 fn add_view(app: &mut SolveApp, view: usize) {
@@ -2219,6 +2227,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             }
         }
         "drawing.ribbon.fit" => fit(app),
+        "drawing.ribbon.update" => begin(app),
         "drawing.ribbon.panel" => {
             let open = app.drawing.panel_open.unwrap_or(!app.drawing.phone);
             app.drawing.panel_open = Some(!open);
@@ -3250,8 +3259,17 @@ pub fn enter(app: &mut SolveApp) -> Result<(), String> {
         app.drawing.title = app.session.doc.name.clone();
     }
     app.drawing.setup = app.drawing.placed.is_empty() && app.drawing.pages.len() <= 1;
-    // The page opens at once; the sheet is computed stage by stage over the next frames.
-    begin(app);
+    // The sheet already made for this design stays as it was, even if the 3D model changed since:
+    // Update (the ribbon button) brings it up to date. Only a drawing never made is computed now.
+    let made = app.drawing.sheet.is_some() && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == design;
+    if made {
+        if app.drawing.drawn_rev != app.session.revision {
+            app.set_status("The 3D model changed since this drawing was made. Press Update to refresh it.".to_string(), false);
+        }
+    } else {
+        // The page opens at once; the sheet is computed stage by stage over the next frames.
+        begin(app);
+    }
     fit(app);
     Ok(())
 }

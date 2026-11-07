@@ -34,6 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.ribbon.delsheet", "Delete Sheet", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("delete_face").params("No parameters. UI only: removes the sheet on screen."),
     CommandSpec::new("drawing.ribbon.print", "Print / PDF", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("export").params("No parameters. UI only: saves the sheet on screen as a PDF at paper size, to print."),
     CommandSpec::new("drawing.ribbon.printall", "Print All Sheets", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("folder").params("No parameters. UI only: saves every sheet as one PDF, a page each."),
+    CommandSpec::new("drawing.ribbon.update", "Update Drawing", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("update").params("No parameters. UI only: remakes the sheet from the current 3D model (the drawing keeps what it shows until this is pressed)."),
     CommandSpec::new("drawing.ribbon.fit", "Fit Sheet", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("fit").params("No parameters. UI only: frames the whole sheet."),
     CommandSpec::new("drawing.ribbon.export", "Export DXF", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("dxf").params("No parameters. UI only: exports the sheet as DXF."),
     CommandSpec::new("drawing.ribbon.close", "Back to Design", ui_only).noundo().doc_only().at("DRAWING", "SHEET").icon("home").params("No parameters. UI only: leaves the Drawing workspace."),

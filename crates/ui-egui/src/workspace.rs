@@ -289,7 +289,7 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "DRAWING", panel: "VIEWS", promoted: 9, ids: &["drawing.ribbon.base", "drawing.ribbon.front", "drawing.ribbon.top", "drawing.ribbon.right", "drawing.ribbon.iso", "drawing.ribbon.model", "drawing.ribbon.section", "drawing.ribbon.sectionstep", "drawing.ribbon.detail", "drawing.ribbon.orient", "drawing.ribbon.shaded", "drawing.ribbon.projected"] },
     Section { tab: "DRAWING", panel: "ANNOTATE", promoted: 5, ids: &["drawing.ribbon.dimension", "drawing.ribbon.note", "drawing.ribbon.centreline", "drawing.ribbon.centremark", "drawing.ribbon.centreerase", "drawing.ribbon.centre"] },
     Section { tab: "DRAWING", panel: "EDIT", promoted: 4, ids: &["drawing.ribbon.hidden", "drawing.ribbon.view3d", "drawing.ribbon.scale", "drawing.ribbon.delete"] },
-    Section { tab: "DRAWING", panel: "SHEET", promoted: 7, ids: &["drawing.ribbon.panel", "drawing.ribbon.addsheet", "drawing.ribbon.delsheet", "drawing.ribbon.print", "drawing.ribbon.printall", "drawing.ribbon.fit", "drawing.ribbon.export", "drawing.ribbon.close"] },
+    Section { tab: "DRAWING", panel: "SHEET", promoted: 8, ids: &["drawing.ribbon.panel", "drawing.ribbon.addsheet", "drawing.ribbon.delsheet", "drawing.ribbon.print", "drawing.ribbon.printall", "drawing.ribbon.update", "drawing.ribbon.fit", "drawing.ribbon.export", "drawing.ribbon.close"] },
 ];
 
 /// Compact source labels for painted big buttons only. Menus, search and tooltips
