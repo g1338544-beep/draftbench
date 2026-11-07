@@ -892,7 +892,13 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                     }
                 }
                 _ => {
-                    let _ = app.run(cmd, json!({"refs": [r]}));
+                    // In a 3D sketch a picked model edge is copied where it is (Convert Entities), not flattened onto
+                    // the sketch plane (which would put it on the bottom face, out of sight).
+                    let in_3d_edge = r.get("edge").is_some() && crate::sketch3d::active(app) && matches!(cmd, "sketch.project" | "sketch.include_3d");
+                    let result = if in_3d_edge { app.run("sketch.convert_entities", json!({"refs": [r]})) } else { app.run(cmd, json!({"refs": [r]})) };
+                    if let Err(error) = result {
+                        app.set_status(error, true);
+                    }
                 }
             }
         }

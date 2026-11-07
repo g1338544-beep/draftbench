@@ -254,12 +254,12 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "SKETCH",
         panel: "REFERENCE",
-        promoted: 1,
+        promoted: 2,
         ids: &[
             "sketch.project",
+            "sketch.convert_entities",
             "sketch.intersect",
             "sketch.include_3d",
-            "sketch.convert_entities",
             "sketch.intersection_curve",
             "sketch.spun_profile",
             "sketch.isoparametric_curve",
