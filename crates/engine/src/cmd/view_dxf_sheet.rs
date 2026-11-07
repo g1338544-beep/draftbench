@@ -435,8 +435,8 @@ fn manual(
                 }
             }
         }
-        // A section cut along a drawn line: the axis of every hole the line passes through the middle of
-        // (the bore, holes cut square through) is a centre line across the view, as on a folded drawing.
+        // A section cut along a drawn line: the axis of every hole the line cuts (the bore, holes cut through
+        // the middle or off to one side) is a centre line across the view, as on a folded drawing.
         if let (Some([x1, y1, x2, y2]), Some((_, _, ang)), None) = (section_line, line_plane, section_path.as_ref())
             && (x2 - x1).hypot(y2 - y1) > 1e-9
             && let Ok(base) = view_lines(scene, parts, view, None, key)
@@ -459,7 +459,7 @@ fn manual(
             let mut done: Vec<f64> = Vec::new();
             for (c, rad) in circles(&base.lines, false).iter().take(200) {
                 let off = ((x2 - x1) * (c.y - y1) - (y2 - y1) * (c.x - x1)).abs() / len;
-                if off > 0.3 || !rad.is_finite() || *rad < 0.5 {
+                if !rad.is_finite() || *rad < 0.5 || off > *rad + 0.3 {
                     continue;
                 }
                 let p3 = Vec3::new(r.x * c.x + u.x * c.y, r.y * c.x + u.y * c.y, r.z * c.x + u.z * c.y);
