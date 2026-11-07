@@ -534,12 +534,12 @@ fn manual(
             }
             let (a, b) = (to_sheet(p1), to_sheet(p2));
             let Some(dir) = unit(Vec2::new(b.x - a.x, b.y - a.y)) else { continue };
-            let (a, b) = (Vec2::new(a.x - dir.x * 6.0, a.y - dir.y * 6.0), Vec2::new(b.x + dir.x * 6.0, b.y + dir.y * 6.0));
+            let (a, b) = (Vec2::new(a.x - dir.x * 2.5, a.y - dir.y * 2.5), Vec2::new(b.x + dir.x * 2.5, b.y + dir.y * 2.5));
             line("CENTER", a, b, &mut entities);
             centre_used = true;
             // Heavy stubs at both ends, as on a drawing sheet: the cutting line's ends are drawn thick.
-            line("VISIBLE", a, Vec2::new(a.x + dir.x * 8.0, a.y + dir.y * 8.0), &mut entities);
-            line("VISIBLE", b, Vec2::new(b.x - dir.x * 8.0, b.y - dir.y * 8.0), &mut entities);
+            line("VISIBLE", a, Vec2::new(a.x + dir.x * 6.0, a.y + dir.y * 6.0), &mut entities);
+            line("VISIBLE", b, Vec2::new(b.x - dir.x * 6.0, b.y - dir.y * 6.0), &mut entities);
             for end in [a, b] {
                 let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
                 line("DIM", end, tip, &mut entities);
