@@ -4568,8 +4568,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !ui.ctx().egui_wants_keyboard_input() && app.drawing.ft_edit.is_none() {
         let (copy_key, paste_key, dup_key) = ui.input(|i| {
             (
-                i.events.iter().any(|e| matches!(e, egui::Event::Copy)),
-                i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))),
+                i.events.iter().any(|e| matches!(e, egui::Event::Copy | egui::Event::Key { key: egui::Key::C, pressed: true, modifiers: egui::Modifiers { command: true, shift: false, alt: false, .. }, .. })),
+                i.events.iter().any(|e| matches!(e, egui::Event::Paste(_) | egui::Event::Key { key: egui::Key::V, pressed: true, modifiers: egui::Modifiers { command: true, shift: false, alt: false, .. }, .. })),
                 i.modifiers.command && i.key_pressed(egui::Key::D),
             )
         });
@@ -4584,6 +4584,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.drawing.fl_clip = None;
             } else if let Some(l) = line {
                 app.drawing.fl_clip = Some([l[2] - l[0], l[3] - l[1]]);
+                // The browser sends no paste event while its clipboard is empty, so a copied line leaves a note there.
+                ui.ctx().copy_text("DraftNew line".to_string());
             }
         }
         if dup_key {
