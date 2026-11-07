@@ -194,3 +194,32 @@ fn second_occurrence_drawn_wire_fit_picks_and_world_triad_drag_stay_aligned() {
     let restored = h.app.session.model.state();
     assert!(restored.sketch(sketch).unwrap().sketch.wires[0].fit[0].dist(Vec3::new(2.0, 3.0, 5.0)) < 1e-6);
 }
+
+#[test]
+fn three_d_sketch_command_draws_a_visible_line_between_model_corners() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.ui.show_origin = false;
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    h.app.start("sketch.create3d");
+    h.frames(3);
+    assert!(crate::sketch3d::active(&h.app), "3D Sketch opens a 3D sketch");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.line"), "and starts the Line tool");
+    let (lo, hi) = {
+        let state = h.app.session.world_state();
+        let b = state.bodies.first().unwrap().mesh().bounds();
+        (b.min, b.max)
+    };
+    let corners = [[lo.x, lo.y, hi.z], [hi.x, lo.y, hi.z]];
+    for p in corners {
+        h.step(&json!({"click":{"world":p}})).unwrap();
+    }
+    h.step(&json!({"key":"Escape"})).unwrap();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.wires.len() + sk.curves.len(), 1, "one line was drawn: {} wires, {} curves", sk.wires.len(), sk.curves.len());
+    let drawn = sk.wires.first().map(|w| w.pts.clone()).unwrap_or_default();
+    assert!(drawn.len() >= 2 && drawn.iter().any(|p| (p.z - hi.z).abs() < 1e-3), "the line lies on the top face: {drawn:?}");
+}

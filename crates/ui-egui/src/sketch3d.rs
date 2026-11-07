@@ -74,6 +74,12 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
     }
     let st = app.session.world_state();
     let ss = app.session.active_sketch.and_then(|s| st.sketch(s))?;
+    // The centre of a round edge (a hole, a boss) when the pointer is near it.
+    for c in circle_centres(app) {
+        if proj.to_screen(c).is_some_and(|s| s.distance(pos) < 10.0) {
+            return Some((c, "Center"));
+        }
+    }
     let (o, d) = proj.ray(pos);
     for h in pick_3d(app, proj, pos) {
         match h {
@@ -98,6 +104,40 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
         }
     }
     ss.plane.intersect_ray(o, d).map(|w| (w, "Plane"))
+}
+
+/// Centres of the circles the visible bodies' closed round edges make (holes, bosses, rims).
+fn circle_centres(app: &SolveApp) -> Vec<Vec3> {
+    let st = app.session.world_state();
+    let mut out: Vec<Vec3> = Vec::new();
+    let mut budget = 6000usize;
+    for b in st.bodies.iter().take(60).filter(|b| app.session.body_visible(&b.name)) {
+        let m = b.mesh();
+        for e in &m.edges {
+            if budget == 0 || out.len() >= 400 {
+                return out;
+            }
+            budget -= 1;
+            let n = e.len();
+            let (Some(first), Some(last)) = (e.first(), e.last()) else { continue };
+            if n < 9 || first.dist(*last) > 1e-6 * (1.0 + first.len()) {
+                continue;
+            }
+            let pts = &e[..n - 1];
+            let c = pts.iter().fold(Vec3::ZERO, |a, p| a + *p) / pts.len() as f64;
+            let r = pts.iter().map(|p| p.dist(c)).sum::<f64>() / pts.len() as f64;
+            if !(r.is_finite() && r > 1e-6) {
+                continue;
+            }
+            let (Some(a), Some(q)) = (pts.first(), pts.get(pts.len() / 4)) else { continue };
+            let Some(normal) = (*a - c).cross(*q - c).normalized() else { continue };
+            let round = pts.iter().all(|p| (p.dist(c) - r).abs() <= 2e-3 * r + 1e-6 && (*p - c).dot(normal).abs() <= 2e-3 * r + 1e-6);
+            if round && !out.iter().any(|o| o.dist(c) < 1e-6) {
+                out.push(c);
+            }
+        }
+    }
+    out
 }
 
 /// The sketch-plane coordinates of `p` when it lies on the plane.
