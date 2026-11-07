@@ -5201,7 +5201,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let model = |q: Pos2| (cx + (q.x - bx.1) / k, cy + (q.y - bx.2) / k);
                             let (p1, p2) = (model(a), model(b));
                             // Under the view it is cut from, or the nearest free place: never on top of another view.
-                            let at = free_spot(sheet, pos2(bx.1, bx.2 - bx.4 - 45.0), (bx.3, bx.4));
+                            let d = b - a;
+                            // The view lies across the cutting line: right of the view for an up-down line, below it for a left-right one.
+                            let want = if d.y.abs() >= d.x.abs() { pos2(bx.1 + bx.3 + 45.0, bx.2) } else { pos2(bx.1, bx.2 - bx.4 - 45.0) };
+                            let at = free_spot(sheet, want, (bx.3, bx.4));
                             sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view)));
                         }
                         (None, _, _) | (_, None, _) | (_, _, None) => sec_msg = Some("Section View needs a view on the sheet to cut: add one first".to_string()),
