@@ -4602,9 +4602,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         if paste_key {
-            if let (Some([dx, dy]), Some(l)) = (app.drawing.fl_clip, line) {
+            if let Some([dx, dy]) = app.drawing.fl_clip {
                 if app.drawing.flines.len() < MAX_FREE_LINES {
-                    let (ox, oy) = (l[0] + 5.0, l[1] + 5.0);
+                    // The line starts at the pointer; without one, beside the picked line.
+                    let (ox, oy) = match (hover, line) {
+                        (Some(h), _) => (f64::from(h.x), f64::from(h.y)),
+                        (None, Some(l)) => (l[0] + 5.0, l[1] + 5.0),
+                        (None, None) => (60.0, 60.0),
+                    };
                     app.drawing.flines.push([ox, oy, ox + dx, oy + dy]);
                     app.drawing.fl_sel = Some(app.drawing.flines.len() - 1);
                     changed = true;
@@ -4622,6 +4627,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if changed {
             refresh(app);
         }
+    }
+    // Delete takes a picked view away when nothing smaller is picked.
+    if let Some(i) = app.drawing.selected
+        && app.drawing.ft_sel.is_none()
+        && app.drawing.fl_sel.is_none()
+        && app.drawing.centre_box.is_none()
+        && !ui.ctx().egui_wants_keyboard_input()
+        && app.drawing.ft_edit.is_none()
+        && ui.input(|inp| inp.key_pressed(egui::Key::Delete))
+        && i < app.drawing.placed.len()
+    {
+        remove_view(app, i);
+        app.drawing.selected = None;
+        refresh(app);
     }
     // Menu of a free line: copy it, make another like it, delete it.
     let mut fl_act: Option<u8> = None;
@@ -5075,7 +5094,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let Some((view, scale)) = app.drawing.base.clone()
         && view <= 6
     {
-        if let Some(at) = response.hover_pos().and_then(|q| m.to_sheet(q))
+        // Without the pointer on the sheet the ghost waits at the sheet's middle, so it is always there to see.
+        let middle = app.drawing.sheet.as_ref().map(|s| pos2(s.width / 2.0, s.height / 2.0));
+        if let Some(at) = response.hover_pos().and_then(|q| m.to_sheet(q)).or(middle)
             && let Some((_, Some(pv))) = &app.drawing.base_preview
         {
             paint_preview(&painter, &m, pv, at);
