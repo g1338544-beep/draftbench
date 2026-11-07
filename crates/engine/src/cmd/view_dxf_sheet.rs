@@ -218,12 +218,15 @@ fn manual(
         let mut section_at = 0.0;
         let mut cut_count = usize::MAX;
         let mut section_closing: Vec<(Vec2, Vec2)> = Vec::new();
+        // A stepped section's pieces (from, to along the view's width, plane offset), for its centre lines.
+        let mut step_pieces: Vec<(f64, f64, f64)> = Vec::new();
         let all = if let Some((axis, at)) = section {
             section_at = at.unwrap_or_else(|| middle(scene, axis));
             let cut = match (&section_path, line_plane) {
                 (Some(pts), Some((normal, _, angles))) => {
                     let pts3: Vec<Vec3> = pts.iter().map(|q| src_point(*q)).collect();
                     let (cut, closing) = stepped_cut(scene, &pts3, normal, angles);
+                    step_pieces = stepped_pieces(&pts3, normal, angles);
                     section_closing = closing;
                     cut
                 }
@@ -394,8 +397,8 @@ fn manual(
         // A straight section shows the axes of the holes that lie in its cutting plane (the bore, holes cut
         // through their middle) as centre lines, turned with the view like the rest of its drawing.
         if let Some((sec_axis, _)) = section
-            && section_path.is_none()
             && !axes.is_empty()
+            && (section_path.is_none() || !step_pieces.is_empty())
         {
             let (n, off, ang) = match line_plane {
                 Some((n, o, a)) => (n, o, a),
@@ -421,7 +424,15 @@ fn manual(
                 Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs)
             };
             for (p0, p1) in axes.iter().take(200) {
-                if (n.dot(*p0) - off).abs() > 0.05 || (n.dot(*p1) - off).abs() > 0.05 {
+                // A straight cut has one plane; a stepped one has a plane per piece, and an axis belongs to the
+                // piece whose plane holds it and whose stretch it lies in.
+                let in_plane = |o: f64| (n.dot(*p0) - o).abs() <= 0.05 && (n.dot(*p1) - o).abs() <= 0.05;
+                let wanted = if step_pieces.is_empty() {
+                    in_plane(off)
+                } else {
+                    step_pieces.iter().any(|(lo, hi, o)| in_plane(*o) && p0.dot(rv) >= *lo - 0.05 && p0.dot(rv) <= *hi + 0.05)
+                };
+                if !wanted {
                     continue;
                 }
                 let a = to_sheet(turned(Vec2::new(p0.dot(rv), p0.dot(uv))));
@@ -932,7 +943,8 @@ fn cut_plane(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, offs
 
 /// A stepped cut: the plane `normal` through each piece of the path that runs along the section's width, clipped to that
 /// piece's stretch and laid side by side. Also the closing edges where one piece meets the next (for the hatch only).
-fn stepped_cut(scene: &meshes::Scene, pts: &[Vec3], normal: Vec3, angles: (f64, f64)) -> (Vec<(Vec2, Vec2)>, Vec<(Vec2, Vec2)>) {
+/// The pieces of a stepped path that run along the section's width: (from, to along the view's right, plane offset).
+fn stepped_pieces(pts: &[Vec3], normal: Vec3, angles: (f64, f64)) -> Vec<(f64, f64, f64)> {
     let cam = Camera { target: Vec3::ZERO, yaw: angles.0, pitch: angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
     let (right, _, _) = cam.basis();
     let mut ranges: Vec<(f64, f64, f64)> = Vec::new();
@@ -945,6 +957,11 @@ fn stepped_cut(scene: &meshes::Scene, pts: &[Vec3], normal: Vec3, angles: (f64, 
         let (ta, tb) = (a.dot(right), b.dot(right));
         ranges.push((ta.min(tb), ta.max(tb), normal.dot(*a)));
     }
+    ranges
+}
+
+fn stepped_cut(scene: &meshes::Scene, pts: &[Vec3], normal: Vec3, angles: (f64, f64)) -> (Vec<(Vec2, Vec2)>, Vec<(Vec2, Vec2)>) {
+    let ranges = stepped_pieces(pts, normal, angles);
     let (mut cut, mut closing) = (Vec::new(), Vec::new());
     for (lo, hi, offset) in ranges.into_iter().take(12) {
         let segs = cut_plane(scene, angles, normal, offset);
