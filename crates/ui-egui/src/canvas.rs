@@ -147,7 +147,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                         _ => None,
                     };
                     match &d.kind {
-                        Kind::Surface(crate::dialogs_surface::Surf::Ruled { mode, angle, flip, .. }) => {
+                        Kind::Surface(crate::dialogs_surface::Surf::Ruled { mode, angle, flip, chain, .. }) => {
                             // The kernel's own probe strip says which way it really leaves (it knows which face
                             // it takes the direction from); the mesh reading below is the fallback.
                             let a = app.session.doc.eval(angle, ValueKind::Angle).unwrap_or(0.0);
@@ -156,15 +156,21 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                                 Some(Sel::Face { point, .. }) => Some(*point),
                                 _ => None,
                             };
-                            let key = (body.clone(), *index, *mode, angle.clone(), *flip, face_pt.map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]), m.triangles.len() as u64);
+                            let key = (body.clone(), *index, *mode + if *chain { 10 } else { 0 }, angle.clone(), *flip, face_pt.map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]), m.triangles.len() as u64);
                             if let Some(cached) = PROBE.with(|c| c.borrow().get(&key).copied()) {
                                 if let Some(v) = cached {
                                     return Some(v);
                                 }
                             } else {
+                                // The same edges the dialog hands the command: the picked one and its tangent chain.
+                                let mut picks = vec![at];
+                                if chain {
+                                    picks.extend(m.tangent_chain(*index, 2f64.to_radians()).into_iter().filter(|i| *i != *index).filter_map(|i| m.edges.get(i).map(|e| crate::selection::polyline_mid(e))));
+                                }
                                 let probed = solidcraft_engine::doc::ruled_probe_dir(
                                     b,
                                     at,
+                                    &picks,
                                     *mode,
                                     a,
                                     dir3,
