@@ -13,7 +13,7 @@ jobs:
       - run: cargo build --release -p solidcraft-cli
       - run: |
           mkdir -p out
-          ./target/release/solidcraft-cli run examples/ev/scale-check.json --results --allow-errors 2>&1 | grep -o '"scale":[0-9.e-]*\|error[^,]*' | head -20
+          ./target/release/solidcraft-cli run examples/ev/scale-check.json --results --allow-errors 2>&1 | grep -E "error" | head
           grep -c . out/d.dxf out/e.dxf || true
-          grep -a -E '^(TOP|RIGHT) ' out/d.dxf out/e.dxf | head
+          for f in out/d.dxf out/e.dxf; do echo $f; grep -a -c CENTER $f; grep -a -E "TOP |RIGHT " $f | head -4; done
           grep -a -E 'TOP|RIGHT' out/d.dxf out/e.dxf | head
