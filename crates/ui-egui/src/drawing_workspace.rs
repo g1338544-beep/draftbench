@@ -6350,8 +6350,8 @@ fn step_snap(c: Pos2, last: Option<Pos2>, tol: f32, free: bool) -> Pos2 {
 /// onto a centre line near it; then lined up level or plumb with the line's first point and with
 /// hole centres. The dashed guides to draw come back with the point.
 fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2, Vec<[Pos2; 2]>) {
-    // A guide only: the point stays where the pointer is. It squares up with the first point when nearly
-    // level or plumb, and dashed guides show where hole centres line up, but nothing pulls it onto them.
+    // The point squares up with the first point when nearly level or plumb, and snaps onto a guide through a
+    // hole centre; dashed guides show where hole centres line up.
     let mut guides: Vec<[Pos2; 2]> = Vec::new();
     let mut p = c;
     if let Some(f) = first {
@@ -6360,6 +6360,18 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
         } else if (p.x - f.x).abs() <= tol * 0.35 {
             p.x = f.x;
         }
+    }
+    // On a guide through a hole centre the point lands exactly on it, so the cutting line really runs
+    // through the holes it lines up with.
+    let reach = tol * 0.35;
+    let nearest = |v: f32, pick: &dyn Fn(&Pos2) -> f32| {
+        sheet.rounds().circles.iter().take(400).map(|(q, _)| pick(q)).filter(|t| (t - v).abs() <= reach).min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()))
+    };
+    if let Some(x) = nearest(p.x, &|q| q.x) {
+        p.x = x;
+    }
+    if let Some(y) = nearest(p.y, &|q| q.y) {
+        p.y = y;
     }
     let near = |v: f32, list: &[f32]| list.iter().copied().any(|t| (t - v).abs() <= tol * 0.35);
     for (q, _) in sheet.rounds().circles.iter().take(400) {
