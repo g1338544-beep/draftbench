@@ -1,0 +1,19 @@
+name: Draft check
+on:
+  push:
+    branches: [draft-check]
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p solidcraft-cli
+      - run: |
+          mkdir -p out
+          ./target/release/solidcraft-cli run examples/ev/scale-check.json --results --allow-errors 2>&1 | grep -o '"scale":[0-9.e-]*\|error[^,]*' | head -20
+          grep -c . out/d.dxf out/e.dxf || true
+          grep -a -E '^(TOP|RIGHT) ' out/d.dxf out/e.dxf | head
+          grep -a -E 'TOP|RIGHT' out/d.dxf out/e.dxf | head
