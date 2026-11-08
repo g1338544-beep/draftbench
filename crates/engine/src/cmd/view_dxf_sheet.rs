@@ -86,6 +86,35 @@ fn line(layer: &str, a: Vec2, b: Vec2, entities: &mut Vec<DxfEntity>) {
     entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Line(a, b) });
 }
 
+/// A heavy stroke (the cutting line's ends, the section arrows): several parallel lines about a millimetre wide.
+fn heavy(a: Vec2, b: Vec2, entities: &mut Vec<DxfEntity>) {
+    let n = (b.x - a.x).hypot(b.y - a.y);
+    if !(n.is_finite() && n > 1e-9) {
+        return;
+    }
+    let d = Vec2::new((b.x - a.x) / n, (b.y - a.y) / n);
+    for k in -2..=2 {
+        let o = f64::from(k) * 0.2;
+        line("VISIBLE", Vec2::new(a.x - d.y * o, a.y + d.x * o), Vec2::new(b.x - d.y * o, b.y + d.x * o), entities);
+    }
+}
+
+/// A section arrow at the end of a cutting line: a heavy stem, a solid head and the letter beside the tail.
+fn section_arrow(end: Vec2, sight: Vec2, letter: char, th: f64, (ox, oy): (f64, f64), entities: &mut Vec<DxfEntity>) {
+    // The head touches the end of the cutting line and points the way the section looks; the stem
+    // runs back from it, and the letter stands beyond the tail.
+    let tail = Vec2::new(end.x - sight.x * 14.0, end.y - sight.y * 14.0);
+    heavy(tail, end, entities);
+    let base = Vec2::new(end.x - sight.x * 5.0, end.y - sight.y * 5.0);
+    let side = |w: f64| Vec2::new(base.x - sight.y * w, base.y + sight.x * w);
+    for k in 0..=8 {
+        let w = -1.8 + 0.45 * f64::from(k);
+        line("VISIBLE", end, side(w), entities);
+    }
+    line("VISIBLE", side(-1.8), side(1.8), entities);
+    text("TEXT", Vec2::new(tail.x - sight.x * (th * 1.6) - th * 0.6 + ox, tail.y - sight.y * (th * 1.6) - th * 0.7 + oy), th * 1.5, letter.to_string(), entities);
+}
+
 fn rect(layer: &str, lo: Vec2, hi: Vec2, entities: &mut Vec<DxfEntity>) {
     let points = vec![lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y), lo];
     entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Polyline { points } });
@@ -201,6 +230,8 @@ fn manual_once(
         if n > 1e-9 { Some(Vec2::new(v.x / n, v.y / n)) } else { None }
     };
     let axes = hole_axes(scene, parts, key);
+    // The scale of the first plain view: a section drawn at the same scale needs no ratio in its title.
+    let mut ref_scale: Option<f64> = None;
     for (index, item) in list.iter().take(12).enumerate() {
         let name = item.get("view").and_then(Value::as_str).ok_or_else(|| bad(CMD, "each placement needs a view"))?;
         let view = StandardView::parse(name).ok_or_else(|| bad(CMD, format!("unknown view `{name}`")))?;
@@ -531,7 +562,8 @@ fn manual_once(
                 let d = Vec2::new(b.x - a.x, b.y - a.y);
                 let len = (d.x * d.x + d.y * d.y).sqrt();
                 if len.is_finite() && len > 1.0 {
-                    let u = Vec2::new(d.x / len * 3.0, d.y / len * 3.0);
+                    let over = (len * 0.15).clamp(1.5, 3.0);
+                    let u = Vec2::new(d.x / len * over, d.y / len * over);
                     line("CENTER", Vec2::new(a.x - u.x, a.y - u.y), Vec2::new(b.x + u.x, b.y + u.y), &mut entities);
                     any_centre = true;
                 }
@@ -623,7 +655,8 @@ fn manual_once(
                 let d = Vec2::new(b.x - a.x, b.y - a.y);
                 let len = (d.x * d.x + d.y * d.y).sqrt();
                 if len.is_finite() && len > 1.0 {
-                    let u = Vec2::new(d.x / len * 3.0, d.y / len * 3.0);
+                    let over = (len * 0.15).clamp(1.5, 3.0);
+                    let u = Vec2::new(d.x / len * over, d.y / len * over);
                     line("CENTER", Vec2::new(a.x - u.x, a.y - u.y), Vec2::new(b.x + u.x, b.y + u.y), &mut entities);
                     any_centre = true;
                 }
@@ -685,12 +718,17 @@ fn manual_once(
                 shape: DxfShape::Text { at: Vec2::new(xx - 1.2, (lo.y + hi.y) / 2.0), height: th, angle_deg: 90.0, text: trim_mm(h) },
             });
         }
+        let same = ref_scale.is_some_and(|r| (r - scale).abs() <= 1e-9 * r.abs().max(1e-9));
+        let ratio = if same { String::new() } else { format!("  {}", ratio_label(scale)) };
         let caption = match section {
-            Some((axis, _)) if axis > 2 => format!("Section {letter}-{letter}  {}", ratio_label(scale)),
-            Some((axis, _)) => format!("Section {letter}-{letter} ({}={})  {}", ["X", "Y", "Z"].get(axis).copied().unwrap_or("?"), trim_mm(section_at), ratio_label(scale)),
+            Some((axis, _)) if axis > 2 => format!("SECTION {letter}-{letter}{ratio}"),
+            Some((axis, _)) => format!("SECTION {letter}-{letter} ({}={}){ratio}", ["X", "Y", "Z"].get(axis).copied().unwrap_or("?"), trim_mm(section_at)),
             None if detail.is_some() => format!("DETAIL {letter}  {}", ratio_label(scale)),
             None => format!("{}  {}", if custom.is_some() { "Model view" } else { view_name(view) }, ratio_label(scale)),
         };
+        if section.is_none() && detail.is_none() && ref_scale.is_none() {
+            ref_scale = Some(scale);
+        }
         // The user's own caption replaces it; an empty one hides it.
         let caption = match item.get("label").and_then(Value::as_str) {
             Some(t) => t.chars().take(80).collect::<String>(),
@@ -763,21 +801,13 @@ fn manual_once(
             let (a, b) = (Vec2::new(a.x - dir.x * 2.5, a.y - dir.y * 2.5), Vec2::new(b.x + dir.x * 2.5, b.y + dir.y * 2.5));
             line("CENTER", a, b, &mut entities);
             centre_used = true;
-            // Heavy stubs at both ends, as on a drawing sheet: the cutting line's ends are drawn thick.
-            line("VISIBLE", a, Vec2::new(a.x + dir.x * 6.0, a.y + dir.y * 6.0), &mut entities);
-            line("VISIBLE", b, Vec2::new(b.x - dir.x * 6.0, b.y - dir.y * 6.0), &mut entities);
+            // Heavy ends, as on a drawing sheet: the cutting line's ends are drawn thick.
+            let stub = (((b.x - a.x).hypot(b.y - a.y)) * 0.25).clamp(3.0, 12.0);
+            heavy(a, Vec2::new(a.x + dir.x * stub, a.y + dir.y * stub), &mut entities);
+            heavy(b, Vec2::new(b.x - dir.x * stub, b.y - dir.y * stub), &mut entities);
             for (k, end) in [a, b].into_iter().enumerate() {
-                let (ox, oy) = (loff.get(2 * k).copied().unwrap_or(0.0), loff.get(2 * k + 1).copied().unwrap_or(0.0));
-                let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
-                line("DIM", end, tip, &mut entities);
-                // A solid arrowhead: the triangle's edges and strokes from the tip across to its base.
-                let base = Vec2::new(tip.x - sight.x * 3.5, tip.y - sight.y * 3.5);
-                let side = |w: f64| Vec2::new(base.x - sight.y * w, base.y + sight.x * w);
-                for w in [-1.3, -0.65, 0.0, 0.65, 1.3] {
-                    line("DIM", tip, side(w), &mut entities);
-                }
-                line("DIM", side(-1.3), side(1.3), &mut entities);
-                text("TEXT", Vec2::new(end.x - dir.x * 0.0 - sight.x * 4.0 + ox, end.y - sight.y * 4.0 - th * 0.3 + oy), th, letter.to_string(), &mut entities);
+                let off = (loff.get(2 * k).copied().unwrap_or(0.0), loff.get(2 * k + 1).copied().unwrap_or(0.0));
+                section_arrow(end, sight, *letter, th, off, &mut entities);
             }
         }
     }
@@ -807,25 +837,16 @@ fn manual_once(
                 }
                 line("CENTER", a2, b2, &mut entities);
                 let stub = (len * 0.4).min(8.0);
-                line("VISIBLE", a2, Vec2::new(a.x + dir.x * stub, a.y + dir.y * stub), &mut entities);
-                line("VISIBLE", b2, Vec2::new(b.x - dir.x * stub, b.y - dir.y * stub), &mut entities);
+                heavy(a2, Vec2::new(a.x + dir.x * stub, a.y + dir.y * stub), &mut entities);
+                heavy(b2, Vec2::new(b.x - dir.x * stub, b.y - dir.y * stub), &mut entities);
             }
             centre_used = true;
             for (k, end) in [(0usize, sheet_pts.first()), (1, sheet_pts.last())] {
                 let (Some(end), Some(other)) = (end, if k == 0 { sheet_pts.get(1) } else { sheet_pts.get(n.saturating_sub(2)) }) else { continue };
                 let Some(dir) = unit(Vec2::new(end.x - other.x, end.y - other.y)) else { continue };
                 let end = Vec2::new(end.x + dir.x * 6.0, end.y + dir.y * 6.0);
-                let (ox, oy) = (loff.get(2 * k).copied().unwrap_or(0.0), loff.get(2 * k + 1).copied().unwrap_or(0.0));
-                let tip = Vec2::new(end.x + sight.x * 8.0, end.y + sight.y * 8.0);
-                line("DIM", end, tip, &mut entities);
-                // A solid arrowhead: the triangle's edges and strokes from the tip across to its base.
-                let base = Vec2::new(tip.x - sight.x * 3.5, tip.y - sight.y * 3.5);
-                let side = |w: f64| Vec2::new(base.x - sight.y * w, base.y + sight.x * w);
-                for w in [-1.3, -0.65, 0.0, 0.65, 1.3] {
-                    line("DIM", tip, side(w), &mut entities);
-                }
-                line("DIM", side(-1.3), side(1.3), &mut entities);
-                text("TEXT", Vec2::new(end.x - sight.x * 4.0 + ox, end.y - sight.y * 4.0 - th * 0.3 + oy), th, letter.to_string(), &mut entities);
+                let off = (loff.get(2 * k).copied().unwrap_or(0.0), loff.get(2 * k + 1).copied().unwrap_or(0.0));
+                section_arrow(end, sight, *letter, th, off, &mut entities);
             }
         }
     }
@@ -954,24 +975,26 @@ fn hole_axes(scene: &meshes::Scene, parts: &[sketch::Part], key: Key) -> Vec<(Ve
 /// Vertical lines at `u - r` and `u + r` (a hole's two sides seen from the side): their extent along the vertical.
 fn vertical_span(lines: &[(Vec2, Vec2, bool)], u: f64, r: f64) -> Option<(f64, f64)> {
     let tol = (0.02 * r).max(0.05);
-    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
-    let (mut near, mut far) = (false, false);
+    // Each side of the hole has its own extent; the hole is where both sides are present, so a stray
+    // line on one side (another feature in line with it) cannot stretch the axis past the hole.
+    let (mut near, mut far) = ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN));
     for (a, b, _) in lines {
         if (a.x - b.x).abs() > 1e-6 + 1e-3 * (a.y - b.y).abs() {
             continue;
         }
         let off = a.x - u;
-        if (off + r).abs() <= tol {
-            near = true;
+        let side = if (off + r).abs() <= tol {
+            &mut near
         } else if (off - r).abs() <= tol {
-            far = true;
+            &mut far
         } else {
             continue;
-        }
-        lo = lo.min(a.y.min(b.y));
-        hi = hi.max(a.y.max(b.y));
+        };
+        side.0 = side.0.min(a.y.min(b.y));
+        side.1 = side.1.max(a.y.max(b.y));
     }
-    (near && far && hi > lo).then_some((lo, hi))
+    let (lo, hi) = (near.0.max(far.0), near.1.min(far.1));
+    (near.0 <= near.1 && far.0 <= far.1 && hi > lo).then_some((lo, hi))
 }
 
 /// A centre line through an axis, a little longer than the hole at both ends.
