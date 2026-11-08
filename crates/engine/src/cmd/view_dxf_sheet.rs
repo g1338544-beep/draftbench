@@ -562,7 +562,8 @@ fn manual_once(
                 let d = Vec2::new(b.x - a.x, b.y - a.y);
                 let len = (d.x * d.x + d.y * d.y).sqrt();
                 if len.is_finite() && len > 1.0 {
-                    let u = Vec2::new(d.x / len * 3.0, d.y / len * 3.0);
+                    let over = (len * 0.15).clamp(1.5, 3.0);
+                    let u = Vec2::new(d.x / len * over, d.y / len * over);
                     line("CENTER", Vec2::new(a.x - u.x, a.y - u.y), Vec2::new(b.x + u.x, b.y + u.y), &mut entities);
                     any_centre = true;
                 }
@@ -654,7 +655,8 @@ fn manual_once(
                 let d = Vec2::new(b.x - a.x, b.y - a.y);
                 let len = (d.x * d.x + d.y * d.y).sqrt();
                 if len.is_finite() && len > 1.0 {
-                    let u = Vec2::new(d.x / len * 3.0, d.y / len * 3.0);
+                    let over = (len * 0.15).clamp(1.5, 3.0);
+                    let u = Vec2::new(d.x / len * over, d.y / len * over);
                     line("CENTER", Vec2::new(a.x - u.x, a.y - u.y), Vec2::new(b.x + u.x, b.y + u.y), &mut entities);
                     any_centre = true;
                 }
@@ -973,24 +975,26 @@ fn hole_axes(scene: &meshes::Scene, parts: &[sketch::Part], key: Key) -> Vec<(Ve
 /// Vertical lines at `u - r` and `u + r` (a hole's two sides seen from the side): their extent along the vertical.
 fn vertical_span(lines: &[(Vec2, Vec2, bool)], u: f64, r: f64) -> Option<(f64, f64)> {
     let tol = (0.02 * r).max(0.05);
-    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
-    let (mut near, mut far) = (false, false);
+    // Each side of the hole has its own extent; the hole is where both sides are present, so a stray
+    // line on one side (another feature in line with it) cannot stretch the axis past the hole.
+    let (mut near, mut far) = ((f64::MAX, f64::MIN), (f64::MAX, f64::MIN));
     for (a, b, _) in lines {
         if (a.x - b.x).abs() > 1e-6 + 1e-3 * (a.y - b.y).abs() {
             continue;
         }
         let off = a.x - u;
-        if (off + r).abs() <= tol {
-            near = true;
+        let side = if (off + r).abs() <= tol {
+            &mut near
         } else if (off - r).abs() <= tol {
-            far = true;
+            &mut far
         } else {
             continue;
-        }
-        lo = lo.min(a.y.min(b.y));
-        hi = hi.max(a.y.max(b.y));
+        };
+        side.0 = side.0.min(a.y.min(b.y));
+        side.1 = side.1.max(a.y.max(b.y));
     }
-    (near && far && hi > lo).then_some((lo, hi))
+    let (lo, hi) = (near.0.max(far.0), near.1.min(far.1));
+    (near.0 <= near.1 && far.0 <= far.1 && hi > lo).then_some((lo, hi))
 }
 
 /// A centre line through an axis, a little longer than the hole at both ends.
