@@ -88,7 +88,11 @@ fn line(layer: &str, a: Vec2, b: Vec2, entities: &mut Vec<DxfEntity>) {
 
 /// A heavy stroke (the cutting line's ends, the section arrows): several parallel lines about a millimetre wide.
 fn heavy(a: Vec2, b: Vec2, entities: &mut Vec<DxfEntity>) {
-    let Some(d) = unit(Vec2::new(b.x - a.x, b.y - a.y)) else { return };
+    let n = (b.x - a.x).hypot(b.y - a.y);
+    if !(n.is_finite() && n > 1e-9) {
+        return;
+    }
+    let d = Vec2::new((b.x - a.x) / n, (b.y - a.y) / n);
     for k in -2..=2 {
         let o = f64::from(k) * 0.2;
         line("VISIBLE", Vec2::new(a.x - d.y * o, a.y + d.x * o), Vec2::new(b.x - d.y * o, b.y + d.x * o), entities);
