@@ -86,15 +86,15 @@ fn line(layer: &str, a: Vec2, b: Vec2, entities: &mut Vec<DxfEntity>) {
     entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Line(a, b) });
 }
 
-/// A heavy stroke (the cutting line's ends, the section arrows): several parallel lines about a millimetre wide.
+/// A heavy stroke (the cutting line's ends, the section arrows): three parallel lines, a little over a third of a millimetre wide.
 fn heavy(a: Vec2, b: Vec2, entities: &mut Vec<DxfEntity>) {
     let n = (b.x - a.x).hypot(b.y - a.y);
     if !(n.is_finite() && n > 1e-9) {
         return;
     }
     let d = Vec2::new((b.x - a.x) / n, (b.y - a.y) / n);
-    for k in -2..=2 {
-        let o = f64::from(k) * 0.2;
+    for k in -1..=1 {
+        let o = f64::from(k) * 0.12;
         line("VISIBLE", Vec2::new(a.x - d.y * o, a.y + d.x * o), Vec2::new(b.x - d.y * o, b.y + d.x * o), entities);
     }
 }
