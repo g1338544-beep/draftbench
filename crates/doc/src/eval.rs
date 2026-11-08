@@ -5412,7 +5412,19 @@ pub fn ruled_probe_dir(b: &ModelBody, at: Vec3, mode: usize, angle: f64, dir: Op
     if n == 0 {
         return None;
     }
-    ((sum * (1.0 / n as f64)) - at).normalized()
+    let mut v = (sum * (1.0 / n as f64)) - at;
+    // Square to the edge: points picked near an end of an edge pull the mean along the edge as well.
+    let mesh = b.mesh();
+    let nearest = mesh
+        .edges
+        .iter()
+        .flat_map(|e| e.windows(2))
+        .filter_map(|w| Some((at.dist_to_segment(*w.first()?, *w.get(1)?), (*w.get(1)? - *w.first()?).normalized()?)))
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    if let Some((_, t)) = nearest {
+        v = v - t * v.dot(t);
+    }
+    v.normalized()
 }
 
 fn smooth_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<Vec3> {
