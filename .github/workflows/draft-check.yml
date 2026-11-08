@@ -26,6 +26,6 @@ jobs:
           if cur: ents.append(cur)
           for e in ents:
               d=dict((c,v) for c,v in e['v'])
-              if e['t']=='LINE' and d.get('20') and 200<float(d['20'])<290 and d.get('20')==d.get('21'):
-                  print('H', d.get('8'), round(float(d['10']),1), round(float(d['11']),1), 'y', round(float(d['20']),1))
+              if e['t']=='LINE' and d.get('8')=='CENTER':
+                  print('CL', *[round(float(d[k]),1) for k in ('10','20','11','21')])
           PY
