@@ -2124,18 +2124,18 @@ fn section_view_for(placed: &[PlacedView], c: char) -> Option<usize> {
     None
 }
 
-/// The section whose cutting-line arrow is under `s`: a short dimension-layer stroke next to the section's letter.
+/// The section whose cutting-line arrow is under `s`: a short stroke (the arrow's stem or head) next to the section's letter.
 fn arrow_hit(sheet: &Sheet, placed: &[PlacedView], s: Pos2) -> Option<usize> {
     for (layer, shape) in sheet.items.iter().take(200_000) {
-        let (Layer::Dim, Shape::Line(a, b)) = (layer, shape) else { continue };
-        if (*b - *a).length() > 10.0 || dist_to_segment(s, (*a, *b)) > 2.5 {
+        let (Layer::Dim | Layer::Visible, Shape::Line(a, b)) = (layer, shape) else { continue };
+        if (*b - *a).length() > 16.0 || dist_to_segment(s, (*a, *b)) > 2.5 {
             continue;
         }
         for (_, t) in sheet.items.iter().take(200_000) {
             let Shape::Text(at, _, text, _, _) = t else { continue };
             let mut chars = text.chars();
             let (Some(c), None) = (chars.next(), chars.next()) else { continue };
-            if c.is_ascii_alphanumeric() && (at.distance(*a) < 14.0 || at.distance(*b) < 14.0) && let Some(i) = section_view_for(placed, c) {
+            if c.is_ascii_alphanumeric() && (at.distance(*a) < 28.0 || at.distance(*b) < 28.0) && let Some(i) = section_view_for(placed, c) {
                 return Some(i);
             }
         }
