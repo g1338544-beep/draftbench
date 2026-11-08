@@ -349,7 +349,25 @@ fn edge_leave(m: &Mesh, index: usize, p: Vec3, reference: Option<u32>) -> Option
     // The face the strip takes its direction from: the picked reference face where it borders
     // the edge, else the lowest-numbered face beside it (the kernel's tie-break).
     let faces = m.edge_faces.get(index)?;
-    let f = reference.filter(|r| faces.contains(r)).or_else(|| faces.iter().copied().min())?;
+    // Failing that, a flat face beside the edge (a strip that carries the plane on), else the lowest-numbered.
+    let flat = |f: u32| {
+        let mut first: Option<Vec3> = None;
+        m.triangles.iter().zip(&m.tri_face).filter(|(_, tf)| **tf == f).filter_map(|(t, _)| m.tri(t)).take(2000).all(|[a, b, c]| {
+            let n = (b - a).cross(c - a).normalized();
+            match (n, first) {
+                (Some(n), Some(f0)) => n.dot(f0) > 0.9999,
+                (Some(n), None) => {
+                    first = Some(n);
+                    true
+                }
+                _ => true,
+            }
+        })
+    };
+    let f = reference
+        .filter(|r| faces.contains(r))
+        .or_else(|| faces.iter().copied().filter(|f| flat(*f)).min())
+        .or_else(|| faces.iter().copied().min())?;
     let (n, c) = m
         .triangles
         .iter()
