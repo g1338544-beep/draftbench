@@ -308,6 +308,14 @@ fn manual_once(
             Some((_, _, angles)) => Some(angles),
             None => custom,
         };
+        // A section on a plane of an axis (no drawn line) turns round by looking from the other side: the
+        // opposite direction of sight, with the arrows on the cutting line pointing the other way.
+        let custom = if flip && line_plane.is_none() && item.get("section").is_some() {
+            let (yaw, pitch) = custom.unwrap_or_else(|| view.angles());
+            Some((yaw + std::f64::consts::PI, -pitch))
+        } else {
+            custom
+        };
         let section: Option<(usize, Option<f64>)> = if section_line.is_some() || section_path.is_some() { Some((3, None)) } else { item.get("section").and_then(|sec| {
             let axis = match sec.get("axis").and_then(Value::as_str)? {
                 "x" => 0,
