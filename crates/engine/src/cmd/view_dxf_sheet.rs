@@ -97,16 +97,18 @@ fn heavy(a: Vec2, b: Vec2, entities: &mut Vec<DxfEntity>) {
 
 /// A section arrow at the end of a cutting line: a heavy stem, a solid head and the letter beside the tail.
 fn section_arrow(end: Vec2, sight: Vec2, letter: char, th: f64, (ox, oy): (f64, f64), entities: &mut Vec<DxfEntity>) {
-    let tip = Vec2::new(end.x + sight.x * 14.0, end.y + sight.y * 14.0);
-    heavy(end, tip, entities);
-    let base = Vec2::new(tip.x - sight.x * 5.0, tip.y - sight.y * 5.0);
+    // The head touches the end of the cutting line and points the way the section looks; the stem
+    // runs back from it, and the letter stands beyond the tail.
+    let tail = Vec2::new(end.x - sight.x * 14.0, end.y - sight.y * 14.0);
+    heavy(tail, end, entities);
+    let base = Vec2::new(end.x - sight.x * 5.0, end.y - sight.y * 5.0);
     let side = |w: f64| Vec2::new(base.x - sight.y * w, base.y + sight.x * w);
     for k in 0..=8 {
         let w = -1.8 + 0.45 * f64::from(k);
-        line("VISIBLE", tip, side(w), entities);
+        line("VISIBLE", end, side(w), entities);
     }
     line("VISIBLE", side(-1.8), side(1.8), entities);
-    text("TEXT", Vec2::new(end.x - sight.x * 6.0 - th * 0.6 + ox, end.y - sight.y * 6.0 - th * 0.7 + oy), th * 1.5, letter.to_string(), entities);
+    text("TEXT", Vec2::new(tail.x - sight.x * (th * 1.6) - th * 0.6 + ox, tail.y - sight.y * (th * 1.6) - th * 0.7 + oy), th * 1.5, letter.to_string(), entities);
 }
 
 fn rect(layer: &str, lo: Vec2, hi: Vec2, entities: &mut Vec<DxfEntity>) {
