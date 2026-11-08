@@ -6393,6 +6393,7 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
             if (deg - m).abs() <= 1.5 && (m / 90.0).fract().abs() > 1e-3 && (m / 90.0).fract().abs() < 0.999 {
                 let u = vec2(m.to_radians().cos(), m.to_radians().sin());
                 guides.push([f - u * 400.0, f + u * 400.0]);
+                p = f + u * d.dot(u);
             }
             // Only the hole the pointer lines up with best: several nearly parallel guides would pile up.
             let mut best: Option<(f32, egui::Vec2)> = None;
@@ -6406,6 +6407,7 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
             }
             if let Some((_, u)) = best {
                 guides.push([f - u * 400.0, f + u * 400.0]);
+                p = f + u * (p - f).dot(u);
             }
         }
     }
