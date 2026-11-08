@@ -602,12 +602,19 @@ fn manual_once(
                     continue;
                 }
                 done.push(xi);
-                if let Some((a, b)) = clip_line(turned(Vec2::new(xi, 0.0)), dir, all.lo, all.hi) {
+                // The line runs the hole's own length: the extent of its two walls in the cut, not the
+                // whole view.
+                let seg = match vertical_span(&all.lines, xi, *rad) {
+                    Some((lo, hi)) => Some((turned(Vec2::new(xi, lo)), turned(Vec2::new(xi, hi)))),
+                    None => clip_line(turned(Vec2::new(xi, 0.0)), dir, all.lo, all.hi),
+                };
+                if let Some((a, b)) = seg {
                     let (a, b) = (to_sheet(a), to_sheet(b));
                     let d = Vec2::new(b.x - a.x, b.y - a.y);
                     let l = (d.x * d.x + d.y * d.y).sqrt();
                     if l.is_finite() && l > 1.0 {
-                        let e = Vec2::new(d.x / l * 3.0, d.y / l * 3.0);
+                        let over = (l * 0.15).clamp(1.5, 3.0);
+                        let e = Vec2::new(d.x / l * over, d.y / l * over);
                         line("CENTER", Vec2::new(a.x - e.x, a.y - e.y), Vec2::new(b.x + e.x, b.y + e.y), &mut entities);
                         any_centre = true;
                     }
