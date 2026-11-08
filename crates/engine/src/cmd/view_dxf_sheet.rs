@@ -106,6 +106,30 @@ fn manual(
     title: String,
     path: Option<String>,
 ) -> Result<Built> {
+    // A view without a scale of its own takes the scale of the first view that has one (a projected
+    // view follows its parent), so the drawing never shows TOP 1:1 beside RIGHT 1:2.
+    if p.get("scale").is_none() {
+        let plain = |it: &Value| it.get("detail").is_none() && it.get("scale_from").is_none();
+        let given = list.iter().take(12).filter(|it| plain(it)).find_map(|it| it.get("scale").and_then(Value::as_f64).filter(|k| k.is_finite() && *k > 0.0));
+        if let Some(k) = given
+            && list.iter().take(12).any(|it| plain(it) && it.get("scale").and_then(Value::as_f64).is_none())
+        {
+            let filled: Vec<Value> = list
+                .iter()
+                .map(|it| {
+                    let mut it = it.clone();
+                    if plain(&it)
+                        && it.get("scale").and_then(Value::as_f64).is_none()
+                        && let Some(o) = it.as_object_mut()
+                    {
+                        o.insert("scale".into(), json!(k));
+                    }
+                    it
+                })
+                .collect();
+            return manual_once(p, scene, parts, key, &filled, sheet, first_angle, title, path);
+        }
+    }
     let built = manual_once(p, scene, parts, key, list, sheet, first_angle, title.clone(), path.clone())?;
     // Views with no scale of their own all get the same one: the smallest each would have chosen, so
     // the drawing doesn't show one view at 1:1 beside another at 1:2.
