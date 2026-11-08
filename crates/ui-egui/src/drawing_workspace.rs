@@ -1055,6 +1055,16 @@ fn shaded_key(app: &SolveApp, v: &ShadedView) -> String {
 /// The picture of a shaded view, drawn now if it is not in the cache. One CPU render of the whole
 /// model: it takes a moment on a large design.
 fn shaded_picture(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
+    // Drawn with the bodies shown as they were at the last Update, like the lines.
+    let kept = app.drawing.drawn_visibility.clone().map(|snap| std::mem::replace(&mut app.session.visibility, snap));
+    let picture = shaded_picture_now(app, v);
+    if let Some(now) = kept {
+        app.session.visibility = now;
+    }
+    picture
+}
+
+fn shaded_picture_now(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
     let key = shaded_key(app, v);
     if let Some(hit) = app.drawing.shaded_cache.iter().find(|c| c.0 == key) {
         return Some(hit.1.clone());
