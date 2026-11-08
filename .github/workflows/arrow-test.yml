@@ -1,0 +1,13 @@
+name: Arrow test
+on:
+  push:
+    branches: [arrow-test]
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p solidcraft-ui-egui ruled_arrow_runs_along_the_strip -- --nocapture 2>&1 | tail -40

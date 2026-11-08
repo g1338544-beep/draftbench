@@ -129,3 +129,30 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
         h.app.dialog = None;
     }
 }
+
+/// A ruled surface's arrow lies along the strip: outward and flat from the rim of a flange's top face,
+/// square to the edge.
+#[test]
+fn ruled_arrow_runs_along_the_strip() {
+    let mut h = Harness::new();
+    h.app.run("solid.cylinder", json!({"base": [0, 0, 0], "axis": "Z", "radius": 100, "height": 15, "operation": "new_body", "body_name": "Body1"})).unwrap();
+    h.app.run("solid.cylinder", json!({"base": [0, 0, 15], "axis": "Z", "radius": 45, "height": 25, "operation": "new_body", "body_name": "Hub"})).unwrap();
+    h.app.run("solid.combine", json!({"target": "Body1", "tools": ["Hub"], "operation": "join"})).unwrap();
+    h.frames(2);
+    let st = h.app.session.world_state();
+    let m = st.body("Body1").unwrap().mesh();
+    let (i, e) = m
+        .edges
+        .iter()
+        .enumerate()
+        .find(|(_, e)| e.len() > 3 && e.iter().all(|p| (p.z - 15.0).abs() < 1e-6 && ((p.x * p.x + p.y * p.y).sqrt() - 100.0).abs() < 1e-3))
+        .expect("the rim edge");
+    let p = e[e.len() / 2];
+    drop(st);
+    h.app.session.selection = vec![Sel::Edge { body: "Body1".into(), index: i, point: p }];
+    h.app.start("surface.ruled");
+    let (at, dir) = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let dir = dir.expect("an arrow");
+    let out = Vec3::new(p.x, p.y, 0.0).normalized().unwrap();
+    assert!(dir.z.abs() < 0.05 && dir.dot(out) > 0.95, "at {at:?}, rim point {p:?}, arrow {dir:?}");
+}
