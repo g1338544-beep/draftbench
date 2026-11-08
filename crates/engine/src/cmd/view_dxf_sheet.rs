@@ -565,8 +565,16 @@ fn manual_once(
                 if !wanted {
                     continue;
                 }
-                let a = to_sheet(turned(Vec2::new(p0.dot(rv), p0.dot(uv))));
-                let b = to_sheet(turned(Vec2::new(p1.dot(rv), p1.dot(uv))));
+                let (mut q0, mut q1) = (Vec2::new(p0.dot(rv), p0.dot(uv)), Vec2::new(p1.dot(rv), p1.dot(uv)));
+                // An upright axis runs the length of its hole as the cut itself shows it: between the two walls
+                // standing either side of it.
+                if (q0.x - q1.x).abs() < 1e-6
+                    && let Some((lo, hi)) = wall_span(&all.lines, q0.x)
+                {
+                    (q0, q1) = (Vec2::new(q0.x, lo), Vec2::new(q0.x, hi));
+                }
+                let a = to_sheet(turned(q0));
+                let b = to_sheet(turned(q1));
                 let d = Vec2::new(b.x - a.x, b.y - a.y);
                 let len = (d.x * d.x + d.y * d.y).sqrt();
                 if len.is_finite() && len > 1.0 {
@@ -1021,6 +1029,19 @@ fn vertical_span(lines: &[(Vec2, Vec2, bool)], u: f64, r: f64) -> Option<(f64, f
     }
     let (lo, hi) = (near.0.max(far.0), near.1.min(far.1));
     (near.0 <= near.1 && far.0 <= far.1 && hi > lo).then_some((lo, hi))
+}
+
+/// The extent along the vertical of the hole an upright axis at `u` runs through, read off the outline: the
+/// nearest pair of vertical walls at equal distances either side of it.
+fn wall_span(lines: &[(Vec2, Vec2, bool)], u: f64) -> Option<(f64, f64)> {
+    let mut offsets: Vec<f64> = lines
+        .iter()
+        .filter(|(a, b, _)| (a.x - b.x).abs() <= 1e-6 + 1e-3 * (a.y - b.y).abs() && a.x < u - 0.05)
+        .map(|(a, _, _)| u - a.x)
+        .collect();
+    offsets.sort_by(|p, q| p.total_cmp(q));
+    offsets.dedup_by(|p, q| (*p - *q).abs() < 1e-4);
+    offsets.into_iter().take(200).find_map(|r| vertical_span(lines, u, r))
 }
 
 /// A centre line through an axis, a little longer than the hole at both ends.
