@@ -142,9 +142,13 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
             let edge_dir = match first {
                 Sel::Edge { body, index, .. } => st.body(body).and_then(|b| {
                     let m = b.mesh();
+                    let reference = match d.inputs.get(1).and_then(|i| i.items.first()) {
+                        Some(Sel::Face { index, .. }) => u32::try_from(*index).ok(),
+                        _ => None,
+                    };
                     match &d.kind {
                         Kind::Surface(crate::dialogs_surface::Surf::Ruled { mode, angle, flip, .. }) => {
-                            let (out, face_n) = edge_leave(&m, *index, at)?;
+                            let (out, face_n) = edge_leave(&m, *index, at, reference)?;
                             let dir = match *mode {
                                 0 => face_n,
                                 2 => {
@@ -162,7 +166,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                             let dir = if *flip { -dir } else { dir };
                             dir.normalized()
                         }
-                        Kind::Surface(crate::dialogs_surface::Surf::Extend { .. }) => edge_leave(&m, *index, at).map(|(out, _)| out),
+                        Kind::Surface(crate::dialogs_surface::Surf::Extend { .. }) => edge_leave(&m, *index, at, None).map(|(out, _)| out),
                         _ => blend_grow_dir(&m, *index, at),
                     }
                 }),
@@ -295,14 +299,25 @@ fn edge_sides(m: &Mesh, index: usize, p: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
 /// How a surface leaves a picked edge: the unit direction in the face beside it, square to the
 /// edge and pointing away from the face (where a strip or an extension grows), and that face's
 /// normal. The first face beside the edge is the reference.
-fn edge_leave(m: &Mesh, index: usize, p: Vec3) -> Option<(Vec3, Vec3)> {
+fn edge_leave(m: &Mesh, index: usize, p: Vec3, reference: Option<u32>) -> Option<(Vec3, Vec3)> {
     let poly = m.edges.get(index)?;
     let i = (0..poly.len().saturating_sub(1)).min_by(|a, b| {
         let d = |k: &usize| poly.get(*k).zip(poly.get(*k + 1)).map_or(f64::INFINITY, |(u, v)| ((*u + *v) * 0.5).dist(p));
         d(a).total_cmp(&d(b))
     })?;
     let tangent = (*poly.get(i + 1)? - *poly.get(i)?).normalized()?;
-    let (n, c) = *edge_sides(m, index, p)?.first()?;
+    // The face the strip takes its direction from: the picked reference face where it borders
+    // the edge, else the lowest-numbered face beside it (the kernel's tie-break).
+    let faces = m.edge_faces.get(index)?;
+    let f = reference.filter(|r| faces.contains(r)).or_else(|| faces.iter().copied().min())?;
+    let (n, c) = m
+        .triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, tf)| **tf == f)
+        .filter_map(|(t, _)| m.tri(t))
+        .min_by(|a, b| ((a[0] + a[1] + a[2]) / 3.0).dist(p).total_cmp(&((b[0] + b[1] + b[2]) / 3.0).dist(p)))
+        .and_then(|[a, b, c]| Some(((b - a).cross(c - a).normalized()?, (a + b + c) / 3.0)))?;
     let v = c - p;
     let across = v - tangent * v.dot(tangent);
     let out = (-across).normalized().or_else(|| n.cross(tangent).normalized())?;
