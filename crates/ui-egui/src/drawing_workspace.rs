@@ -446,6 +446,8 @@ pub struct State {
     /// The model revision the sheet on screen was made from, and the design it belongs to: the sheet keeps
     /// what it shows until Update is pressed, however the 3D model changes meanwhile (0 = not made yet).
     drawn_rev: u64,
+    /// Update is recomputing the sheet from the model as it is now.
+    updating: bool,
     /// Which bodies were shown when the drawing was last updated.
     drawn_visibility: Option<solidcraft_engine::Visibility>,
     drawn_design: String,
@@ -590,6 +592,7 @@ impl Default for State {
             menu_at: None,
             scale_edit: None,
             drawn_rev: 0,
+            updating: false,
             drawn_visibility: None,
             drawn_design: String::new(),
             orient: None,
@@ -1455,6 +1458,8 @@ fn parse(v: &Value) -> Option<Sheet> {
 /// Start an Update: the model first, then each placed view, one stage per frame.
 fn begin(app: &mut SolveApp) {
     app.drawing.drawn_visibility = Some(app.session.visibility.clone());
+    app.drawing.drawn_rev = app.session.revision;
+    app.drawing.drawn_design = app.session.doc.name.clone();
     let mut steps = vec!["scene".to_string()];
     for v in &app.drawing.placed {
         let name = match v.custom {
@@ -1484,7 +1489,11 @@ fn run_sheet(app: &mut SolveApp, p: Value) -> Result<Value, String> {
 
 /// Compose the sheet from what is already computed (cheap) without moving the camera.
 fn refresh(app: &mut SolveApp) {
-    let p = params(&app.drawing);
+    let mut p = params(&app.drawing);
+    // Until Update, the sheet keeps the model it was last computed from, whatever changed in 3D since.
+    if !app.drawing.updating && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == app.session.doc.name {
+        p["freeze"] = json!(true);
+    }
     match run_sheet(app, p) {
         Ok(v) => match parse(&v) {
             Some(sheet) => {
@@ -1503,7 +1512,9 @@ fn refresh(app: &mut SolveApp) {
 /// Compose the sheet and frame it.
 pub fn update(app: &mut SolveApp) {
     app.drawing.drawn_visibility = Some(app.session.visibility.clone());
+    app.drawing.updating = true;
     refresh(app);
+    app.drawing.updating = false;
     fit(app);
     app.drawing.drawn_rev = app.session.revision;
     app.drawing.drawn_design = app.session.doc.name.clone();

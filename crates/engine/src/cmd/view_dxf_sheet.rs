@@ -1381,7 +1381,12 @@ fn build(s: &mut Session, p: &Value) -> Result<Built> {
         None => 0.15,
         Some(v) => v.as_f64().filter(|t| (0.001..=2.0).contains(t)).ok_or_else(|| bad(CMD, "tolerance must be 0.001..2 mm"))?,
     };
-    let key = cache_key(s, tolerance);
+    // A frozen sheet (re-laid-out after a move, not updated) keeps the model it was last computed from.
+    let frozen = p.get("freeze").and_then(Value::as_bool).unwrap_or(false);
+    let key = match frozen.then(|| CACHE.with(|c| c.borrow().key)).flatten() {
+        Some(kept) => kept,
+        None => cache_key(s, tolerance),
+    };
     let (scene, parts) = scene_and_parts(s, tolerance, key)?;
 
     if let Some(list) = p.get("placements").and_then(Value::as_array) {
