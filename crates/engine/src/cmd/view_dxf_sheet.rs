@@ -646,12 +646,23 @@ fn manual_once(
             infos.insert(index, ViewInfo { lines: all.clone(), circles: here, x, y, c, scale, view });
         }
         // Every projected view: each hole's axis, wherever it shows as a line, is drawn as a centre line.
-        if centres_on && !axes.is_empty() {
+        // A view turned by quarter turns or by an angle shows them turned with it.
+        if section.is_none() && detail.is_none() && item.get("center").and_then(Value::as_bool).unwrap_or(true) && !axes.is_empty() {
             let cam = Camera { target: Vec3::ZERO, yaw: angles.0, pitch: angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
             let (rv, uv, _) = cam.basis();
+            let (sn, cs) = spin.to_radians().sin_cos();
+            let turned = |q: Vec2| {
+                let q = match quarter % 4 {
+                    1 => Vec2::new(-q.y, q.x),
+                    2 => Vec2::new(-q.x, -q.y),
+                    3 => Vec2::new(q.y, -q.x),
+                    _ => q,
+                };
+                Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs)
+            };
             for (p0, p1) in &axes {
-                let a = to_sheet(Vec2::new(p0.dot(rv), p0.dot(uv)));
-                let b = to_sheet(Vec2::new(p1.dot(rv), p1.dot(uv)));
+                let a = to_sheet(turned(Vec2::new(p0.dot(rv), p0.dot(uv))));
+                let b = to_sheet(turned(Vec2::new(p1.dot(rv), p1.dot(uv))));
                 let d = Vec2::new(b.x - a.x, b.y - a.y);
                 let len = (d.x * d.x + d.y * d.y).sqrt();
                 if len.is_finite() && len > 1.0 {

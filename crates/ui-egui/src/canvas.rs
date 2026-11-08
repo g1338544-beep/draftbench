@@ -137,11 +137,42 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // Surface commands with a length (Extrude, Offset, Thicken, Extend...): an arrow along the picked
         // face's, plane's or profile's normal, so the size can be pulled in and out.
         Kind::Surface(_) => {
+            // Ruled and Extend reach away from the picked edge, so their arrow lies along the
+            // strip: in the face's own surface and square to the edge, pointing off the face.
             let edge_dir = match first {
-                Sel::Edge { body, index, .. } => st.body(body).and_then(|b| blend_grow_dir(&b.mesh(), *index, at)),
+                Sel::Edge { body, index, .. } => st.body(body).and_then(|b| {
+                    let m = b.mesh();
+                    match &d.kind {
+                        Kind::Surface(crate::dialogs_surface::Surf::Ruled { mode, angle, flip, .. }) => {
+                            let (out, face_n) = edge_leave(&m, *index, at)?;
+                            let dir = match *mode {
+                                0 => face_n,
+                                2 => {
+                                    let a = app.session.doc.eval(angle, ValueKind::Angle).unwrap_or(0.0);
+                                    face_n * a.cos() + out * a.sin()
+                                }
+                                3 => d
+                                    .inputs
+                                    .get(2)
+                                    .and_then(|i| i.items.first())
+                                    .and_then(|x| crate::dialogs::axis_of(app, x))
+                                    .map_or(out, |a| a.1),
+                                _ => out,
+                            };
+                            let dir = if *flip { -dir } else { dir };
+                            dir.normalized()
+                        }
+                        Kind::Surface(crate::dialogs_surface::Surf::Extend { .. }) => edge_leave(&m, *index, at).map(|(out, _)| out),
+                        _ => blend_grow_dir(&m, *index, at),
+                    }
+                }),
                 _ => None,
             };
-            (at, normal.or(edge_dir))
+            if matches!(&d.kind, Kind::Surface(crate::dialogs_surface::Surf::Ruled { .. } | crate::dialogs_surface::Surf::Extend { .. })) {
+                (at, edge_dir.or(normal))
+            } else {
+                (at, normal.or(edge_dir))
+            }
         }
         Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),
         // A sketch move's X Distance grows along the sketch's own x axis, so its drag arrow
@@ -259,6 +290,23 @@ fn edge_sides(m: &Mesh, index: usize, p: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
                 .and_then(|[a, b, c]| Some(((b - a).cross(c - a).normalized()?, (a + b + c) / 3.0)))
         })
         .collect()
+}
+
+/// How a surface leaves a picked edge: the unit direction in the face beside it, square to the
+/// edge and pointing away from the face (where a strip or an extension grows), and that face's
+/// normal. The first face beside the edge is the reference.
+fn edge_leave(m: &Mesh, index: usize, p: Vec3) -> Option<(Vec3, Vec3)> {
+    let poly = m.edges.get(index)?;
+    let i = (0..poly.len().saturating_sub(1)).min_by(|a, b| {
+        let d = |k: &usize| poly.get(*k).zip(poly.get(*k + 1)).map_or(f64::INFINITY, |(u, v)| ((*u + *v) * 0.5).dist(p));
+        d(a).total_cmp(&d(b))
+    })?;
+    let tangent = (*poly.get(i + 1)? - *poly.get(i)?).normalized()?;
+    let (n, c) = *edge_sides(m, index, p)?.first()?;
+    let v = c - p;
+    let across = v - tangent * v.dot(tangent);
+    let out = (-across).normalized().or_else(|| n.cross(tangent).normalized())?;
+    Some((out, n))
 }
 
 /// The outward direction between the two faces at an edge: the mean of their normals.
