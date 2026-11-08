@@ -5401,7 +5401,7 @@ pub fn ruled_probe_dir(b: &ModelBody, at: Vec3, mode: usize, angle: f64, dir: Op
     };
     let r = kernel::Ruled { distance: d, mode, flip, corners: kernel::RuledCorners::Mitre, face };
     let strip = kernel::ruled_surface(&b.body, &[at], &r).ok()?;
-    let m = strip.mesh();
+    let m = strip.tessellate(d * 0.05).ok()?;
     let (mut sum, mut n) = (Vec3::ZERO, 0usize);
     for q in &m.positions {
         if q.dist(at) <= d * 1.5 {
