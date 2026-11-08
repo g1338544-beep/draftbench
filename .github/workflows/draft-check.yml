@@ -13,7 +13,22 @@ jobs:
       - run: cargo build --release -p solidcraft-cli
       - run: |
           mkdir -p out
-          ./target/release/solidcraft-cli run examples/ev/scale-check.json --results --allow-errors 2>&1 | grep -E "error" | head
-          grep -c . out/d.dxf out/e.dxf || true
-          for f in out/d.dxf out/e.dxf; do echo $f; grep -a -c CENTER $f; grep -a -E "TOP |RIGHT " $f | head -4; done
-          grep -a -E 'TOP|RIGHT' out/d.dxf out/e.dxf | head
+          ./target/release/solidcraft-cli run examples/ev/scale-check.json --allow-errors 2>&1 | grep -i error | head
+          python3 - <<'PY'
+          L=open('out/flange.dxf',errors='ignore').read().split('\n')
+          pairs=[(L[i].strip(),L[i+1].strip()) for i in range(0,len(L)-1,2)]
+          ents=[];cur=None
+          for c,v in pairs:
+              if c=='0':
+                  if cur: ents.append(cur)
+                  cur={'t':v,'v':[]}
+              elif cur is not None: cur['v'].append((c,v))
+          if cur: ents.append(cur)
+          n=0
+          for e in ents:
+              d=dict((c,v) for c,v in e['v'])
+              if d.get('8')=='CENTER' and e['t']=='LINE':
+                  n+=1
+                  print('CL', d.get('10'),d.get('20'),'->',d.get('11'),d.get('21'))
+          print('center lines',n)
+          PY
