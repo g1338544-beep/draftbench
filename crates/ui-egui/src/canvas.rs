@@ -148,6 +148,40 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                     };
                     match &d.kind {
                         Kind::Surface(crate::dialogs_surface::Surf::Ruled { mode, angle, flip, .. }) => {
+                            // The kernel's own probe strip says which way it really leaves (it knows which face
+                            // it takes the direction from); the mesh reading below is the fallback.
+                            let a = app.session.doc.eval(angle, ValueKind::Angle).unwrap_or(0.0);
+                            let dir3 = d.inputs.get(2).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1);
+                            let face_pt = match d.inputs.get(1).and_then(|i| i.items.first()) {
+                                Some(Sel::Face { point, .. }) => Some(*point),
+                                _ => None,
+                            };
+                            let key = (body.clone(), *index, *mode, angle.clone(), *flip, face_pt.map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]), m.triangles.len() as u64);
+                            if let Some(cached) = PROBE.with(|c| c.borrow().get(&key).copied()) {
+                                if let Some(v) = cached {
+                                    return Some(v);
+                                }
+                            } else {
+                                let probed = solidcraft_engine::doc::ruled_probe_dir(
+                                    b,
+                                    at,
+                                    *mode,
+                                    a,
+                                    dir3,
+                                    *flip,
+                                    face_pt,
+                                );
+                                PROBE.with(|c| {
+                                    let mut c = c.borrow_mut();
+                                    if c.len() > 64 {
+                                        c.clear();
+                                    }
+                                    c.insert(key, probed);
+                                });
+                                if let Some(v) = probed {
+                                    return Some(v);
+                                }
+                            }
                             let (out, face_n) = edge_leave(&m, *index, at, reference)?;
                             let dir = match *mode {
                                 0 => face_n,
@@ -294,6 +328,12 @@ fn edge_sides(m: &Mesh, index: usize, p: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
                 .and_then(|[a, b, c]| Some(((b - a).cross(c - a).normalized()?, (a + b + c) / 3.0)))
         })
         .collect()
+}
+
+type ProbeKey = (String, usize, usize, String, bool, Option<[u64; 3]>, u64);
+thread_local! {
+    /// Ruled probe directions already worked out (they cost a kernel call), per dialog state.
+    static PROBE: std::cell::RefCell<std::collections::HashMap<ProbeKey, Option<Vec3>>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 /// How a surface leaves a picked edge: the unit direction in the face beside it, square to the

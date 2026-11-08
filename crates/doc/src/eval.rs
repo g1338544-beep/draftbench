@@ -5386,6 +5386,35 @@ pub fn tangent_face_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<(usize, Vec3)> {
     out
 }
 
+/// Which way a ruled surface leaves the edge picked at `at`, worked out by making a short probe strip
+/// with the kernel's own rules (reference face, tie-breaks, flip): the mean of the strip's mesh points
+/// around `at`, from `at`. None when the strip cannot be made. `mode`: 0 normal, 1 tangent, 2 angle
+/// (radians, from the face's normal), 3 direction `dir`.
+pub fn ruled_probe_dir(b: &ModelBody, at: Vec3, mode: usize, angle: f64, dir: Option<Vec3>, flip: bool, face: Option<Vec3>) -> Option<Vec3> {
+    let size = b.body.size();
+    let d = (size * 0.1).clamp(0.5, 50.0);
+    let mode = match mode {
+        0 => kernel::RuledMode::Normal,
+        2 => kernel::RuledMode::Angle { angle, reference: None },
+        3 => kernel::RuledMode::Direction(dir?),
+        _ => kernel::RuledMode::Tangent,
+    };
+    let r = kernel::Ruled { distance: d, mode, flip, corners: kernel::RuledCorners::Mitre, face };
+    let strip = kernel::ruled_surface(&b.body, &[at], &r).ok()?;
+    let m = strip.mesh();
+    let (mut sum, mut n) = (Vec3::ZERO, 0usize);
+    for q in &m.positions {
+        if q.dist(at) <= d * 1.5 {
+            sum = sum + *q;
+            n += 1;
+        }
+    }
+    if n == 0 {
+        return None;
+    }
+    ((sum * (1.0 / n as f64)) - at).normalized()
+}
+
 fn smooth_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<Vec3> {
     let mut out = picks.to_vec();
     out.extend(tangent_face_chain(b, picks).into_iter().map(|(_, point)| point));
