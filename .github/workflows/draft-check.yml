@@ -24,11 +24,8 @@ jobs:
                   cur={'t':v,'v':[]}
               elif cur is not None: cur['v'].append((c,v))
           if cur: ents.append(cur)
-          n=0
           for e in ents:
               d=dict((c,v) for c,v in e['v'])
-              if d.get('8')=='CENTER' and e['t']=='LINE':
-                  n+=1
-                  print('CL', d.get('10'),d.get('20'),'->',d.get('11'),d.get('21'))
-          print('center lines',n)
+              if e['t']=='LINE' and d.get('20') and 200<float(d['20'])<290 and d.get('20')==d.get('21'):
+                  print('H', d.get('8'), round(float(d['10']),1), round(float(d['11']),1), 'y', round(float(d['20']),1))
           PY
