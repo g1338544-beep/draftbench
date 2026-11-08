@@ -1,0 +1,24 @@
+name: Diag
+on:
+  push:
+    branches: [diag-faces]
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p solidcraft-cli
+      - run: |
+          ./target/release/solidcraft-cli run tmpdiag/f.json --results > out.json || true
+          python3 - <<'PY'
+          import json
+          d=json.load(open('out.json'))
+          r=d['results'] if isinstance(d,dict) else d
+          f=[x for x in r if isinstance(x,dict) and 'faces' in x and x.get('body')=='Flange'][-1]
+          for x in f['faces']:
+              n=x.get('plane_normal')
+              print(x['index'],x.get('name'),round(x['area'],1),n,[round(c,1) for c in x['centroid']])
+          PY
