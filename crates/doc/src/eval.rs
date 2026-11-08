@@ -5315,10 +5315,48 @@ pub fn tangent_face_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<(usize, Vec3)> {
     let mut chosen: Vec<u32> = picks.iter().filter_map(|p| face_of(*p).map(|f| f as u32)).collect();
     chosen.sort_unstable();
     chosen.dedup();
+    // Faces meeting at a shared mesh vertex count as neighbours even when no edge line joins
+    // them (a flat ring cut in two halves is one face to the eye).
+    let key = |q: Vec3| ((q.x * 1e3).round() as i64, (q.y * 1e3).round() as i64, (q.z * 1e3).round() as i64);
+    let mut at_vertex: std::collections::HashMap<(i64, i64, i64), Vec<u32>> = std::collections::HashMap::new();
+    for (t, tf) in m.triangles.iter().zip(&m.tri_face) {
+        for i in t {
+            if let Some(q) = m.positions.get(*i as usize) {
+                let list = at_vertex.entry(key(*q)).or_default();
+                if !list.contains(tf) && list.len() < 16 {
+                    list.push(*tf);
+                }
+            }
+        }
+    }
     let mut k = 0;
     while k < chosen.len() && chosen.len() < 10_000 {
         let f = chosen[k];
         k += 1;
+        let mut shared: Vec<(u32, Vec3)> = Vec::new();
+        for (t, tf) in m.triangles.iter().zip(&m.tri_face) {
+            if *tf != f {
+                continue;
+            }
+            for i in t {
+                let Some(q) = m.positions.get(*i as usize).copied() else { continue };
+                for g in at_vertex.get(&key(q)).into_iter().flatten() {
+                    if *g != f && !chosen.contains(g) && shared.len() < 4096 {
+                        shared.push((*g, q));
+                    }
+                }
+            }
+        }
+        for (g, q) in shared {
+            if chosen.contains(&g) {
+                continue;
+            }
+            if let (Some(n1), Some(n2)) = (normal_near(f, q), normal_near(g, q))
+                && n1.dot(n2) > 2f64.to_radians().cos()
+            {
+                chosen.push(g);
+            }
+        }
         for (e, fs) in m.edges.iter().zip(&m.edge_faces) {
             let (Some(&a), Some(&bb)) = (fs.first(), fs.get(1)) else { continue };
             let other = if a == f {
