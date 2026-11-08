@@ -649,7 +649,7 @@ impl State {
             "custom_w": self.custom_w, "custom_h": self.custom_h, "sheet_scale": self.sheet_scale,
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
             "bolt": self.bolt, "sec_flip": self.sec_flip, "hidden_style": self.hidden_style, "colours": self.colours,
-            "centre": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
+            "centre_auto": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
             "company": self.company, "material": self.material, "qty": self.qty, "finishing": self.finishing, "heat": self.heat, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_tpl": self.block_detail, "block_free": self.block_free, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
         })
     }
@@ -684,7 +684,8 @@ impl State {
         if let Some(b) = flag("sec_flip") {
             self.sec_flip = b;
         }
-        if let Some(b) = flag("centre") {
+        // "centre_auto" replaces the old "centre" key: an old off state kept from before the lines were reliable is dropped, so they come back on.
+        if let Some(b) = flag("centre_auto") {
             self.centre = b;
         }
         if let Some(b) = flag("hole_table") {
