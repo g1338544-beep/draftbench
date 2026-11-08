@@ -5390,7 +5390,7 @@ pub fn tangent_face_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<(usize, Vec3)> {
 /// with the kernel's own rules (reference face, tie-breaks, flip): the mean of the strip's mesh points
 /// around `at`, from `at`. None when the strip cannot be made. `mode`: 0 normal, 1 tangent, 2 angle
 /// (radians, from the face's normal), 3 direction `dir`.
-pub fn ruled_probe_dir(b: &ModelBody, at: Vec3, mode: usize, angle: f64, dir: Option<Vec3>, flip: bool, face: Option<Vec3>) -> Option<Vec3> {
+pub fn ruled_probe_dir(b: &ModelBody, at: Vec3, picks: &[Vec3], mode: usize, angle: f64, dir: Option<Vec3>, flip: bool, face: Option<Vec3>) -> Option<Vec3> {
     let size = b.body.size();
     let d = (size * 0.1).clamp(0.5, 50.0);
     let mode = match mode {
@@ -5400,7 +5400,7 @@ pub fn ruled_probe_dir(b: &ModelBody, at: Vec3, mode: usize, angle: f64, dir: Op
         _ => kernel::RuledMode::Tangent,
     };
     let r = kernel::Ruled { distance: d, mode, flip, corners: kernel::RuledCorners::Mitre, face };
-    let strip = kernel::ruled_surface(&b.body, &[at], &r).ok()?;
+    let strip = kernel::ruled_surface(&b.body, if picks.is_empty() { std::slice::from_ref(&at) } else { picks }, &r).ok()?;
     let m = strip.tessellate(d * 0.05).ok()?;
     let (mut sum, mut n) = (Vec3::ZERO, 0usize);
     for q in &m.positions {

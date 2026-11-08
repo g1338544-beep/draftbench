@@ -446,6 +446,8 @@ pub struct State {
     /// The model revision the sheet on screen was made from, and the design it belongs to: the sheet keeps
     /// what it shows until Update is pressed, however the 3D model changes meanwhile (0 = not made yet).
     drawn_rev: u64,
+    /// The stages of the sheet being composed use the model kept from the last Update.
+    freeze_steps: bool,
     /// Update is recomputing the sheet from the model as it is now.
     updating: bool,
     /// Which bodies were shown when the drawing was last updated.
@@ -592,6 +594,7 @@ impl Default for State {
             menu_at: None,
             scale_edit: None,
             drawn_rev: 0,
+            freeze_steps: false,
             updating: false,
             drawn_visibility: None,
             drawn_design: String::new(),
@@ -1208,7 +1211,7 @@ fn switch_page(app: &mut SolveApp, to: usize) {
     let Some(next) = st.pages.get(to).cloned() else { return };
     st.page = to;
     st.load_page(&next);
-    begin(app);
+    begin_keep(app, true);
 }
 
 /// Add a blank sheet after the last one and switch to it.
@@ -1457,9 +1460,19 @@ fn parse(v: &Value) -> Option<Sheet> {
 
 /// Start an Update: the model first, then each placed view, one stage per frame.
 fn begin(app: &mut SolveApp) {
-    app.drawing.drawn_visibility = Some(app.session.visibility.clone());
-    app.drawing.drawn_rev = app.session.revision;
-    app.drawing.drawn_design = app.session.doc.name.clone();
+    begin_keep(app, false);
+}
+
+/// Start composing the sheet stage by stage. With `keep`, the model it was last computed from stays (a
+/// page switch is not an Update); otherwise the model as it is now is taken.
+fn begin_keep(app: &mut SolveApp, keep: bool) {
+    let keep = keep && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == app.session.doc.name && app.drawing.drawn_visibility.is_some();
+    app.drawing.freeze_steps = keep;
+    if !keep {
+        app.drawing.drawn_visibility = Some(app.session.visibility.clone());
+        app.drawing.drawn_rev = app.session.revision;
+        app.drawing.drawn_design = app.session.doc.name.clone();
+    }
     let mut steps = vec!["scene".to_string()];
     for v in &app.drawing.placed {
         let name = match v.custom {
@@ -2122,6 +2135,38 @@ fn section_view_for(placed: &[PlacedView], c: char) -> Option<usize> {
         }
     }
     None
+}
+
+/// Names of the line kinds the Show lines switches stand for, in `layers_off` order.
+const LAYER_NAMES: [&str; 5] = ["visible lines", "hidden lines", "centre lines", "dimensions and section marks", "text"];
+
+/// Pixels per sheet millimetre of the page map, or a plain 4 before it exists.
+fn px_per_mm_hint(map: &Option<Map>) -> f32 {
+    map.as_ref().map_or(4.0, |m| m.px_per_mm().max(1e-3))
+}
+
+/// Which switch (index into `layers_off`) the line, circle or text at `s` belongs to.
+fn line_kind_at(sheet: &Sheet, s: Pos2, tol: f32) -> Option<usize> {
+    let mut best: Option<(f32, usize)> = None;
+    for (layer, shape) in sheet.items.iter().take(200_000) {
+        let kind = match layer {
+            Layer::Visible => 0,
+            Layer::Hidden => 1,
+            Layer::Center => 2,
+            Layer::Dim => 3,
+            Layer::Text => 4,
+            Layer::Sheet => continue,
+        };
+        let d = match shape {
+            Shape::Line(a, b) => dist_to_segment(s, (*a, *b)),
+            Shape::Circle(c, r) => ((s - *c).length() - r).abs(),
+            _ => continue,
+        };
+        if d <= tol && best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, kind));
+        }
+    }
+    best.map(|(_, k)| k)
 }
 
 /// The section whose cutting-line arrow is under `s`: a short stroke (the arrow's stem or head) next to the section's letter.
@@ -3949,6 +3994,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.drawing.painted = false;
         let mut p = params(&app.drawing);
         p["warm"] = json!(next);
+        if app.drawing.freeze_steps {
+            p["freeze"] = json!(true);
+        }
         app.drawing.steps.remove(0);
         if let Err(e) = run_sheet(app, p) {
             app.drawing.steps.clear();
@@ -4992,8 +5040,27 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut menu_scale: Option<usize> = None;
     let mut menu_proj: Option<usize> = None;
     let app_has_clip = app.drawing.cell_clip.is_some();
+    let mut hide_layer: Option<usize> = None;
+    let mut show_all_lines = false;
+    let any_off = app.drawing.layers_off.iter().any(|b| *b);
     if let Some((target, at)) = app.drawing.menu_at {
+        // The kind of line under the pointer, for the hide entry.
+        let under_kind = app.drawing.sheet.as_ref().and_then(|sheet| line_kind_at(sheet, at, 3.0 / px_per_mm_hint(&map)));
         crate::ui_kit::Menu::context(&response, |ui| {
+            if let Some(k) = under_kind {
+                let name = LAYER_NAMES.get(k).copied().unwrap_or("lines");
+                if crate::ui_kit::list_picker(ui, &format!("Hide {name}"), &format!("Hide {name}"), false).clicked() {
+                    hide_layer = Some(k);
+                    ui.close();
+                }
+            }
+            if any_off && crate::ui_kit::list_picker(ui, "Show all lines", "Show all lines", false).clicked() {
+                show_all_lines = true;
+                ui.close();
+            }
+            if under_kind.is_some() || any_off {
+                ui.separator();
+            }
             for (i, (_, label)) in VIEWS.iter().enumerate() {
                 if crate::ui_kit::list_picker(ui, &format!("Add {label} view here"), label, false).clicked() {
                     menu_add = Some((i, at));
@@ -5025,6 +5092,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
+    }
+    if let Some(k) = hide_layer
+        && let Some(slot) = app.drawing.layers_off.get_mut(k)
+    {
+        *slot = true;
+    }
+    if show_all_lines {
+        app.drawing.layers_off = [false; 5];
     }
     if let Some((paste, at)) = menu_text {
         if paste {

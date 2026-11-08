@@ -1274,6 +1274,30 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
             }
         };
         out.retain(|(a, b)| !(smooth(*a) && smooth(*b)));
+        // A circular seam seen edge-on arrives as many short pieces end to end: where such a run, taken whole,
+        // starts and ends on the smooth outline (a bore wall either side), all of it is left out.
+        for horizontal in [true, false] {
+            let along = |q: Vec2| if horizontal { q.x } else { q.y };
+            let across = |q: Vec2| if horizontal { q.y } else { q.x };
+            let level = |a: Vec2, b: Vec2| (across(a) - across(b)).abs() < 1e-6;
+            let mut levels: Vec<f64> = out.iter().filter(|(a, b)| level(*a, *b)).map(|(a, _)| (across(*a) * 1e4).round() / 1e4).collect();
+            levels.sort_by(|p, q| p.total_cmp(q));
+            levels.dedup();
+            for c in levels.into_iter().take(400) {
+                let on = |a: Vec2, b: Vec2| level(a, b) && (across(a) - c).abs() < 2e-4;
+                let mut ends: Vec<Vec2> = out.iter().filter(|(a, b)| on(*a, *b)).flat_map(|(a, b)| [*a, *b]).collect();
+                if ends.len() < 4 {
+                    continue;
+                }
+                ends.sort_by(|p, q| along(*p).total_cmp(&along(*q)));
+                if let (Some(lo), Some(hi)) = (ends.first(), ends.last())
+                    && smooth(*lo)
+                    && smooth(*hi)
+                {
+                    out.retain(|(a, b)| !on(*a, *b));
+                }
+            }
+        }
     }
     out
 }
@@ -2025,7 +2049,11 @@ fn warm(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(PREVIEW, "no visible bodies or sketches to draw: create a solid in Design first"));
     }
     let tolerance = p.get("tolerance").and_then(Value::as_f64).filter(|t| (0.001..=2.0).contains(t)).unwrap_or(0.15);
-    let key = cache_key(s, tolerance);
+    let frozen = p.get("freeze").and_then(Value::as_bool).unwrap_or(false);
+    let key = match frozen.then(|| CACHE.with(|c| c.borrow().key)).flatten() {
+        Some(kept) => kept,
+        None => cache_key(s, tolerance),
+    };
     let (scene, parts) = scene_and_parts(s, tolerance, key)?;
     let stage = str_(p, "warm").unwrap_or("scene");
     if let Some(angles) = stage.strip_prefix("custom:") {
