@@ -2124,6 +2124,38 @@ fn section_view_for(placed: &[PlacedView], c: char) -> Option<usize> {
     None
 }
 
+/// Names of the line kinds the Show lines switches stand for, in `layers_off` order.
+const LAYER_NAMES: [&str; 5] = ["visible lines", "hidden lines", "centre lines", "dimensions and section marks", "text"];
+
+/// Pixels per sheet millimetre of the page map, or a plain 4 before it exists.
+fn px_per_mm_hint(map: &Option<Map>) -> f32 {
+    map.as_ref().map_or(4.0, |m| m.px_per_mm().max(1e-3))
+}
+
+/// Which switch (index into `layers_off`) the line, circle or text at `s` belongs to.
+fn line_kind_at(sheet: &Sheet, s: Pos2, tol: f32) -> Option<usize> {
+    let mut best: Option<(f32, usize)> = None;
+    for (layer, shape) in sheet.items.iter().take(200_000) {
+        let kind = match layer {
+            Layer::Visible => 0,
+            Layer::Hidden => 1,
+            Layer::Center => 2,
+            Layer::Dim => 3,
+            Layer::Text => 4,
+            Layer::Sheet => continue,
+        };
+        let d = match shape {
+            Shape::Line(a, b) => dist_to_segment(s, (*a, *b)),
+            Shape::Circle(c, r) => ((s - *c).length() - r).abs(),
+            _ => continue,
+        };
+        if d <= tol && best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, kind));
+        }
+    }
+    best.map(|(_, k)| k)
+}
+
 /// The section whose cutting-line arrow is under `s`: a short stroke (the arrow's stem or head) next to the section's letter.
 fn arrow_hit(sheet: &Sheet, placed: &[PlacedView], s: Pos2) -> Option<usize> {
     for (layer, shape) in sheet.items.iter().take(200_000) {
@@ -4992,8 +5024,27 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut menu_scale: Option<usize> = None;
     let mut menu_proj: Option<usize> = None;
     let app_has_clip = app.drawing.cell_clip.is_some();
+    let mut hide_layer: Option<usize> = None;
+    let mut show_all_lines = false;
+    let any_off = app.drawing.layers_off.iter().any(|b| *b);
     if let Some((target, at)) = app.drawing.menu_at {
+        // The kind of line under the pointer, for the hide entry.
+        let under_kind = app.drawing.sheet.as_ref().and_then(|sheet| line_kind_at(sheet, at, 3.0 / px_per_mm_hint(&map)));
         crate::ui_kit::Menu::context(&response, |ui| {
+            if let Some(k) = under_kind {
+                let name = LAYER_NAMES.get(k).copied().unwrap_or("lines");
+                if crate::ui_kit::list_picker(ui, &format!("Hide {name}"), &format!("Hide {name}"), false).clicked() {
+                    hide_layer = Some(k);
+                    ui.close();
+                }
+            }
+            if any_off && crate::ui_kit::list_picker(ui, "Show all lines", "Show all lines", false).clicked() {
+                show_all_lines = true;
+                ui.close();
+            }
+            if under_kind.is_some() || any_off {
+                ui.separator();
+            }
             for (i, (_, label)) in VIEWS.iter().enumerate() {
                 if crate::ui_kit::list_picker(ui, &format!("Add {label} view here"), label, false).clicked() {
                     menu_add = Some((i, at));
@@ -5025,6 +5076,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
+    }
+    if let Some(k) = hide_layer
+        && let Some(slot) = app.drawing.layers_off.get_mut(k)
+    {
+        *slot = true;
+    }
+    if show_all_lines {
+        app.drawing.layers_off = [false; 5];
     }
     if let Some((paste, at)) = menu_text {
         if paste {
