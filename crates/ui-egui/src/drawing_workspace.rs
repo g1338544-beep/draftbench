@@ -287,6 +287,8 @@ pub struct State {
     /// Section arrows (and the view they look along) face the other way.
     sec_flip: bool,
     hidden_style: usize,
+    /// Lines switched off on the sheet: visible, hidden, centre, dimension and section marks, text.
+    layers_off: [bool; 5],
     /// AutoCAD colour numbers: visible, hidden, centre, dimension.
     colours: [u8; 4],
     centre: bool,
@@ -482,6 +484,7 @@ impl Default for State {
             bolt: true,
             sec_flip: false,
             hidden_style: 0,
+            layers_off: [false; 5],
             colours: [7, 8, 1, 3],
             centre: true,
             hole_table: false,
@@ -648,7 +651,7 @@ impl State {
             "paper": self.paper, "landscape": self.landscape, "first_angle": self.first_angle,
             "custom_w": self.custom_w, "custom_h": self.custom_h, "sheet_scale": self.sheet_scale,
             "sheet_no": self.sheet_no, "revision": self.revision, "centre_mode": self.centre_mode,
-            "bolt": self.bolt, "sec_flip": self.sec_flip, "hidden_style": self.hidden_style, "colours": self.colours,
+            "bolt": self.bolt, "sec_flip": self.sec_flip, "hidden_style": self.hidden_style, "layers_off": self.layers_off, "colours": self.colours,
             "centre_auto": self.centre, "hole_table": self.hole_table, "text_height": self.text_height, "centre_extra": self.centre_extra, "author": self.author,
             "company": self.company, "material": self.material, "qty": self.qty, "finishing": self.finishing, "heat": self.heat, "margin": self.margin, "block_w": self.block_w, "frame_on": self.frame_on, "block_on": self.block_on, "block_tpl": self.block_detail, "block_free": self.block_free, "block_h": self.block_h, "cols": self.cols, "body_rows": self.body_rows, "flines": self.flines, "cells": self.cells, "designs": designs,
         })
@@ -693,6 +696,11 @@ impl State {
         }
         if let Some(n) = index("centre_mode", 8) {
             self.centre_mode = n;
+        }
+        if let Some(a) = v.get("layers_off").and_then(serde_json::Value::as_array) {
+            for (slot, x) in self.layers_off.iter_mut().zip(a) {
+                *slot = x.as_bool().unwrap_or(false);
+            }
         }
         if let Some(n) = index("hidden_style", 8) {
             self.hidden_style = n;
@@ -3374,6 +3382,14 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dirty |= crate::ui_kit::checkbox(ui, "Landscape", &mut app.drawing.landscape).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "First-angle projection (ISO)", &mut app.drawing.first_angle).changed();
                     ui.separator();
+                    ui.label("Show lines");
+                    for (i, name) in ["Visible lines", "Hidden lines", "Centre lines", "Dimensions and section marks", "Text"].iter().enumerate() {
+                        let mut on = !app.drawing.layers_off[i];
+                        if crate::ui_kit::checkbox(ui, name, &mut on).changed() {
+                            app.drawing.layers_off[i] = !on;
+                            dirty = true;
+                        }
+                    }
                     ui.label("Lines");
                     dirty |= crate::ui_kit::checkbox(ui, "Automatic centre lines (every view)", &mut app.drawing.centre).changed();
                     dirty |= crate::ui_kit::checkbox(ui, "Hole table (tags + X, Y, diameter)", &mut app.drawing.hole_table).changed();
@@ -5122,6 +5138,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let over = line_cols_map(&app.drawing.line_cols);
     for (layer, shape) in &sheet.items {
+        let off = match layer {
+            Layer::Visible => app.drawing.layers_off[0],
+            Layer::Hidden => app.drawing.layers_off[1],
+            Layer::Center => app.drawing.layers_off[2],
+            Layer::Dim => app.drawing.layers_off[3],
+            Layer::Text => app.drawing.layers_off[4],
+            Layer::Sheet => false,
+        };
+        if off {
+            continue;
+        }
         let mut s = stroke(*layer);
         if let Some(c) = line_colour(&over, sheet, shape) {
             s = Stroke::new(s.width, colour_of(c));
