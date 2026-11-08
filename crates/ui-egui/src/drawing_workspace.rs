@@ -446,6 +446,8 @@ pub struct State {
     /// The model revision the sheet on screen was made from, and the design it belongs to: the sheet keeps
     /// what it shows until Update is pressed, however the 3D model changes meanwhile (0 = not made yet).
     drawn_rev: u64,
+    /// Which bodies were shown when the drawing was last updated.
+    drawn_visibility: Option<solidcraft_engine::Visibility>,
     drawn_design: String,
     /// The Orient View window: the direction (X, Y, Z) the new view looks back along.
     orient: Option<[String; 3]>,
@@ -588,6 +590,7 @@ impl Default for State {
             menu_at: None,
             scale_edit: None,
             drawn_rev: 0,
+            drawn_visibility: None,
             drawn_design: String::new(),
             orient: None,
             setup: false,
@@ -1441,6 +1444,7 @@ fn parse(v: &Value) -> Option<Sheet> {
 
 /// Start an Update: the model first, then each placed view, one stage per frame.
 fn begin(app: &mut SolveApp) {
+    app.drawing.drawn_visibility = Some(app.session.visibility.clone());
     let mut steps = vec!["scene".to_string()];
     for v in &app.drawing.placed {
         let name = match v.custom {
@@ -1457,10 +1461,21 @@ fn begin(app: &mut SolveApp) {
     app.drawing.error = None;
 }
 
+/// Run the sheet command with the bodies shown or hidden as they were when the drawing was last updated:
+/// switching a body on or off in 3D changes the drawing only when Update is pressed.
+fn run_sheet(app: &mut SolveApp, p: Value) -> Result<Value, String> {
+    let kept = app.drawing.drawn_visibility.clone().map(|v| std::mem::replace(&mut app.session.visibility, v));
+    let r = app.run("drawing.sheet", p);
+    if let Some(now) = kept {
+        app.session.visibility = now;
+    }
+    r
+}
+
 /// Compose the sheet from what is already computed (cheap) without moving the camera.
 fn refresh(app: &mut SolveApp) {
     let p = params(&app.drawing);
-    match app.run("drawing.sheet", p) {
+    match run_sheet(app, p) {
         Ok(v) => match parse(&v) {
             Some(sheet) => {
                 app.drawing.sheet = Some(sheet);
@@ -1477,6 +1492,7 @@ fn refresh(app: &mut SolveApp) {
 
 /// Compose the sheet and frame it.
 pub fn update(app: &mut SolveApp) {
+    app.drawing.drawn_visibility = Some(app.session.visibility.clone());
     refresh(app);
     fit(app);
     app.drawing.drawn_rev = app.session.revision;
@@ -1597,8 +1613,8 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
     p["bolt_circle"] = json!(false);
     let mut warm = p.clone();
     warm["warm"] = json!(name);
-    app.run("drawing.sheet", warm).ok()?;
-    parse(&app.run("drawing.sheet", p).ok()?)
+    run_sheet(app, warm).ok()?;
+    parse(&run_sheet(app, p).ok()?)
 }
 
 /// Draw the Base View ghost with its centre at `at` (sheet mm).
@@ -3913,7 +3929,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut p = params(&app.drawing);
         p["warm"] = json!(next);
         app.drawing.steps.remove(0);
-        if let Err(e) = app.run("drawing.sheet", p) {
+        if let Err(e) = run_sheet(app, p) {
             app.drawing.steps.clear();
             app.drawing.sheet = None;
             app.drawing.error = Some(e);
