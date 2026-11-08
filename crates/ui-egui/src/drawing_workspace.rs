@@ -446,6 +446,8 @@ pub struct State {
     /// The model revision the sheet on screen was made from, and the design it belongs to: the sheet keeps
     /// what it shows until Update is pressed, however the 3D model changes meanwhile (0 = not made yet).
     drawn_rev: u64,
+    /// The stages of the sheet being composed use the model kept from the last Update.
+    freeze_steps: bool,
     /// Update is recomputing the sheet from the model as it is now.
     updating: bool,
     /// Which bodies were shown when the drawing was last updated.
@@ -592,6 +594,7 @@ impl Default for State {
             menu_at: None,
             scale_edit: None,
             drawn_rev: 0,
+            freeze_steps: false,
             updating: false,
             drawn_visibility: None,
             drawn_design: String::new(),
@@ -1208,7 +1211,7 @@ fn switch_page(app: &mut SolveApp, to: usize) {
     let Some(next) = st.pages.get(to).cloned() else { return };
     st.page = to;
     st.load_page(&next);
-    begin(app);
+    begin_keep(app, true);
 }
 
 /// Add a blank sheet after the last one and switch to it.
@@ -1457,9 +1460,19 @@ fn parse(v: &Value) -> Option<Sheet> {
 
 /// Start an Update: the model first, then each placed view, one stage per frame.
 fn begin(app: &mut SolveApp) {
-    app.drawing.drawn_visibility = Some(app.session.visibility.clone());
-    app.drawing.drawn_rev = app.session.revision;
-    app.drawing.drawn_design = app.session.doc.name.clone();
+    begin_keep(app, false);
+}
+
+/// Start composing the sheet stage by stage. With `keep`, the model it was last computed from stays (a
+/// page switch is not an Update); otherwise the model as it is now is taken.
+fn begin_keep(app: &mut SolveApp, keep: bool) {
+    let keep = keep && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == app.session.doc.name && app.drawing.drawn_visibility.is_some();
+    app.drawing.freeze_steps = keep;
+    if !keep {
+        app.drawing.drawn_visibility = Some(app.session.visibility.clone());
+        app.drawing.drawn_rev = app.session.revision;
+        app.drawing.drawn_design = app.session.doc.name.clone();
+    }
     let mut steps = vec!["scene".to_string()];
     for v in &app.drawing.placed {
         let name = match v.custom {
@@ -3981,6 +3994,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.drawing.painted = false;
         let mut p = params(&app.drawing);
         p["warm"] = json!(next);
+        if app.drawing.freeze_steps {
+            p["freeze"] = json!(true);
+        }
         app.drawing.steps.remove(0);
         if let Err(e) = run_sheet(app, p) {
             app.drawing.steps.clear();

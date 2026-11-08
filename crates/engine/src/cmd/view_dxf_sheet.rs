@@ -2049,7 +2049,11 @@ fn warm(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(PREVIEW, "no visible bodies or sketches to draw: create a solid in Design first"));
     }
     let tolerance = p.get("tolerance").and_then(Value::as_f64).filter(|t| (0.001..=2.0).contains(t)).unwrap_or(0.15);
-    let key = cache_key(s, tolerance);
+    let frozen = p.get("freeze").and_then(Value::as_bool).unwrap_or(false);
+    let key = match frozen.then(|| CACHE.with(|c| c.borrow().key)).flatten() {
+        Some(kept) => kept,
+        None => cache_key(s, tolerance),
+    };
     let (scene, parts) = scene_and_parts(s, tolerance, key)?;
     let stage = str_(p, "warm").unwrap_or("scene");
     if let Some(angles) = stage.strip_prefix("custom:") {
