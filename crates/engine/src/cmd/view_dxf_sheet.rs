@@ -1230,10 +1230,24 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                     }
                 }
             }
-            match dirs.as_slice() {
-                [d1, d2] => {
-                    let (l1, l2) = (d1.len(), d2.len());
-                    l1 > 1e-9 && l2 > 1e-9 && (d1.x * d2.y - d1.y * d2.x).abs() <= 1e-3 * l1 * l2 && d1.x * d2.x + d1.y * d2.y < 0.0
+            // Every outline piece leaving the point runs along one line, with pieces going both ways (a wall
+            // split into several pieces at the point still counts as one straight wall).
+            match dirs.first() {
+                Some(d1) if d1.len() > 1e-9 && dirs.len() <= 8 => {
+                    let l1 = d1.len();
+                    let (mut fwd, mut back) = (false, false);
+                    for d2 in &dirs {
+                        let l2 = d2.len();
+                        if !(l2 > 1e-9) || (d1.x * d2.y - d1.y * d2.x).abs() > 1e-3 * l1 * l2 {
+                            return false;
+                        }
+                        if d1.x * d2.x + d1.y * d2.y > 0.0 {
+                            fwd = true;
+                        } else {
+                            back = true;
+                        }
+                    }
+                    fwd && back
                 }
                 _ => false,
             }
