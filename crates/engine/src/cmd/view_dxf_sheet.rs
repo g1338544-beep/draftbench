@@ -150,9 +150,11 @@ fn manual(
                 .collect()
         })
         .unwrap_or_default();
-    let lo = chosen.iter().copied().fold(f64::INFINITY, f64::min);
+    // Every view follows the first one's scale.
+    let lo = chosen.first().copied().unwrap_or(f64::INFINITY);
     let hi = chosen.iter().copied().fold(0.0_f64, f64::max);
-    if chosen.len() > 1 && lo.is_finite() && lo > 0.0 && hi - lo > 1e-12 {
+    let lo_all = chosen.iter().copied().fold(f64::INFINITY, f64::min);
+    if chosen.len() > 1 && lo.is_finite() && lo > 0.0 && hi - lo_all > 1e-12 {
         let mut common = p.clone();
         if let Some(o) = common.as_object_mut() {
             o.insert("scale".into(), json!(lo));
