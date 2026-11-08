@@ -164,7 +164,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                             } else {
                                 // The same edges the dialog hands the command: the picked one and its tangent chain.
                                 let mut picks = vec![at];
-                                if chain {
+                                if *chain {
                                     picks.extend(m.tangent_chain(*index, 2f64.to_radians()).into_iter().filter(|i| *i != *index).filter_map(|i| m.edges.get(i).map(|e| crate::selection::polyline_mid(e))));
                                 }
                                 let probed = solidcraft_engine::doc::ruled_probe_dir(
