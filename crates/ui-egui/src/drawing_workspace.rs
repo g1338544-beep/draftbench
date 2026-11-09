@@ -2132,6 +2132,15 @@ fn erase_centre(app: &mut SolveApp, mut r: [f32; 4], any_line: bool) {
     app.drawing.dirty_marks = true;
 }
 
+/// Delete the dimensions any of whose lines the frame `r` touches; how many went.
+fn erase_dims(app: &mut SolveApp, r: [f32; 4]) -> usize {
+    let before = app.drawing.dims.len();
+    app.drawing.dims.retain(|d| !dim_parts(d).into_iter().any(|(a, b)| segment_in_rect(a, b, r)));
+    app.drawing.sel_dim = None;
+    app.drawing.drag_end = None;
+    before.saturating_sub(app.drawing.dims.len())
+}
+
 /// The centre-line segments the frame `r` touches: the sheet's own centre lines and the ones
 /// placed by hand, each with whether it was placed by hand.
 fn centre_segments(app: &SolveApp, r: [f32; 4]) -> Vec<((Pos2, Pos2), bool)> {
@@ -2187,6 +2196,10 @@ fn free_in_box(app: &SolveApp, r: [f32; 4]) -> (Vec<usize>, Vec<usize>, Vec<usiz
 fn erase_selection(app: &mut SolveApp, r: [f32; 4]) {
     let (lines, texts, cells) = free_in_box(app, r);
     erase_centre(app, r, false);
+    // Lines drawn by hand and dimensions in the frame go too.
+    app.drawing.vlines.retain(|c| !segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r));
+    app.drawing.vcurves.retain(|c| !ring_in_rect(pos2(c[0], c[1]), c[2], r));
+    erase_dims(app, r);
     for i in cells {
         if app.drawing.cells.len() <= i {
             app.drawing.cells.resize(i + 1, String::new());
@@ -2225,7 +2238,7 @@ fn ring_in_rect(c: Pos2, rad: f32, r: [f32; 4]) -> bool {
 /// How many centre lines, marks, free lines and free texts the frame `r` holds.
 fn centre_in_box(app: &SolveApp, r: [f32; 4]) -> usize {
     let (fl, ft, fc) = free_in_box(app, r);
-    fl.len() + ft.len() + fc.len() + app.drawing.ccircles.iter().filter(|c| ring_in_rect(pos2(c[0], c[1]), c[2], r)).count() + centre_segments(app, r).len() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
+    fl.len() + ft.len() + fc.len() + app.drawing.ccircles.iter().filter(|c| ring_in_rect(pos2(c[0], c[1]), c[2], r)).count() + centre_segments(app, r).len() + app.drawing.vlines.iter().filter(|c| segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r)).count() + app.drawing.vcurves.iter().filter(|c| ring_in_rect(pos2(c[0], c[1]), c[2], r)).count() + app.drawing.dims.iter().filter(|d| dim_parts(d).into_iter().any(|(a, b)| segment_in_rect(a, b, r))).count() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
 }
 
 /// Erase exactly one centre line (its ends), leaving any line that crosses it.
@@ -4404,6 +4417,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if let Some(r) = erase_click {
         erase_centre(app, r, true);
+        erase_dims(app, r);
     }
     if app.drawing.caption_sel.is_some() && response.clicked() {
         app.drawing.sel_dim = None;
@@ -4600,8 +4614,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if response.drag_stopped() || !response.dragged() {
             if let Some((a, b)) = app.drawing.erase.take() {
-                let any_line = app.drawing.erase_tool || std::mem::take(&mut app.drawing.erase_any);
-                erase_centre(app, [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)], any_line);
+                let tool = app.drawing.erase_tool;
+                let any_line = tool || std::mem::take(&mut app.drawing.erase_any);
+                let fr = [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)];
+                erase_centre(app, fr, any_line);
+                if tool {
+                    // The Erase tool takes dimensions as well: one frame clears them all.
+                    erase_dims(app, fr);
+                }
             }
         }
     }
@@ -6728,6 +6748,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         c[3] += fy;
                     }
                 }
+                // Lines drawn by hand stay with the view they were drawn on.
+                for c in app.drawing.vlines.iter_mut() {
+                    if inside((c[0] + c[2]) / 2.0, (c[1] + c[3]) / 2.0) {
+                        c[0] += fx;
+                        c[2] += fx;
+                        c[1] += fy;
+                        c[3] += fy;
+                    }
+                }
+                for c in app.drawing.vcurves.iter_mut() {
+                    if inside(c[0], c[1]) {
+                        c[0] += fx;
+                        c[1] += fy;
+                    }
+                }
                 for c in app.drawing.centre_cut.iter_mut() {
                     if inside((c[0] + c[2]) / 2.0, (c[1] + c[3]) / 2.0) {
                         c[0] += fx;
@@ -7559,5 +7594,31 @@ fn item_name(layer: Layer, shape: &Shape) -> String {
             Layer::Text => "Line",
         }
         .to_string(),
+    }
+}
+
+#[cfg(test)]
+mod hand_drawn_tests {
+    use super::*;
+
+    fn dim(x0: f32, x1: f32, y: f32) -> DimItem {
+        DimItem { kind: 0, a: pos2(x0, y), b: pos2(x1, y), at: y + 5.0, text: String::new(), slide: 0.0, decimals: -1, style: 0 }
+    }
+
+    /// One frame removes the hand-drawn lines and every dimension it touches, and leaves what it misses.
+    #[test]
+    fn one_frame_deletes_hand_drawn_lines_and_dimensions() {
+        let mut h = crate::scenario::Harness::new();
+        let app = &mut h.app;
+        app.drawing.dims = vec![dim(0.0, 20.0, 0.0), dim(0.0, 20.0, 10.0), dim(200.0, 220.0, 200.0)];
+        app.drawing.vlines = vec![[1.0, 1.0, 9.0, 1.0], [300.0, 300.0, 310.0, 300.0]];
+        app.drawing.vcurves = vec![[5.0, 5.0, 3.0, 0.0, 360.0], [400.0, 400.0, 3.0, 0.0, 360.0]];
+        let frame = [-5.0, -5.0, 30.0, 30.0];
+        assert_eq!(centre_in_box(app, frame), 4, "two dimensions, a line and a circle are counted");
+        erase_selection(app, frame);
+        assert_eq!(app.drawing.dims.len(), 1, "the dimension outside the frame stays");
+        assert_eq!(app.drawing.vlines.len(), 1);
+        assert_eq!(app.drawing.vcurves.len(), 1);
+        assert_eq!(centre_in_box(app, frame), 0);
     }
 }
