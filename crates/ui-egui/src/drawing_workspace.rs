@@ -7719,11 +7719,11 @@ mod hand_drawn_tests {
         let beside = free_spot_on(&sheet(vec![parent]), pos2(220.0, 190.0), size, Some((true, 200.0)));
         assert_eq!(beside.y, 200.0, "level with the parent");
         assert!(beside.x > 120.0 + 40.0);
-        // Another view sits on the way: the spot is still on the line, past it.
-        let blocker = (1, 120.0, 100.0, 80.0, 60.0);
-        let past = free_spot_on(&sheet(vec![parent, blocker]), pos2(120.0, 110.0), size, Some((false, 120.0)));
-        assert_eq!(past.x, 120.0);
-        assert!(!((past.y - 100.0).abs() < 45.0), "not on top of the other view");
+        // Another view sits on the way: the spot is still level with the parent, past it.
+        let blocker = (1, 215.0, 200.0, 60.0, 60.0);
+        let past = free_spot_on(&sheet(vec![parent, blocker]), pos2(220.0, 200.0), size, Some((true, 200.0)));
+        assert_eq!(past.y, 200.0);
+        assert!(past.x >= 287.0, "past the other view, not on top of it");
     }
 
     /// A click takes the hand-drawn line or circle under it, and Delete removes just that one.
