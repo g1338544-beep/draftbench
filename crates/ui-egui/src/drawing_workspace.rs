@@ -378,6 +378,8 @@ pub struct State {
     cl_drag: Option<(Pos2, Pos2, Pos2, Pos2, bool)>,
     /// An erase drag in progress: where it started and where the pointer is.
     erase: Option<(Pos2, Pos2)>,
+    /// The erase frame was started with Shift: it hides lines of every kind.
+    erase_any: bool,
     /// Earlier states of the sheet (as saved text), for Undo and Redo in the Drawing workspace.
     undo: Vec<String>,
     redo: Vec<String>,
@@ -546,6 +548,7 @@ impl Default for State {
             centre_cut: Vec::new(),
             cl_drag: None,
             erase: None,
+            erase_any: false,
             undo: Vec::new(),
             redo: Vec::new(),
             last_state: String::new(),
@@ -4096,7 +4099,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         }
-        if app.drawing.erase_tool {
+        if app.drawing.dim_tool.is_none()
+            && app.drawing.proj_tool.is_none()
+            && !app.drawing.erase_tool
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && ui.input(|i| i.modifiers.shift)
+            && let Some(s) = pointer
+        {
+            // Shift + drag: a frame; every line it touches (any kind) is hidden when the button is released.
+            app.drawing.erase = Some((s, s));
+            app.drawing.erase_any = true;
+            app.drawing.selected = None;
+            app.drawing.sel_dim = None;
+            app.drawing.sel_centre = None;
+        } else if app.drawing.erase_tool {
             if let Some(s) = pointer {
                 if response.drag_started_by(egui::PointerButton::Primary) {
                     app.drawing.erase = Some((s, s));
@@ -4443,7 +4459,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if response.drag_stopped() || !response.dragged() {
             if let Some((a, b)) = app.drawing.erase.take() {
-                let any_line = app.drawing.erase_tool;
+                let any_line = app.drawing.erase_tool || std::mem::take(&mut app.drawing.erase_any);
                 erase_centre(app, [a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)], any_line);
             }
         }
