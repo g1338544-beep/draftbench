@@ -1776,7 +1776,7 @@ fn finish(
             let rot = num("rot").unwrap_or(0.0);
             let id = t.get("id").and_then(Value::as_str).unwrap_or("");
             let words: String = t.get("text").and_then(Value::as_str).unwrap_or("").chars().take(60).collect();
-            entities.extend(super::drawing_symbols::entities(id, &words, Vec2::new(x, y), k, rot));
+            entities.extend(crate::cmd::drawing_symbols::entities(id, &words, Vec2::new(x, y), k, rot));
         }
     }
     // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go; a fifth
