@@ -1756,7 +1756,7 @@ fn finish(
             put(bx0 + x * k, by0 + y * k, 21.3 * k, (field(key), 0.0, 0.0, 1.0, 0), &mut entities);
         }
     }
-    // Texts the user put anywhere on the sheet: x, y, size factor, font and the words.
+    // Texts the user put anywhere on the sheet: x, y, size factor, font, the words and the turn in degrees.
     if let Some(list) = p.get("free_texts").and_then(Value::as_array) {
         for t in list.iter().take(400) {
             let num = |k: &str| t.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e5);
@@ -1768,7 +1768,8 @@ fn finish(
                 continue;
             }
             let body = if font > 0 { format!("\u{1}{font}{body}") } else { body };
-            text("TEXT", Vec2::new(x, y), th * k, body, &mut entities);
+            let rot = num("rot").unwrap_or(0.0).rem_euclid(360.0);
+            entities.push(DxfEntity { layer: "TEXT".into(), shape: DxfShape::Text { at: Vec2::new(x, y), height: th * k, angle_deg: rot, text: body } });
         }
     }
     // Symbols from the palette (surface finish, welding, tolerance frames, mechanical): x, y, size factor, turn in degrees, id and words.

@@ -675,7 +675,7 @@ impl State {
             "dim_decimals": self.dim_decimals,
             "dim_text": self.dim_text, "dim_arrow": self.dim_arrow,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch, v.ratio, v.bg, v.style, v.zoom])).collect::<Vec<_>>(),
-            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "flines": self.flines, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(), "symbols": self.sym.to_json(), "ordinate": self.ord.to_json(),
+            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "flines": self.flines, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text, "rot": t.rot})).collect::<Vec<_>>(), "symbols": self.sym.to_json(), "ordinate": self.ord.to_json(),
             "paper": self.paper, "landscape": self.landscape,
             "block_detail": self.block_detail, "block_free": self.block_free, "block_w": self.block_w,
             "material": self.material, "qty": self.qty, "finishing": self.finishing, "heat": self.heat,
@@ -1118,6 +1118,7 @@ impl State {
                             k: f("k").unwrap_or(1.0).clamp(0.2, 8.0) as f32,
                             font: t.get("font").and_then(serde_json::Value::as_u64).filter(|n| *n <= 4).unwrap_or(0) as u8,
                             text: t.get("text").and_then(serde_json::Value::as_str)?.chars().take(120).collect(),
+                            rot: f("rot").unwrap_or(0.0).clamp(-360.0, 360.0) as f32,
                         })
                     })
                     .collect()
@@ -1539,7 +1540,7 @@ fn params(st: &State) -> Value {
         "block_cells": st.cells,
         "symbols": st.sym.to_json(),
         "ordinate": st.ord.to_json(),
-        "free_texts": st.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
+        "free_texts": st.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text, "rot": t.rot})).collect::<Vec<_>>(),
         "marks": st.marks,
         "clines": st.clines,
         "vlines": st.vlines,
@@ -2808,6 +2809,8 @@ struct FreeText {
     k: f32,
     font: u8,
     text: String,
+    /// Turn in degrees, counter-clockwise (0 reads left to right).
+    rot: f32,
 }
 
 const MAX_FREE_TEXTS: usize = 400;
@@ -2848,7 +2851,7 @@ fn paste_free_text(st: &mut State, at: Pos2) -> bool {
     let Some(clip) = st.cell_clip.clone() else { return false };
     let (_, _, k, font, body) = split_cell(&clip);
     let text: String = if body.trim().is_empty() { "Text".into() } else { body.chars().take(120).collect() };
-    st.texts.push(FreeText { x: at.x, y: at.y, k, font, text });
+    st.texts.push(FreeText { x: at.x, y: at.y, k, font, text, rot: 0.0 });
     st.ft_sel = Some(st.texts.len() - 1);
     true
 }
@@ -2883,6 +2886,18 @@ fn free_text_window(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        ui.label("Angle");
+        ui.horizontal(|ui| {
+            crate::ui_kit::number_field(ui, &mut t.rot, -360.0..=360.0, 1.0, "°");
+            for (label, d) in [("−15°", -15.0), ("+15°", 15.0), ("+90°", 90.0)] {
+                if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small).clicked() {
+                    t.rot = ((t.rot + d + 180.0).rem_euclid(360.0)) - 180.0;
+                }
+            }
+            if crate::ui_kit::button(ui, "0°", crate::ui_kit::Button::Small).clicked() {
+                t.rot = 0.0;
+            }
+        });
         ui.small("Drag the text on the sheet to move it.");
         ui.horizontal(|ui| {
             copy = crate::ui_kit::button(ui, "Copy", crate::ui_kit::Button::Small).clicked();
@@ -2903,7 +2918,7 @@ fn free_text_window(app: &mut SolveApp, ui: &mut egui::Ui) {
         refresh(app);
         return;
     }
-    let changed = t.text != before.text || t.k != before.k || t.font != before.font;
+    let changed = t.text != before.text || t.k != before.k || t.font != before.font || t.rot != before.rot;
     if changed && let Some(slot) = app.drawing.texts.get_mut(i) {
         *slot = t.clone();
         refresh(app);
@@ -3030,7 +3045,7 @@ fn explode_detail_block(app: &mut SolveApp) -> bool {
         if body.trim().is_empty() {
             continue;
         }
-        st.texts.push(FreeText { x: bx0 + *x as f32, y: by0 + *y as f32, k: (*h as f32 / th).clamp(0.2, 8.0), font: 0, text: body.chars().take(120).collect() });
+        st.texts.push(FreeText { x: bx0 + *x as f32, y: by0 + *y as f32, k: (*h as f32 / th).clamp(0.2, 8.0), font: 0, text: body.chars().take(120).collect(), rot: 0.0 });
     }
     st.block_free = true;
     st.block_detail = false;
@@ -5551,7 +5566,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if paste {
             paste_free_text(&mut app.drawing, at);
         } else if app.drawing.texts.len() < MAX_FREE_TEXTS {
-            app.drawing.texts.push(FreeText { x: at.x, y: at.y, k: 1.0, font: 0, text: "Text".into() });
+            app.drawing.texts.push(FreeText { x: at.x, y: at.y, k: 1.0, font: 0, text: "Text".into(), rot: 0.0 });
             let n = app.drawing.texts.len() - 1;
             app.drawing.ft_sel = Some(n);
             app.drawing.ft_edit = Some(n);
