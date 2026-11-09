@@ -15,6 +15,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("I")
         .noundo()
         .params("bodies?: [names] (default all); or items: [1-2 selections] → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+    CommandSpec::new("inspect.measure.distance", "Simple Distance", simple_distance).icon("measure").noundo().params(SIMPLE_PARAMS),
+    CommandSpec::new("inspect.measure.angle", "Simple Angle", simple_angle).icon("measure").noundo().params(SIMPLE_PARAMS),
+    CommandSpec::new("inspect.measure.length", "Simple Length", simple_length).icon("measure").noundo().params(SIMPLE_PARAMS),
+    CommandSpec::new("inspect.measure.radius", "Simple Radius", simple_radius).icon("measure").noundo().params(SIMPLE_PARAMS),
+    CommandSpec::new("inspect.measure.diameter", "Simple Diameter", simple_diameter).icon("measure").noundo().params(SIMPLE_PARAMS),
     CommandSpec::new("inspect.mass_properties", "Mass Properties", measure).at("SOLID", "INSPECT").icon("measure").noundo().params(
         "bodies?: [names] (default all). Volume, area, mass (g and kg), weight (N), centre of mass and the moments of inertia (kg·mm², about the centre of mass) of each body and in total, from each body's material",
     ),
@@ -76,6 +81,38 @@ pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
         }),
         Err(e) => json!({"name": b.name, "error": e.to_string()}),
     }
+}
+
+const SIMPLE_PARAMS: &str = "items?: [1-2 selections] (default: the current selection) → value (mm, or degrees for angle) of that one quantity; the full result is under `measure`. In the app it opens Measure for just that quantity";
+
+/// One quantity of `inspect.measure` for `items` (default: the selection): `value` plus the full result.
+fn simple(s: &mut Session, p: &Value, cmd: &str, key: &str, unit: &str) -> Result<Value> {
+    let items = match p.get("items") {
+        Some(i) => i.clone(),
+        None => serde_json::to_value(&s.selection).map_err(|e| bad(cmd, e.to_string()))?,
+    };
+    let full = super::measure_sel::measure_items(s, &items)?;
+    let value = full
+        .get(key)
+        .and_then(Value::as_f64)
+        .or_else(|| full["items"].as_array()?.first()?.get(key)?.as_f64())
+        .ok_or_else(|| bad(cmd, format!("these items have no {key}; pick {}", if key == "angle_deg" { "two lines or planar faces" } else { "the right kind of item" })))?;
+    Ok(json!({"value": value, "unit": unit, "measure": full}))
+}
+fn simple_distance(s: &mut Session, p: &Value) -> Result<Value> {
+    simple(s, p, "inspect.measure.distance", "distance_mm", "mm")
+}
+fn simple_angle(s: &mut Session, p: &Value) -> Result<Value> {
+    simple(s, p, "inspect.measure.angle", "angle_deg", "deg")
+}
+fn simple_length(s: &mut Session, p: &Value) -> Result<Value> {
+    simple(s, p, "inspect.measure.length", "length_mm", "mm")
+}
+fn simple_radius(s: &mut Session, p: &Value) -> Result<Value> {
+    simple(s, p, "inspect.measure.radius", "radius", "mm")
+}
+fn simple_diameter(s: &mut Session, p: &Value) -> Result<Value> {
+    simple(s, p, "inspect.measure.diameter", "diameter", "mm")
 }
 
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
@@ -752,4 +789,25 @@ fn material_list(s: &mut Session, _p: &Value) -> Result<Value> {
         |m| json!({"name": m.name, "density_g_cm3": m.density, "appearance": s.doc.material_look(&m.name).as_ref().map(look_json), "user": true}),
     );
     Ok(json!({"materials": built_in.chain(user).collect::<Vec<_>>()}))
+}
+
+#[cfg(test)]
+mod simple_measure_tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn simple_measures_return_one_value_and_refuse_the_wrong_kind_of_item() {
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 5, "height": 10, "operation": "new", "body_name": "C"})).unwrap();
+        let faces = s.execute("model.faces", &json!({"body": "C"})).unwrap();
+        let round = faces["faces"].as_array().unwrap().iter().find(|f| f.get("cylinder").is_some_and(|c| !c.is_null())).unwrap().clone();
+        let item = json!({"type": "face", "body": "C", "index": round["index"], "point": round["point"]});
+        let d = s.execute("inspect.measure.diameter", &json!({"items": [item]})).unwrap();
+        assert!((d["value"].as_f64().unwrap() - 10.0).abs() < 1e-6);
+        let r = s.execute("inspect.measure.radius", &json!({"items": [item]})).unwrap();
+        assert!((r["value"].as_f64().unwrap() - 5.0).abs() < 1e-6);
+        assert!(s.execute("inspect.measure.distance", &json!({"items": []})).is_err(), "nothing to measure");
+    }
 }

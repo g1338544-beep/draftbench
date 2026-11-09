@@ -91,6 +91,13 @@ pub const SECTIONS: &[Section] = &[
     },
     // The quick Show/Hide row: Ctrl+B, Ctrl+Shift+B and Ctrl+Shift+U as buttons.
     Section { tab: "MODEL", panel: "VISIBILITY", promoted: 4, ids: &["view.hide", "view.hide_others", "view.invert_visibility", "view.show_all"] },
+    // Simple measures (distance, angle, length, radius, diameter): each opens Measure.
+    Section {
+        tab: "MODEL",
+        panel: "MEASURE",
+        promoted: 3,
+        ids: &["inspect.measure.distance", "inspect.measure.angle", "inspect.measure.length", "inspect.measure.radius", "inspect.measure.diameter"],
+    },
     Section { tab: "MODEL", panel: "LAYER", promoted: 2, ids: &["layer.settings", "layer.assign"] },
     Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 2, ids: &["construct.plane.offset", "sketch.project_to_surface"] },
@@ -320,6 +327,11 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("inspect.section", "Section"),
     ("inspect.zebra", "Zebra"),
     ("joint.as_built", "As-Built"),
+    ("inspect.measure.angle", "Angle"),
+    ("inspect.measure.diameter", "Diameter"),
+    ("inspect.measure.distance", "Distance"),
+    ("inspect.measure.length", "Length"),
+    ("inspect.measure.radius", "Radius"),
     ("layer.assign", "To Layer"),
     ("layer.settings", "Layers"),
     ("material.assign", "Material"),

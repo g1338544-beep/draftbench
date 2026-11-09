@@ -1051,6 +1051,13 @@ impl SolveApp {
         if solidcraft_engine::find_command(id).is_some_and(|c| c.info(&self.session).enabled) {
             self.preferences.sketch_variants.remember(id);
         }
+        if let Some(rest) = id.strip_prefix("inspect.measure.") {
+            // The simple measures open Measure; its rows list distance, angle, length, radius and diameter.
+            if matches!(rest, "distance" | "angle" | "length" | "radius" | "diameter") {
+                self.start("inspect.measure");
+                return;
+            }
+        }
         if id == "parameters.change" {
             params_dialog::open(self);
             return;
