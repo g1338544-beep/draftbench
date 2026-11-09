@@ -5985,7 +5985,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Section View: click two points on the Top view (hole centres snap); the cutting line runs between them.
-    let mut sec_new: Option<([f32; 4], f32, f32, f32, usize)> = None;
+    let mut sec_new: Option<([f32; 4], f32, f32, f32, usize, Option<(usize, bool)>)> = None;
     let mut sec_msg: Option<String> = None;
     if let Some(mut picked) = app.drawing.sec_tool.clone() {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
@@ -6035,8 +6035,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let d = b - a;
                             // The view lies across the cutting line: right of the view for an up-down line, below it for a left-right one.
                             let want = section_spot(d, (bx.1, bx.2, bx.3, bx.4));
-                            let at = free_spot(sheet, want, (bx.3, bx.4));
-                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view)));
+                            // A straight left-right or up-down cut puts its view on the line through the parent's
+                            // centre (below it, or beside it), and the view keeps to that line from then on.
+                            let (nx, ny) = section_side((d.x / d.length().max(1e-6), d.y / d.length().max(1e-6)));
+                            let along = if nx.abs() <= 0.1 { Some(false) } else if ny.abs() <= 0.1 { Some(true) } else { None };
+                            let axis = along.map(|horizontal| (horizontal, if horizontal { bx.2 } else { bx.1 }));
+                            let at = free_spot_on(sheet, want, (bx.3, bx.4), axis);
+                            let link = along.map(|horizontal| (bx.0, horizontal));
+                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view), link));
                         }
                         (None, _, _) | (_, None, _) | (_, _, None) => sec_msg = Some("Section View needs a view on the sheet to cut: add one first".to_string()),
                         _ => {}
@@ -6653,7 +6659,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
         begin(app);
     }
-    if let Some((line, k, x, y, from)) = sec_new {
+    if let Some((line, k, x, y, from, link)) = sec_new {
         let spin = 0.0;
         let rot = 0;
         app.drawing.placed.push(PlacedView {
@@ -6668,7 +6674,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             section_line: Some(line),
             section_path: None,
             detail: None,
-            align: None,
+            align: link,
             custom: None,
             rot,
             label: None,
@@ -6981,6 +6987,22 @@ fn snap_dim(sheet: &Sheet, p: Pos2, tol: f32, first: bool) -> Option<Pos2> {
 /// views already there (with their captions), the sheet's edge and the title block. Falls back to
 /// `prefer` when the sheet is full.
 fn free_spot(sheet: &Sheet, prefer: Pos2, size: (f32, f32)) -> Pos2 {
+    free_spot_on(sheet, prefer, size, None)
+}
+
+/// `free_spot`, kept on a line when `axis` is given: (true, y) a level line, (false, x) a plumb one.
+/// Where that line has no room the nearest free place anywhere is used.
+fn free_spot_on(sheet: &Sheet, prefer: Pos2, size: (f32, f32), axis: Option<(bool, f32)>) -> Pos2 {
+    if axis.is_some() {
+        let on = free_spot_axis(sheet, prefer, size, axis);
+        if let Some(q) = on {
+            return q;
+        }
+    }
+    free_spot_axis(sheet, prefer, size, None).unwrap_or(prefer)
+}
+
+fn free_spot_axis(sheet: &Sheet, prefer: Pos2, size: (f32, f32), axis: Option<(bool, f32)>) -> Option<Pos2> {
     let (w, h) = (size.0.clamp(10.0, 600.0), size.1.clamp(10.0, 600.0));
     let edge = 15.0;
     // Boxes as (left, right, bottom, top); a view's caption sits under it.
@@ -6993,11 +7015,22 @@ fn free_spot(sheet: &Sheet, prefer: Pos2, size: (f32, f32)) -> Pos2 {
     while y + h / 2.0 + 6.0 <= sheet.height - edge && rows < 200 {
         let (mut x, mut cols) = (edge + w / 2.0, 0);
         while x + w / 2.0 <= sheet.width - edge && cols < 200 {
-            let me = area(x, y, w, h);
-            if !taken.iter().any(|t| hit(me, *t)) && !hit(me, block) {
-                let d = (pos2(x, y) - prefer).length();
+            // On a line: the grid point nearest to it, put exactly on it.
+            let (px, py) = match axis {
+                Some((true, ay)) if (y - ay).abs() <= 5.0 => (x, ay),
+                Some((false, ax)) if (x - ax).abs() <= 5.0 => (ax, y),
+                Some(_) => {
+                    x += 10.0;
+                    cols += 1;
+                    continue;
+                }
+                None => (x, y),
+            };
+            let me = area(px, py, w, h);
+            if !taken.iter().any(|t| hit(me, *t)) && !hit(me, block) && px - w / 2.0 >= 0.0 && px + w / 2.0 <= sheet.width {
+                let d = (pos2(px, py) - prefer).length();
                 if best.is_none_or(|(bd, _)| d < bd) {
-                    best = Some((d, pos2(x, y)));
+                    best = Some((d, pos2(px, py)));
                 }
             }
             x += 10.0;
@@ -7006,7 +7039,7 @@ fn free_spot(sheet: &Sheet, prefer: Pos2, size: (f32, f32)) -> Pos2 {
         y += 10.0;
         rows += 1;
     }
-    best.map_or(prefer, |(_, q)| q)
+    best.map(|(_, q)| q)
 }
 
 /// The nearest drawn corner, end, centre or circle quadrant within `tol` mm of `p`.
@@ -7671,6 +7704,26 @@ mod hand_drawn_tests {
         assert_eq!(app.drawing.vlines.len(), 1);
         assert_eq!(app.drawing.vcurves.len(), 1);
         assert_eq!(centre_in_box(app, frame), 0);
+    }
+
+    /// A section view lands exactly on the line through its parent's centre (below it, or beside it),
+    /// even when another view is in the way; where that line is full it goes to the nearest free place.
+    #[test]
+    fn a_section_view_is_placed_on_the_axis_of_its_parent() {
+        let sheet = |boxes: Vec<(usize, f32, f32, f32, f32)>| Sheet { width: 420.0, height: 297.0, note: String::new(), items: Vec::new(), boxes, scales: Vec::new(), centres: Vec::new(), rounds: std::sync::OnceLock::new() };
+        let parent = (0, 120.0, 200.0, 80.0, 80.0);
+        let size = (60.0, 30.0);
+        let below = free_spot_on(&sheet(vec![parent]), pos2(133.0, 110.0), size, Some((false, 120.0)));
+        assert_eq!(below.x, 120.0, "straight under the parent");
+        assert!(below.y < 200.0 - 40.0, "clear of the parent");
+        let beside = free_spot_on(&sheet(vec![parent]), pos2(220.0, 190.0), size, Some((true, 200.0)));
+        assert_eq!(beside.y, 200.0, "level with the parent");
+        assert!(beside.x > 120.0 + 40.0);
+        // Another view sits on the way: the spot is still on the line, past it.
+        let blocker = (1, 120.0, 100.0, 80.0, 60.0);
+        let past = free_spot_on(&sheet(vec![parent, blocker]), pos2(120.0, 110.0), size, Some((false, 120.0)));
+        assert_eq!(past.x, 120.0);
+        assert!(!((past.y - 100.0).abs() < 45.0), "not on top of the other view");
     }
 
     /// A click takes the hand-drawn line or circle under it, and Delete removes just that one.
