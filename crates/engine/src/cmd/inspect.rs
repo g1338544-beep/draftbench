@@ -15,11 +15,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("I")
         .noundo()
         .params("bodies?: [names] (default all); or items: [1-2 selections] → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
-    CommandSpec::new("inspect.measure.distance", "Simple Distance", simple_distance).icon("measure").noundo().params(SIMPLE_PARAMS),
-    CommandSpec::new("inspect.measure.angle", "Simple Angle", simple_angle).icon("measure").noundo().params(SIMPLE_PARAMS),
-    CommandSpec::new("inspect.measure.length", "Simple Length", simple_length).icon("measure").noundo().params(SIMPLE_PARAMS),
-    CommandSpec::new("inspect.measure.radius", "Simple Radius", simple_radius).icon("measure").noundo().params(SIMPLE_PARAMS),
-    CommandSpec::new("inspect.measure.diameter", "Simple Diameter", simple_diameter).icon("measure").noundo().params(SIMPLE_PARAMS),
+    CommandSpec::new("inspect.measure.distance", "Simple Distance", simple_distance).icon("measure_distance").noundo().params(SIMPLE_PARAMS),
+    CommandSpec::new("inspect.measure.angle", "Simple Angle", simple_angle).icon("measure_angle").noundo().params(SIMPLE_PARAMS),
+    CommandSpec::new("inspect.measure.length", "Simple Length", simple_length).icon("measure_length").noundo().params(SIMPLE_PARAMS),
+    CommandSpec::new("inspect.measure.radius", "Simple Radius", simple_radius).icon("measure_radius").noundo().params(SIMPLE_PARAMS),
+    CommandSpec::new("inspect.measure.diameter", "Simple Diameter", simple_diameter).icon("measure_diameter").noundo().params(SIMPLE_PARAMS),
     CommandSpec::new("inspect.mass_properties", "Mass Properties", measure).at("SOLID", "INSPECT").icon("measure").noundo().params(
         "bodies?: [names] (default all). Volume, area, mass (g and kg), weight (N), centre of mass and the moments of inertia (kg·mm², about the centre of mass) of each body and in total, from each body's material",
     ),

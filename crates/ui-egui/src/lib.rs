@@ -1054,7 +1054,10 @@ impl SolveApp {
         if let Some(rest) = id.strip_prefix("inspect.measure.") {
             // The simple measures open Measure; its rows list distance, angle, length, radius and diameter.
             if matches!(rest, "distance" | "angle" | "length" | "radius" | "diameter") {
+                // Stay on the tab the click came from: Measure's own tab is INSPECT.
+                let tab = self.ui.tab.clone();
                 self.start("inspect.measure");
+                self.ui.tab = tab;
                 return;
             }
         }

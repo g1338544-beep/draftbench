@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Simple distance</title>
+  <path d="M12 12L12 52" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M52 12L52 52" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="12" cy="44" r="4.5" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55"/>
+  <circle cx="52" cy="44" r="4.5" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55"/>
+  <path d="M22 24L42 24" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M52 24L42 29L42 19Z" fill="#236ead" stroke="#236ead" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M12 24L22 19L22 29Z" fill="#236ead" stroke="#236ead" stroke-width="2" stroke-linejoin="round"/>
+</svg>

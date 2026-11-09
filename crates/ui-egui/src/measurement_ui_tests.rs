@@ -162,3 +162,12 @@ fn measurement_axis_distances_can_be_disabled_saved_and_restored_in_preferences(
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert!(h.app.preferences.measure_axis_distances, "Cancel restores the last Apply");
 }
+
+#[test]
+fn a_simple_measure_opens_measure_and_stays_on_the_tab_it_was_clicked_from() {
+    let mut h = Harness::new();
+    h.app.ui.tab = "MODEL".into();
+    h.app.start("inspect.measure.diameter");
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Measure { .. })), "the Measure dialog opened");
+    assert_eq!(h.app.ui.tab, "MODEL", "the ribbon did not jump to INSPECT");
+}
