@@ -1819,6 +1819,17 @@ fn finish(
             }
         }
     }
+    // Lines drawn by hand (the Line tool): visible lines on the sheet.
+    if let Some(list) = p.get("vlines").and_then(Value::as_array) {
+        for m in list.iter().take(400) {
+            let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+            if let [x1, y1, x2, y2] = n[..]
+                && [x1, y1, x2, y2].iter().all(|v| v.is_finite() && v.abs() < 1e5)
+            {
+                line("VISIBLE", Vec2::new(x1, y1), Vec2::new(x2, y2), &mut entities);
+            }
+        }
+    }
     if let Some(list) = p.get("ccircles").and_then(Value::as_array) {
         for m in list.iter().take(200) {
             let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();

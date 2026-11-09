@@ -366,6 +366,8 @@ pub struct State {
     base_shaded: bool,
     /// Centre lines placed between two picked lines (ends on the sheet), and the tool: the lines picked so far.
     clines: Vec<[f32; 4]>,
+    /// Lines drawn by hand on the sheet (Line tool), as visible lines: x1, y1, x2, y2 in sheet mm.
+    vlines: Vec<[f32; 4]>,
     /// Circular centre lines placed by hand: centre x, y and radius (sheet mm).
     ccircles: Vec<[f32; 3]>,
     /// Colours the user gave single lines (double-click): the line's key and an AutoCAD colour number.
@@ -386,6 +388,8 @@ pub struct State {
     /// The state at the last look: what a change is compared with.
     last_state: String,
     cline_tool: Option<Vec<(Pos2, Pos2)>>,
+    /// The line tool is the free Line (click its two ends) rather than the Centre Line between two lines.
+    cline_free: bool,
     dirty_marks: bool,
     /// Colour pictures of the model on the sheet, and the pictures drawn so far (key, RGB, texture).
     shaded: Vec<ShadedView>,
@@ -542,6 +546,7 @@ impl Default for State {
             base_dashed: true,
             base_shaded: false,
             clines: Vec::new(),
+            vlines: Vec::new(),
             ccircles: Vec::new(),
             line_cols: Vec::new(),
             col_pick: None,
@@ -553,6 +558,7 @@ impl Default for State {
             redo: Vec::new(),
             last_state: String::new(),
             cline_tool: None,
+            cline_free: false,
             dirty_marks: false,
             shaded: Vec::new(),
             shaded_cache: Vec::new(),
@@ -622,6 +628,7 @@ impl State {
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
             "clines": self.clines,
+            "vlines": self.vlines,
             "ccircles": self.ccircles,
             "line_cols": self.line_cols.iter().map(|(v, k, c)| json!([v, k, c])).collect::<Vec<_>>(),
             "centre_cut": self.centre_cut,
@@ -819,6 +826,7 @@ impl State {
         self.bom.clear();
         self.marks.clear();
         self.clines.clear();
+        self.vlines.clear();
         self.ccircles.clear();
         self.line_cols.clear();
         self.col_pick = None;
@@ -982,6 +990,16 @@ impl State {
                     && [a, b, c, e].iter().all(|t| t.is_finite() && t.abs() < 1e5)
                 {
                     self.clines.push([a as f32, b as f32, c as f32, e as f32]);
+                }
+            }
+        }
+        if let Some(list) = d.get("vlines").and_then(serde_json::Value::as_array) {
+            for m in list.iter().take(400) {
+                let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
+                if let [a, b, c, e] = n[..]
+                    && [a, b, c, e].iter().all(|t| t.is_finite() && t.abs() < 1e5)
+                {
+                    self.vlines.push([a as f32, b as f32, c as f32, e as f32]);
                 }
             }
         }
@@ -1361,6 +1379,7 @@ fn params(st: &State) -> Value {
         "free_texts": st.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
         "marks": st.marks,
         "clines": st.clines,
+        "vlines": st.vlines,
         "ccircles": st.ccircles,
         "centre_cut": st.centre_cut,
         "dim_decimals": st.dim_decimals,
@@ -1645,7 +1664,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
     app.drawing.placed.pop();
     let own = p.get("placements").and_then(Value::as_array).and_then(|a| a.last()).cloned()?;
     p["placements"] = json!([own]);
-    for key in ["dimension_items", "clines", "ccircles", "marks", "centre_cut", "bom"] {
+    for key in ["dimension_items", "clines", "vlines", "ccircles", "marks", "centre_cut", "bom"] {
         p[key] = json!([]);
     }
     p["hole_table"] = json!(false);
@@ -2006,6 +2025,9 @@ fn erase_centre(app: &mut SolveApp, mut r: [f32; 4], any_line: bool) {
     }
     app.drawing.marks.retain(|m| !(m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]));
     app.drawing.clines.retain(|c| !segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r));
+    if any_line {
+        app.drawing.vlines.retain(|c| !segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r));
+    }
     app.drawing.ccircles.retain(|c| !ring_in_rect(pos2(c[0], c[1]), c[2], r));
     if app.drawing.centre_cut.len() < 400 {
         // The fifth number: 0 centre lines only, 1 one exact line, 2 every line the frame touches.
@@ -2340,7 +2362,16 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                 }
             });
         }
+        "drawing.ribbon.line" => {
+            let on = app.drawing.cline_tool.is_some() && app.drawing.cline_free;
+            app.drawing.cline_free = true;
+            app.drawing.cline_tool = if on { None } else { Some(Vec::new()) };
+            app.drawing.mark_tool = false;
+            app.drawing.erase_tool = false;
+            app.drawing.dim_tool = None;
+        }
         "drawing.ribbon.centreline" => {
+            app.drawing.cline_free = false;
             app.drawing.cline_tool = if app.drawing.cline_tool.is_some() { None } else { Some(Vec::new()) };
             app.drawing.mark_tool = false;
             app.drawing.dim_tool = None;
@@ -5514,6 +5545,40 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(mut picked) = app.drawing.cline_tool.clone() {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
             app.drawing.cline_tool = None;
+        } else if app.drawing.cline_free {
+            // Line: click its two ends (they snap to ends, corners and centres; Shift keeps it level or upright);
+            // each click goes on from the last, Esc or right-click ends.
+            let tol = 12.0 / px_per_mm;
+            let from = picked.first().map(|(a, _)| *a);
+            let shift = ui.input(|i| i.modifiers.shift);
+            let aim = |s: Pos2| -> Pos2 {
+                let q = snap_point(sheet, s, tol).unwrap_or(s);
+                match from {
+                    Some(f) if shift => {
+                        if (q.x - f.x).abs() >= (q.y - f.y).abs() { pos2(q.x, f.y) } else { pos2(f.x, q.y) }
+                    }
+                    _ => q,
+                }
+            };
+            let accent = Tokens::get().accent;
+            if let Some(at) = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q)).map(aim) {
+                if let Some(f) = from {
+                    painter.line_segment([map(f), map(at)], Stroke::new(2.0, accent));
+                }
+                painter.circle_stroke(map(at), 5.0, Stroke::new(1.5, accent));
+            }
+            if response.clicked_by(egui::PointerButton::Primary)
+                && let Some(q) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)).map(aim)
+            {
+                if let Some(f) = from
+                    && (q - f).length() > 0.01
+                    && app.drawing.vlines.len() < 400
+                {
+                    app.drawing.vlines.push([f.x, f.y, q.x, q.y]);
+                    app.drawing.dirty_marks = true;
+                }
+                app.drawing.cline_tool = Some(vec![(q, q)]);
+            }
         } else {
             let tol = 10.0 / px_per_mm;
             let near = |c: Pos2| {
