@@ -3630,7 +3630,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             app.drawing.centre_cut.clear();
                             dirty = true;
                         }
-                        ui.label("Centre line length past the circle (mm, 0–50)");
+                        ui.label("Centre line length past the circle (mm, 0–50; never more than a quarter of the circle, 3 to 12 mm)");
                         dirty |= crate::ui_kit::bounded_cell_editor(ui, ui.id().with("drawing_centre_extra"), &mut app.drawing.centre_extra, "3", false, 6).changed();
                     }
                     ui.label("Hidden line style");

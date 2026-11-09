@@ -727,7 +727,10 @@ fn manual_once(
                 // lines: a full cross through the circle; marks: a small cross at its centre.
                 let extra = p.get("centre_extra").and_then(Value::as_f64).filter(|v| v.is_finite()).unwrap_or(3.0).clamp(0.0, 50.0);
                 // A small cross grows by whatever the length is set above its default of 3 mm.
-                let reach = if mode == "marks" { (rs * 0.5).clamp(1.5, 4.0) + (extra - 3.0).max(0.0) } else { rs + extra };
+                // A line never reaches further past its circle than a quarter of the circle (3 to 12 mm): a long setting
+                // keeps the small holes and the big rim in proportion.
+                let past = extra.min((rs * 0.25).clamp(3.0, 12.0));
+                let reach = if mode == "marks" { (rs * 0.5).clamp(1.5, 4.0) + (extra - 3.0).max(0.0).min(past) } else { rs + past };
                 line("CENTER", Vec2::new(cs.x - reach, cs.y), Vec2::new(cs.x + reach, cs.y), &mut entities);
                 line("CENTER", Vec2::new(cs.x, cs.y - reach), Vec2::new(cs.x, cs.y + reach), &mut entities);
                 any_centre = true;
