@@ -1,6 +1,6 @@
 //! The work coordinate system drawn in the 3D window: three arrows labelled XC, YC, ZC.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use egui::{Align2, FontId, Painter, Pos2, Rect, Stroke};
 use serde_json::json;
@@ -28,6 +28,12 @@ thread_local! {
     static ARMED: Cell<Option<usize>> = const { Cell::new(None) };
     /// The direction the armed axis would take under the pointer, and what it follows.
     static PREVIEW: Cell<Option<(Vec3, &'static str)>> = const { Cell::new(None) };
+    /// WCS Origin was clicked: the next click on a point, a circle (its centre), a middle or a
+    /// face puts the origin there.
+    static PICK_ORIGIN: Cell<bool> = const { Cell::new(false) };
+    /// The guide points near the pointer while picking, and the one a click would take.
+    static GUIDES: RefCell<Vec<(Vec3, &'static str)>> = const { RefCell::new(Vec::new()) };
+    static TARGET: Cell<Option<(Vec3, &'static str)>> = const { Cell::new(None) };
     /// Where the dragged origin snapped to, and what kind of point it is.
     static SNAP: Cell<Option<(Vec3, &'static str)>> = const { Cell::new(None) };
 }
@@ -61,6 +67,46 @@ fn follow_target(app: &SolveApp, proj: &Proj, pos: Pos2, current: Vec3) -> Optio
         }
     }
     None
+}
+
+/// Ask for the origin by a click (WCS Origin with nothing picked).
+pub fn pick_origin() {
+    PICK_ORIGIN.with(|p| p.set(true));
+}
+
+/// The points a click can take: edge ends, the middle of straight edges and the centres of
+/// circles and arcs (a hole's centre), of the bodies shown.
+fn guide_points(app: &SolveApp) -> Vec<(Vec3, &'static str)> {
+    let st = crate::open_meshing::shown_world(app);
+    let mut out: Vec<(Vec3, &'static str)> = Vec::new();
+    let add = |p: Vec3, what: &'static str, out: &mut Vec<(Vec3, &'static str)>| {
+        if !out.iter().any(|(q, _)| q.dist(p) < 1e-6) {
+            out.push((p, what));
+        }
+    };
+    for b in st.bodies.iter().take(64) {
+        let m = b.mesh();
+        for (i, e) in m.edges.iter().enumerate().take(4000) {
+            if !m.edge_pickable(i) {
+                continue;
+            }
+            if let Some(c) = crate::viewport::circle_edge_centre(&m, i) {
+                add(c, "centre", &mut out);
+            } else if let (Some(a), Some(z)) = (e.first(), e.last())
+                && straight_direction(e).is_some()
+            {
+                add((*a + *z) * 0.5, "middle", &mut out);
+            }
+            if let (Some(a), Some(z)) = (e.first(), e.last()) {
+                add(*a, "end", &mut out);
+                add(*z, "end", &mut out);
+            }
+            if out.len() > 20_000 {
+                return out;
+            }
+        }
+    }
+    out
 }
 
 /// Is the triad being dragged (the camera must not move with it)?
@@ -104,6 +150,48 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
     };
     let (pos, down, pressed) = ui.input(|i| (i.pointer.interact_pos(), i.pointer.primary_down(), i.pointer.primary_pressed()));
     let proj = crate::viewport::projection(app, rect);
+    if PICK_ORIGIN.with(Cell::get) {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            PICK_ORIGIN.with(|p| p.set(false));
+            GUIDES.with(|g| g.borrow_mut().clear());
+            TARGET.with(|t| t.set(None));
+        } else if let Some(pos) = pos.filter(|p| rect.contains(*p) && !crate::shell::covered(app, *p)) {
+            let over_handle = handle_at(&w, &proj, pos).is_some();
+            let mut near: Vec<(f32, Vec3, &'static str)> = guide_points(app)
+                .into_iter()
+                .filter_map(|(p, what)| proj.to_screen(p).map(|q| (q.distance(pos), p, what)))
+                .filter(|(d, _, _)| *d <= 90.0)
+                .collect();
+            near.sort_by(|a, b| a.0.total_cmp(&b.0));
+            near.truncate(40);
+            // A guide point within reach wins; else what is under the pointer.
+            let mut target = near.first().filter(|(d, _, _)| *d <= 14.0).map(|(_, p, what)| (*p, *what));
+            if target.is_none() {
+                target = crate::viewport::pick(app, &proj, pos).into_iter().find_map(|hit| match hit {
+                    Hit::Vertex { point, .. } => Some((point, "point")),
+                    Hit::Face { body, point, .. } => {
+                        Some((solidcraft_engine::cmd::wcs::round_centre(&app.session, point, Some(&body)).unwrap_or(point), "face"))
+                    }
+                    _ => None,
+                });
+            }
+            GUIDES.with(|g| *g.borrow_mut() = near.iter().map(|(_, p, what)| (*p, *what)).collect());
+            TARGET.with(|t| t.set(target));
+            ui.ctx().request_repaint();
+            if pressed && !over_handle {
+                if let Some((at, _)) = target {
+                    let _ = app.run("wcs.origin", json!({"point": [at.x, at.y, at.z]}));
+                }
+                PICK_ORIGIN.with(|p| p.set(false));
+                GUIDES.with(|g| g.borrow_mut().clear());
+                TARGET.with(|t| t.set(None));
+                return;
+            }
+        } else {
+            GUIDES.with(|g| g.borrow_mut().clear());
+            TARGET.with(|t| t.set(None));
+        }
+    }
     // An axis picked by a click: follow the face or edge under the pointer, keep it on the next click.
     if let Some(k) = ARMED.with(Cell::get)
         && GRAB.with(Cell::get).is_none()
@@ -278,6 +366,24 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
         } else {
             painter.text(o + egui::vec2(14.0, 14.0), Align2::LEFT_TOP, "move over a face or a straight edge (Esc ends)", FontId::proportional(12.0), orange);
         }
+    }
+    if PICK_ORIGIN.with(Cell::get) {
+        let hit = TARGET.with(Cell::get);
+        GUIDES.with(|g| {
+            for (p, _) in g.borrow().iter() {
+                if let Some(q) = proj.to_screen(*p) {
+                    painter.circle_filled(q, 3.0, orange);
+                }
+            }
+        });
+        if let Some((at, what)) = hit
+            && let Some(q) = proj.to_screen(at)
+        {
+            painter.circle_stroke(q, 8.0, Stroke::new(2.0, orange));
+            painter.circle_filled(q, 3.5, orange);
+            painter.text(q + egui::vec2(12.0, -12.0), Align2::LEFT_BOTTOM, what, FontId::proportional(12.0), orange);
+        }
+        painter.text(o + egui::vec2(14.0, 14.0), Align2::LEFT_TOP, "click a point, a circle or a middle to put the origin there (Esc ends)", FontId::proportional(12.0), orange);
     }
     painter.circle_filled(o, 6.0, orange);
     painter.circle_stroke(o, 6.0, Stroke::new(1.5, egui::Color32::WHITE));

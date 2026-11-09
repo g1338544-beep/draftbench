@@ -31,6 +31,7 @@ pub mod deferred;
 pub mod delete;
 pub mod design_properties;
 pub mod layer_window;
+pub mod wcs_rotate;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -396,6 +397,7 @@ pub struct SolveApp {
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
     pub layer_window: Option<layer_window::LayerWindow>,
+    pub wcs_rotate: Option<wcs_rotate::WcsRotate>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     /// The Run Script window, when open.
@@ -562,6 +564,7 @@ impl SolveApp {
             params: None,
             design_properties: None,
             layer_window: None,
+            wcs_rotate: None,
             bom: None,
             script: None,
             material_card_review: None,
@@ -1063,6 +1066,19 @@ impl SolveApp {
         }
         if id == "parameters.change" {
             params_dialog::open(self);
+            return;
+        }
+        if id == "wcs.origin" {
+            // With nothing picked, show the triad and take the next click as the new origin.
+            let picked = self.session.selection.iter().any(|x| matches!(x, solidcraft_engine::Sel::Vertex { .. } | solidcraft_engine::Sel::Edge { .. } | solidcraft_engine::Sel::Face { .. }));
+            if !picked {
+                wcs_triad::pick_origin();
+            }
+            let _ = self.run(id, json!({}));
+            return;
+        }
+        if matches!(id, "wcs.rotate_x" | "wcs.rotate_y" | "wcs.rotate_z") {
+            wcs_rotate::open(self, id);
             return;
         }
         if matches!(id, "layer.settings" | "layer.create" | "layer.assign") {
@@ -1858,6 +1874,7 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         layer_window::show(self, ui.ctx());
+        wcs_rotate::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
         script_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
