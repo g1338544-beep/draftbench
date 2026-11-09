@@ -5041,8 +5041,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut menu_proj: Option<usize> = None;
     let app_has_clip = app.drawing.cell_clip.is_some();
     let mut hide_layer: Option<usize> = None;
+    let mut hide_one: Option<Pos2> = None;
+    let mut bring_back = false;
     let mut show_all_lines = false;
     let any_off = app.drawing.layers_off.iter().any(|b| *b);
+    let has_erased = !app.drawing.centre_cut.is_empty();
     if let Some((target, at)) = app.drawing.menu_at {
         // The kind of line under the pointer, for the hide entry.
         let under_kind = app.drawing.sheet.as_ref().and_then(|sheet| line_kind_at(sheet, at, 3.0 / px_per_mm_hint(&map)));
@@ -5054,11 +5057,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.close();
                 }
             }
+            if under_kind.is_some() && crate::ui_kit::list_picker(ui, "Hide this line", "Hide this line", false).clicked() {
+                hide_one = Some(at);
+                ui.close();
+            }
+            if has_erased && crate::ui_kit::list_picker(ui, "Bring back hidden lines", "Bring back hidden lines", false).clicked() {
+                bring_back = true;
+                ui.close();
+            }
             if any_off && crate::ui_kit::list_picker(ui, "Show all lines", "Show all lines", false).clicked() {
                 show_all_lines = true;
                 ui.close();
             }
-            if under_kind.is_some() || any_off {
+            if under_kind.is_some() || any_off || has_erased {
                 ui.separator();
             }
             for (i, (_, label)) in VIEWS.iter().enumerate() {
@@ -5100,6 +5111,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if show_all_lines {
         app.drawing.layers_off = [false; 5];
+    }
+    if let Some(at) = hide_one {
+        erase_centre(app, [at.x, at.y, at.x, at.y], true);
+        refresh(app);
+    }
+    if bring_back {
+        app.drawing.centre_cut.clear();
+        app.drawing.dirty_marks = true;
+        refresh(app);
     }
     if let Some((paste, at)) = menu_text {
         if paste {
