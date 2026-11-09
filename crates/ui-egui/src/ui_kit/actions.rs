@@ -49,11 +49,14 @@ pub(super) fn icon_button_colored(ui: &mut Ui, rect: egui::Rect, icon: &str, lab
     response.on_hover_text(crate::i18n::tr_label(label))
 }
 
-/// Esc cancels; unowned Enter submits only when valid. Tokens: `none`.
+/// Esc cancels; unowned Enter or a middle-button click (not a drag) submits only when valid.
+/// Tokens: `none`.
 pub(crate) fn keyboard(ctx: &egui::Context, ok_enabled: bool) -> Action {
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         Action::Cancel
     } else if ok_enabled && ctx.memory(|m| m.focused().is_none()) && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+        Action::Ok
+    } else if ok_enabled && ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Middle)) {
         Action::Ok
     } else {
         Action::None

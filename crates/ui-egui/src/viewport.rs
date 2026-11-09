@@ -562,6 +562,100 @@ pub(crate) struct CachedBlock {
     meshes: Vec<std::sync::Arc<solidcraft_engine::geom::Mesh>>,
 }
 
+/// Side lines of the cylindrical faces (holes, bosses, shafts): a B-rep draws only the rims of
+/// such a face, so a wireframe or hidden-edges view shows a hole as two bare circles. Four lines
+/// along the axis, a quarter turn apart, give it its sides. A face qualifies when all its vertex
+/// normals are square to one axis and every vertex lies on one cylinder around it; partial arcs
+/// (fillets) are left alone.
+fn cylinder_side_lines(m: &solidcraft_engine::geom::Mesh) -> Vec<(Vec3, Vec3)> {
+    const MAX_FACES: usize = 20_000;
+    let mut by_face: std::collections::BTreeMap<u32, Vec<u32>> = std::collections::BTreeMap::new();
+    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+        by_face.entry(*f).or_default().extend_from_slice(t);
+    }
+    let mut lines = Vec::new();
+    for verts in by_face.values_mut().take(MAX_FACES) {
+        verts.sort_unstable();
+        verts.dedup();
+        let pts: Vec<(Vec3, Vec3)> = verts
+            .iter()
+            .filter_map(|&i| Some((*m.positions.get(i as usize)?, m.normals.get(i as usize)?.normalized()?)))
+            .collect();
+        let Some(&(p0, n0)) = pts.first() else { continue };
+        // The axis: square to every normal, so the cross product of two that differ.
+        let Some((n1, d)) = pts.iter().find_map(|(_, n)| n0.cross(*n).normalized().map(|d| (*n, d))) else { continue };
+        let tol = 1e-4 * pts.iter().map(|(p, _)| (*p - p0).len()).fold(0.0, f64::max).max(1.0);
+        if pts.iter().any(|(_, n)| n.dot(d).abs() > 1e-3) {
+            continue;
+        }
+        let dn = n0 - n1;
+        let dn2 = dn.len2();
+        // Radius from the two vertices: their offset square to the axis is R times the normals' difference.
+        let Some(&(p1, _)) = pts.iter().find(|(_, n)| (*n - n1).len2() < 1e-18) else { continue };
+        let off = p0 - p1;
+        let off = off - d * off.dot(d);
+        let r = off.dot(dn) / dn2;
+        if !r.is_finite() || r.abs() < 1e-6 {
+            continue;
+        }
+        let c = p0 - n0 * r;
+        // Every vertex sits on that cylinder.
+        if pts.iter().any(|(p, n)| {
+            let q = *p - *n * r - c;
+            (q - d * q.dot(d)).len() > tol
+        }) {
+            continue;
+        }
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for (p, _) in &pts {
+            let t = (*p - c).dot(d);
+            lo = lo.min(t);
+            hi = hi.max(t);
+        }
+        if hi - lo <= 1e-6 || !(hi - lo).is_finite() {
+            continue;
+        }
+        // A frame square to the axis, and each vertex's angle in it.
+        let e = if d.x.abs() <= d.y.abs() && d.x.abs() <= d.z.abs() {
+            Vec3::X
+        } else if d.y.abs() <= d.z.abs() {
+            Vec3::Y
+        } else {
+            Vec3::Z
+        };
+        let Some(u) = (e - d * e.dot(d)).normalized() else { continue };
+        let w = d.cross(u);
+        let mut angles: Vec<f64> = pts.iter().map(|(_, n)| n.dot(w).atan2(n.dot(u)).rem_euclid(std::f64::consts::TAU)).collect();
+        angles.sort_by(f64::total_cmp);
+        // The widest gap between neighbouring angles is where the face is not; a face needs to
+        // cover at least a half turn.
+        let (mut gap, mut gap_from) = (0.0f64, 0.0f64);
+        let first = angles.first().copied().unwrap_or(0.0);
+        for (k, a) in angles.iter().enumerate() {
+            let b = angles.get(k + 1).copied().unwrap_or(first + std::f64::consts::TAU);
+            if b - a > gap {
+                gap = b - a;
+                gap_from = *a;
+            }
+        }
+        if gap > std::f64::consts::PI + 1e-3 {
+            continue;
+        }
+        for q in 0..4 {
+            let th = q as f64 * std::f64::consts::FRAC_PI_2;
+            // Inside the widest gap: the face has no surface there.
+            let into = (th - gap_from).rem_euclid(std::f64::consts::TAU);
+            if into > 1e-6 && into < gap - 1e-6 {
+                continue;
+            }
+            let n = u * th.cos() + w * th.sin();
+            let on = c + n * r;
+            lines.push((on + d * lo, on + d * hi));
+        }
+    }
+    lines
+}
+
 /// Whether an edge's polyline winds through space like a thread: many points that do not lie in one plane.
 fn helix_like(e: &[Vec3]) -> bool {
     let n = e.len();
@@ -666,6 +760,16 @@ impl BodyDraw {
                         out.hidden_line(p(t0), p(t1), hidden_col, 1.2);
                         k += 2;
                     }
+                }
+            }
+        }
+        // Wireframe and hidden-edges views: cylinder faces get side lines, or a hole is two bare circles.
+        if edges && (!shaded || hidden_edges) {
+            for (a, b) in cylinder_side_lines(m) {
+                let (a, b) = (a.to_f32(), b.to_f32());
+                out.line(a, b, edge_col, 1.4, false);
+                if hidden_edges {
+                    out.hidden_line(a, b, hidden_col, 1.2);
                 }
             }
         }
@@ -2926,6 +3030,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(Hit::Face { body, .. }) = app.viewport.hover.clone()
         {
             app.tree.reveal = Some(body);
+        }
+        // A middle-button click (not a drag, which navigates) is OK: it ends the running sketch tool's chain.
+        if resp.clicked_by(egui::PointerButton::Middle) && delta == egui::Vec2::ZERO && app.tool.is_some() && app.dialog.is_none() {
+            crate::tools::finish(app);
         }
         // A right-click, unless the same press opened the mouse gestures' ring.
         if resp.secondary_clicked() && delta == egui::Vec2::ZERO && !crate::mouse_gesture::took_press(app) {
@@ -7297,5 +7405,39 @@ mod standalone_point_tests {
         assert!(points[0].dist(Vec3::new(5.0, 4.0, 0.0)) < 1e-9, "{points:?}");
         app.ui.show_sketches = false;
         assert!(standalone_points(&app).is_empty(), "sketches hidden");
+    }
+
+    /// A hole's wall is one cylinder face: wireframe gets four lines along its axis, a flat face none.
+    #[test]
+    fn cylinder_faces_get_side_lines_and_flat_ones_do_not() {
+        let mut m = solidcraft_engine::geom::Mesh::default();
+        let n = 16u32;
+        for k in 0..n {
+            let a = f64::from(k) / f64::from(n) * std::f64::consts::TAU;
+            let (c, s) = (a.cos(), a.sin());
+            for z in [0.0, 10.0] {
+                m.positions.push(Vec3::new(5.0 * c, 5.0 * s, z));
+                m.normals.push(Vec3::new(-c, -s, 0.0));
+            }
+        }
+        for k in 0..n {
+            let (a, b) = (2 * k, 2 * ((k + 1) % n));
+            m.triangles.push([a, b, a + 1]);
+            m.triangles.push([b, b + 1, a + 1]);
+            m.tri_face.extend([0, 0]);
+        }
+        let lines = cylinder_side_lines(&m);
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        for (a, b) in &lines {
+            assert!((a.z - b.z).abs() > 9.99 && ((a.x * a.x + a.y * a.y).sqrt() - 5.0).abs() < 1e-6, "{a:?} {b:?}");
+        }
+        let flat = solidcraft_engine::geom::Mesh {
+            positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y],
+            normals: vec![Vec3::Z; 3],
+            triangles: vec![[0, 1, 2]],
+            tri_face: vec![0],
+            ..Default::default()
+        };
+        assert!(cylinder_side_lines(&flat).is_empty());
     }
 }

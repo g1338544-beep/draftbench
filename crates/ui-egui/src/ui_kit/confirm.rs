@@ -71,7 +71,8 @@ impl<'a> Confirm<'a> {
             let t = Tokens::get();
             ui.spacing_mut().item_spacing.y = 0.0;
             // Consume before native button focus can interpret Enter as a different answer.
-            let enter = ui.is_enabled() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            let enter = ui.is_enabled()
+                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) || i.pointer.button_clicked(egui::PointerButton::Middle));
             let mut closed = false;
             egui::Frame::NONE
                 .inner_margin(egui::Margin {

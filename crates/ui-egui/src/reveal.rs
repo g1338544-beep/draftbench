@@ -69,7 +69,7 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, resp: &egui::Respon
         finish(app, false);
         return;
     }
-    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+    if ui.input(|i| i.key_pressed(egui::Key::Enter) || i.pointer.button_clicked(egui::PointerButton::Middle)) {
         finish(app, true);
         return;
     }

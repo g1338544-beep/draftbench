@@ -6242,7 +6242,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.line_segment([map(l), map(at)], Stroke::new(2.0, accent.gamma_multiply(0.7)));
                 }
             }
-            let mut finish = ui.input(|i| i.key_pressed(egui::Key::Enter)) || response.double_clicked();
+            let mut finish = ui.input(|i| i.key_pressed(egui::Key::Enter) || i.pointer.button_clicked(egui::PointerButton::Middle)) || response.double_clicked();
             if !finish
                 && response.clicked_by(egui::PointerButton::Primary)
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
@@ -6437,7 +6437,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && app.drawing.text_edit.is_none()
         && app.drawing.cell_edit.is_none()
         && !ui.ctx().egui_wants_keyboard_input()
-        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+        && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.pointer.button_clicked(egui::PointerButton::Middle))
     {
         app.drawing.dim_back = k == 7;
         app.drawing.dim_tool = Some((k, Vec::new()));
