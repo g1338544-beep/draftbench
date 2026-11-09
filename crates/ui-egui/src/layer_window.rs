@@ -98,32 +98,3 @@ mod tests {
     }
 }
 
-/// The Show/Hide list: the hidden bodies and sketches, each with a box; ticking one shows it.
-pub fn show_hidden(app: &mut SolveApp, ctx: &egui::Context) {
-    if !app.hidden_window {
-        return;
-    }
-    let v = &app.session.visibility;
-    let mut names: Vec<String> = v.hidden_bodies.clone();
-    names.extend(v.hidden_sketches.iter().filter_map(|id| app.session.doc.find_feature(&id.to_string()).map(|f| f.name.clone())));
-    let mut ticked: Vec<String> = Vec::new();
-    let (closed, _) = ui_kit::Window::new(egui::Id::new("sc_hidden_window"), "settings", crate::i18n::tr_label("Show/Hide")).actions("", "Close", None).show(ctx, true, |ui| {
-        if names.is_empty() {
-            ui_kit::text(ui, "Nothing is hidden.", ui_kit::Text::Note("hidden_empty"));
-        } else {
-            ui_kit::text(ui, "Tick a hidden item to show it.", ui_kit::Text::Note("hidden_hint"));
-        }
-        for name in &names {
-            let mut on = false;
-            if ui_kit::checkbox(ui, name, &mut on).changed() && on {
-                ticked.push(name.clone());
-            }
-        }
-    });
-    if !ticked.is_empty() {
-        let _ = app.run("view.show_hidden", json!({"items": ticked}));
-    }
-    if closed {
-        app.hidden_window = false;
-    }
-}

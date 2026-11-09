@@ -380,6 +380,10 @@ fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
 
 /// With a component active, bodies outside it are drawn faded.
 fn body_faded(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, active_bodies: &Option<Vec<String>>) -> bool {
+    // Show/Hide: the bodies that were hidden are ghosts until they are ticked.
+    if app.reveal.as_ref().is_some_and(|r| r.is_ghost(&b.name)) {
+        return true;
+    }
     let s = &app.session;
     if let Some(names) = active_bodies {
         !names.contains(&b.name)
@@ -2502,6 +2506,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !flat {
         crate::wcs_triad::update(app, ui, rect);
     }
+    crate::reveal::update(app, ui, rect, &resp);
     let input =
         if flat { crate::dialogs_sheet::navigate(app, ui, rect, &resp) } else { crate::navigation::handle(app, ui, rect, &resp, NavCaps::MODEL) };
     let CameraInput {

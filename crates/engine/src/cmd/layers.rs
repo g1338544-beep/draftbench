@@ -22,7 +22,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("layer.settings", "Layer Settings", list).icon("folder").noundo().params("lists the layers; in the app it opens the Layer Settings window (Ctrl+L)"),
     CommandSpec::new("layer.list", "List Layers", list).icon("list").noundo().doc_only(),
     CommandSpec::new("view.hide", "Hide", hide).icon("view_hide").noundo().params("items?: [body | sketch | construction names] (default: the bodies of the selection, faces and edges included); hides them. Ctrl+B in the app flips what is selected"),
-    CommandSpec::new("view.show_hidden", "Show/Hide", show_hidden).icon("view_show_hidden").noundo().params("items?: [body | sketch | construction names] (they are shown again); without items: lists the hidden bodies and sketches. In the app it opens the list to tick the ones to show"),
+    CommandSpec::new("view.show_hidden", "Show/Hide", show_hidden).icon("view_show_hidden").noundo().params("items?: [body | sketch | construction names] (they are shown again); without items: lists the hidden bodies and sketches. In the app the hidden bodies come back as faded ghosts: click one, or drag a box over several, to keep them shown"),
     CommandSpec::new("view.hide_others", "Isolate", hide_others).icon("eye").noundo().params("items?: [body names] (default: the bodies of the selection); shows those and hides every other body"),
     CommandSpec::new("view.show_all", "Show All", show_all).icon("view_show_all").noundo().params("shows every body, sketch, construction item and layer"),
     CommandSpec::new("view.invert_visibility", "Show Hidden / Hide Shown", invert).icon("eye").noundo().params("swaps shown and hidden bodies and sketches"),
