@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Show All</title>
+  <path d="M8 8L28 8L28 28L8 28Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round"/>
+  <path d="M36 8L56 8L56 28L36 28Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round"/>
+  <path d="M8 36L28 36L28 56L8 56Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round"/>
+  <path d="M36 36L56 36L56 56L36 56Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round"/>
+  <circle cx="18" cy="18" r="4" fill="#236ead"/>
+  <circle cx="46" cy="18" r="4" fill="#236ead"/>
+  <circle cx="18" cy="46" r="4" fill="#236ead"/>
+  <circle cx="46" cy="46" r="4" fill="#236ead"/>
+</svg>

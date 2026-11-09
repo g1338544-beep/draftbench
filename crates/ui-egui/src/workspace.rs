@@ -90,7 +90,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &["solid.move", "solid.mirror", "solid.pattern.rectangular", "solid.align", "solid.pattern.circular", "solid.pattern.path"],
     },
     // The quick Show/Hide row: Ctrl+B, Ctrl+Shift+B and Ctrl+Shift+U as buttons.
-    Section { tab: "MODEL", panel: "VISIBILITY", promoted: 4, ids: &["view.hide", "view.hide_others", "view.invert_visibility", "view.show_all"] },
+    Section { tab: "MODEL", panel: "VISIBILITY", promoted: 3, ids: &["view.hide", "view.show_hidden", "view.show_all"] },
     // Simple measures (distance, angle, length, radius, diameter): each opens Measure.
     Section {
         tab: "MODEL",
@@ -363,7 +363,6 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("surface.sweep", "Sweep"),
     ("timeline.dependents", "Dependents"),
     ("view.apply", "Restore View"),
-    ("view.invert_visibility", "Show/Hide"),
     ("view.save", "Save View"),
 ];
 

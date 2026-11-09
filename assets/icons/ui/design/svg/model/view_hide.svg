@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Hide</title>
+  <path d="M6 32C16 16 48 16 58 32C48 48 16 48 6 32Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="7" fill="#34465b"/>
+  <path d="M12 54L52 10" fill="none" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12 54L52 10" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

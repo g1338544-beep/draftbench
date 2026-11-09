@@ -21,9 +21,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("layer.delete", "Delete Layer", delete).icon("delete").noundo().params("name (its items are shown again and stay in the design)"),
     CommandSpec::new("layer.settings", "Layer Settings", list).icon("folder").noundo().params("lists the layers; in the app it opens the Layer Settings window (Ctrl+L)"),
     CommandSpec::new("layer.list", "List Layers", list).icon("list").noundo().doc_only(),
-    CommandSpec::new("view.hide", "Hide", hide).icon("eye").noundo().params("items?: [body | sketch | construction names] (default: the bodies of the selection, faces and edges included); hides them. Ctrl+B in the app flips what is selected"),
+    CommandSpec::new("view.hide", "Hide", hide).icon("view_hide").noundo().params("items?: [body | sketch | construction names] (default: the bodies of the selection, faces and edges included); hides them. Ctrl+B in the app flips what is selected"),
+    CommandSpec::new("view.show_hidden", "Show/Hide", show_hidden).icon("view_show_hidden").noundo().params("items?: [body | sketch | construction names] (they are shown again); without items: lists the hidden bodies and sketches. In the app it opens the list to tick the ones to show"),
     CommandSpec::new("view.hide_others", "Isolate", hide_others).icon("eye").noundo().params("items?: [body names] (default: the bodies of the selection); shows those and hides every other body"),
-    CommandSpec::new("view.show_all", "Show All", show_all).icon("eye").noundo().params("shows every body, sketch, construction item and layer"),
+    CommandSpec::new("view.show_all", "Show All", show_all).icon("view_show_all").noundo().params("shows every body, sketch, construction item and layer"),
     CommandSpec::new("view.invert_visibility", "Show Hidden / Hide Shown", invert).icon("eye").noundo().params("swaps shown and hidden bodies and sketches"),
 ];
 
@@ -174,6 +175,15 @@ fn hide_others(s: &mut Session, p: &Value) -> Result<Value> {
     visibility(s, &json!({"visible": false, "items": others}))
 }
 
+fn show_hidden(s: &mut Session, p: &Value) -> Result<Value> {
+    if p.get("items").is_some() {
+        let items = item_names(s, p, "view.show_hidden", true)?;
+        return visibility(s, &json!({"visible": true, "items": items}));
+    }
+    let sketches: Vec<String> = s.visibility.hidden_sketches.iter().filter_map(|id| s.doc.find_feature(&id.to_string()).map(|f| f.name.clone())).collect();
+    Ok(json!({"bodies": s.visibility.hidden_bodies, "sketches": sketches}))
+}
+
 fn show_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let v = &mut s.visibility;
     v.hidden_bodies.clear();
@@ -224,5 +234,18 @@ mod tests {
         s.execute("view.show_all", &json!({})).unwrap();
         assert!(s.visibility.hidden_bodies.is_empty());
         assert!(s.execute("view.hide", &json!({"items": ["Nope"]})).is_err(), "an unknown name is an error");
+    }
+
+    #[test]
+    fn show_hidden_lists_what_is_hidden_and_shows_only_the_ticked_ones() {
+        let mut s = Session::default();
+        for (name, x) in [("A", 0), ("B", 30)] {
+            s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "center": [x, 0, 5], "operation": "new", "body_name": name})).unwrap();
+        }
+        s.execute("view.hide", &json!({"items": ["A", "B"]})).unwrap();
+        let listed = s.execute("view.show_hidden", &json!({})).unwrap();
+        assert_eq!(listed["bodies"], json!(["A", "B"]));
+        s.execute("view.show_hidden", &json!({"items": ["B"]})).unwrap();
+        assert_eq!(s.execute("view.show_hidden", &json!({})).unwrap()["bodies"], json!(["A"]));
     }
 }
