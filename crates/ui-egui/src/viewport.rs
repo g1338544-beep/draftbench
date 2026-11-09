@@ -3658,6 +3658,61 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     {
         painter.circle(p, 4.5, t.hover_edge_halo, Stroke::new(1.5, t.hover_edge));
     }
+    circle_centres(app, painter, proj);
+}
+
+/// The centre of a circle or arc edge: through its first, middle and last points, and only when
+/// every point of the edge (all pieces of a split rim) lies on that circle.
+pub(crate) fn circle_edge_centre(m: &solidcraft_engine::geom::Mesh, edge: usize) -> Option<Vec3> {
+    let pieces: Vec<&Vec<Vec3>> = m.circular_rim(edge).into_iter().filter_map(|i| m.edges.get(i)).collect();
+    let first = pieces.first()?;
+    if first.len() < 3 {
+        return None;
+    }
+    let (a, b, c) = (*first.first()?, *first.get(first.len() / 2)?, *first.last()?);
+    let (u, v) = (b - a, c - a);
+    let n = u.cross(v);
+    if !(n.len2() > u.len2() * v.len2() * 1e-9) {
+        return None;
+    }
+    let centre = a + (v.cross(n) * u.len2() + n.cross(u) * v.len2()) / (2.0 * n.len2());
+    let r = centre.dist(a);
+    if !r.is_finite() || r <= 0.0 {
+        return None;
+    }
+    let tol = r * 1e-3 + 1e-6;
+    pieces.iter().all(|p| p.iter().all(|q| (centre.dist(*q) - r).abs() <= tol)).then_some(centre)
+}
+
+/// A dot at the centre of the hovered and selected circle and arc edges, so the centre can be
+/// seen (and snapped to) before it is picked.
+fn circle_centres(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let t = Tokens::get();
+    let st = crate::open_meshing::shown_world(app);
+    let mut edges: Vec<(String, usize, bool)> = Vec::new();
+    if let Some(Hit::Edge { body, index, .. }) = &app.viewport.hover {
+        edges.push((body.clone(), *index, true));
+    }
+    for x in app.highlighted().into_iter().take(64) {
+        if let Sel::Edge { body, index, .. } = x {
+            edges.push((body, index, false));
+        }
+    }
+    let mut seen: Vec<Vec3> = Vec::new();
+    for (body, index, hover) in edges {
+        let Some(b) = st.body(&body) else { continue };
+        let m = drawn_mesh(app, b);
+        let Some(c) = circle_edge_centre(&m, index) else { continue };
+        if seen.iter().any(|q| q.dist(c) < 1e-6) {
+            continue;
+        }
+        seen.push(c);
+        let Some(p) = proj.to_screen(c) else { continue };
+        let (fill, line) = if hover { (t.hover_edge_halo, t.hover_edge) } else { (t.sel_vertex, t.sel_edge) };
+        painter.circle(p, 3.5, fill, Stroke::new(1.5, line));
+        painter.line_segment([p - egui::vec2(7.0, 0.0), p + egui::vec2(7.0, 0.0)], Stroke::new(1.0, line));
+        painter.line_segment([p - egui::vec2(0.0, 7.0), p + egui::vec2(0.0, 7.0)], Stroke::new(1.0, line));
+    }
 }
 
 /// Where the ground grid is centred: where the view's axis (`back`, through the camera's target
@@ -5897,6 +5952,18 @@ mod tests {
         assert!(sc.trans.is_empty(), "no origin plane is drawn where the section clips");
         // Each origin axis: a solid part and dashes beyond, plus each plane's four edges.
         assert!(sc.guide_lines.len() >= (planes * 4 + 3) * crate::gpu::LINE_SIZE);
+    }
+
+    #[test]
+    fn a_circular_rim_has_a_centre_to_show_and_a_straight_edge_has_none() {
+        let app = cylinder_app();
+        let st = app.session.world_state();
+        let m = st.bodies[0].mesh();
+        let top = m.edges.iter().position(|e| e.len() > 3 && e.iter().all(|p| (p.z - 20.0).abs() < 1e-6)).unwrap();
+        let c = circle_edge_centre(&m, top).expect("the top rim is a circle");
+        assert!((c.z - 20.0).abs() < 1e-6 && c.x.abs() < 1e-6 && c.y.abs() < 1e-6, "on the axis at the top: {c:?}");
+        let line = m.edges.iter().position(|e| e.len() == 2).expect("the seam is a straight edge");
+        assert!(circle_edge_centre(&m, line).is_none());
     }
 
     #[test]
