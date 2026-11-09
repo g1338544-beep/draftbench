@@ -4514,8 +4514,6 @@ pub(crate) fn kernel_rail_fit(fit: crate::RailFit) -> kernel::RailFit {
     }
 }
 
-/// A sweep's or a loft's guide rails as polylines in the feature's frame, each a chain of its sketch's curves
-/// (planar or 3D) from the end nearest `start` (the start of the path, the loft's first section).
 /// Add a copy of the first (or, with `last`, the last) section of a loft a fifth of the way toward its
 /// neighbour, measured along the section's normal, so a surface through them all meets the end square on.
 fn add_end_guide(secs: &mut Vec<(Plane, Region2)>, last: bool) {
@@ -4536,6 +4534,8 @@ fn add_end_guide(secs: &mut Vec<(Plane, Region2)>, last: bool) {
     secs.insert(at, (moved, region));
 }
 
+/// A sweep's or a loft's guide rails as polylines in the feature's frame, each a chain of its sketch's curves
+/// (planar or 3D) from the end nearest `start` (the start of the path, the loft's first section).
 pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::SweepRail], consumer: u64, start: Vec3) -> Result<Vec<Vec<Vec3>>> {
     if rails.len() > 2 {
         return Err(DocError::Invalid("a sweep or a loft takes one or two guide rails".into()));
