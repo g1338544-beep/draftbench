@@ -2135,6 +2135,49 @@ fn erase_centre(app: &mut SolveApp, mut r: [f32; 4], any_line: bool) {
     app.drawing.dirty_marks = true;
 }
 
+/// The section whose drawn cutting line is the chain line `old` (as drawn on the sheet, its ends 2.5 mm past the
+/// line), and its new line in model mm once the chain line has been stretched to `new`.
+fn stretch_cutting_line(placed: &[PlacedView], sheet: &Sheet, old: (Pos2, Pos2), new: (Pos2, Pos2)) -> Option<(usize, [f32; 4])> {
+    let near = |p: Pos2, q: Pos2| (p - q).length() < 0.3;
+    for (i, v) in placed.iter().enumerate() {
+        let Some([x1, y1, x2, y2]) = v.section_line else { continue };
+        if ![x1, y1, x2, y2].iter().all(|n| n.is_finite()) {
+            continue;
+        }
+        for bx in &sheet.boxes {
+            let plain = placed.get(bx.0).is_some_and(|w| w.view < 6 && w.rot == 0 && w.section.is_none() && w.custom.is_none() && w.detail.is_none());
+            let k = sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1).filter(|k| *k > 0.0 && k.is_finite());
+            let c = sheet.centres.iter().find(|s| s.0 == bx.0).map(|s| (s.1, s.2));
+            let (true, Some(k), Some((cx, cy))) = (plain, k, c) else { continue };
+            let to_sheet = |m: (f32, f32)| pos2(bx.1 + (m.0 - cx) * k, bx.2 + (m.1 - cy) * k);
+            let (a, b) = (to_sheet((x1, y1)), to_sheet((x2, y2)));
+            let d = b - a;
+            if d.length() < 1e-3 {
+                continue;
+            }
+            let u = d / d.length();
+            let (ea, eb) = (a - u * 2.5, b + u * 2.5);
+            let same = (near(old.0, ea) && near(old.1, eb), near(old.0, eb) && near(old.1, ea));
+            if !same.0 && !same.1 {
+                continue;
+            }
+            // Which new end belongs to the line's first end.
+            let (na, nb) = if same.0 { new } else { (new.1, new.0) };
+            let nd = nb - na;
+            if nd.length() < 1e-3 {
+                return None;
+            }
+            let nu = nd / nd.length();
+            let (ia, ib) = (na + nu * 2.5, nb - nu * 2.5);
+            let model = |q: Pos2| ((q.x - bx.1) / k + cx, (q.y - bx.2) / k + cy);
+            let (m1, m2) = (model(ia), model(ib));
+            let line = [m1.0, m1.1, m2.0, m2.1];
+            return line.iter().all(|n| n.is_finite()).then_some((i, line));
+        }
+    }
+    None
+}
+
 /// The hand-drawn line under a sheet point: a line, or the rim of a circle or arc.
 fn hand_hit(d: &State, s: Pos2, tol: f32) -> Option<(bool, usize)> {
     let line = d.vlines.iter().enumerate().filter(|(_, c)| c.iter().all(|v| v.is_finite())).map(|(i, c)| (dist_to_segment(s, (pos2(c[0], c[1]), pos2(c[2], c[3]))), (false, i)));
@@ -4465,9 +4508,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if response.drag_stopped() || !response.dragged() {
             if let Some((oa, ob, la, lb, _)) = app.drawing.cl_drag.take() {
-                erase_line(app, oa, ob);
-                if app.drawing.clines.len() < 400 {
-                    app.drawing.clines.push([la.x, la.y, lb.x, lb.y]);
+                // The chain line of a section's cutting line: its own ends move, so the arrows and letters follow.
+                let cut = app.drawing.sheet.as_ref().and_then(|sh| stretch_cutting_line(&app.drawing.placed, sh, (oa, ob), (la, lb)));
+                if let Some((i, line)) = cut
+                    && let Some(v) = app.drawing.placed.get_mut(i)
+                {
+                    v.section_line = Some(line);
+                    refresh(app);
+                } else {
+                    erase_line(app, oa, ob);
+                    if app.drawing.clines.len() < 400 {
+                        app.drawing.clines.push([la.x, la.y, lb.x, lb.y]);
+                    }
                 }
                 app.drawing.sel_centre = Some((la, lb));
             }
@@ -7753,6 +7805,23 @@ mod hand_drawn_tests {
         let (q, g) = section_snap(&sheet, pos2(160.0, 200.0), Some(first), 3.0);
         assert!((q.x - 160.0).abs() < 1e-3 && (q.y - 200.0).abs() < 1e-3, "{q:?}");
         let _ = g;
+    }
+
+    /// Stretching a section's chain line moves the cutting line itself (so its arrows follow), at the right place and order.
+    #[test]
+    fn stretching_the_cutting_line_moves_the_section_line() {
+        let sheet = Sheet { width: 420.0, height: 297.0, note: String::new(), items: Vec::new(), boxes: vec![(0, 100.0, 150.0, 80.0, 80.0)], scales: vec![(0, 2.0)], centres: vec![(0, 10.0, 20.0)], rounds: std::sync::OnceLock::new() };
+        let view = |section_line: Option<[f32; 4]>| PlacedView { view: 0, x: 100.0, y: 150.0, scale: String::new(), dashed: false, dims: false, section: section_line.map(|_| (0, String::new())), section_line, section_path: None, detail: None, align: None, custom: None, rot: 0, spin: 0.0, label: None, letter: String::new(), cap: (0.0, 0.0), letter_off: [0.0; 4], flip: false, colour: false };
+        let placed = vec![view(None), view(Some([10.0, 0.0, 10.0, 40.0]))];
+        // Model (10,0)-(10,40) at scale 2 about the centre (10,20): sheet (100,110)-(100,190); the drawn chain line is 2.5 mm longer.
+        let old = (pos2(100.0, 107.5), pos2(100.0, 192.5));
+        let (i, line) = stretch_cutting_line(&placed, &sheet, old, (pos2(100.0, 107.5), pos2(100.0, 212.5))).expect("the cutting line is found");
+        assert_eq!(i, 1);
+        assert!((line[0] - 10.0).abs() < 1e-3 && line[1].abs() < 1e-3 && (line[2] - 10.0).abs() < 1e-3 && (line[3] - 50.0).abs() < 1e-3, "{line:?}");
+        // Dragged from the other end: the first end of the line moves, the order stays.
+        let (_, back) = stretch_cutting_line(&placed, &sheet, (old.1, old.0), (pos2(100.0, 212.5), pos2(100.0, 107.5))).expect("found");
+        assert!((back[3] - 50.0).abs() < 1e-3 && back[1].abs() < 1e-3, "{back:?}");
+        assert!(stretch_cutting_line(&placed, &sheet, (pos2(0.0, 0.0), pos2(5.0, 5.0)), old).is_none(), "an ordinary centre line is not a cutting line");
     }
 
     /// A click takes the hand-drawn line or circle under it, and Delete removes just that one.
