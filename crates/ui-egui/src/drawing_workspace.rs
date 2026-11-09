@@ -452,6 +452,9 @@ pub struct State {
     /// The model revision the sheet on screen was made from, and the design it belongs to: the sheet keeps
     /// what it shows until Update is pressed, however the 3D model changes meanwhile (0 = not made yet).
     drawn_rev: u64,
+    /// What the sheet command last returned for each sheet (by number): a sheet is shown again as it was
+    /// made when switched back to, whatever Update did on another sheet since.
+    page_json: Vec<Option<Value>>,
     /// The stages of the sheet being composed use the model kept from the last Update.
     freeze_steps: bool,
     /// Update is recomputing the sheet from the model as it is now.
@@ -603,6 +606,7 @@ impl Default for State {
             menu_at: None,
             scale_edit: None,
             drawn_rev: 0,
+            page_json: Vec::new(),
             freeze_steps: false,
             updating: false,
             drawn_visibility: None,
@@ -791,6 +795,7 @@ impl State {
                 self.saved_designs.insert(self.owner.chars().take(120).collect(), json!({"pages": pages}));
             }
             self.pages.clear();
+            self.page_json.clear();
             self.page = 0;
             self.load_page(&json!({}));
             self.title.clear();
@@ -805,6 +810,7 @@ impl State {
         let Some(d) = self.saved_designs.get(design).cloned() else { return };
         match d.get("pages").and_then(serde_json::Value::as_array) {
             Some(list) if !list.is_empty() => {
+                self.page_json.clear();
                 self.pages = list.iter().take(30).cloned().collect();
                 self.page = 0;
                 if let Some(first) = self.pages.first().cloned() {
@@ -1232,6 +1238,16 @@ fn switch_page(app: &mut SolveApp, to: usize) {
     let Some(next) = st.pages.get(to).cloned() else { return };
     st.page = to;
     st.load_page(&next);
+    // A sheet already made is shown as it was made: only its own Update brings it up to date.
+    let made = app.drawing.page_json.get(to).and_then(Option::as_ref).and_then(parse);
+    if let Some(sheet) = made {
+        app.drawing.sheet = Some(sheet);
+        app.drawing.steps.clear();
+        app.drawing.painted = false;
+        app.drawing.error = None;
+        fit(app);
+        return;
+    }
     begin_keep(app, true);
 }
 
@@ -1258,6 +1274,9 @@ fn duplicate_page(app: &mut SolveApp) {
     copy["sheet_no"] = json!((st.pages.len() + 1).to_string());
     let to = st.page + 1;
     st.pages.insert(to, copy);
+    let same = st.page_json.get(st.page).cloned().flatten();
+    st.page_json.resize(to.max(st.page_json.len()), None);
+    st.page_json.insert(to, same);
     switch_page(app, to);
 }
 
@@ -1269,11 +1288,21 @@ fn delete_page(app: &mut SolveApp) {
         return;
     }
     st.pages.remove(st.page);
+    if st.page < st.page_json.len() {
+        st.page_json.remove(st.page);
+    }
     let to = st.page.min(st.pages.len() - 1);
     st.page = to;
     let next = st.pages.get(to).cloned().unwrap_or_default();
     st.load_page(&next);
-    begin(app);
+    if let Some(sheet) = app.drawing.page_json.get(to).and_then(Option::as_ref).and_then(parse) {
+        app.drawing.sheet = Some(sheet);
+        app.drawing.steps.clear();
+        app.drawing.painted = false;
+        fit(app);
+    } else {
+        begin(app);
+    }
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -1536,6 +1565,13 @@ fn refresh(app: &mut SolveApp) {
             Some(sheet) => {
                 app.drawing.sheet = Some(sheet);
                 app.drawing.error = None;
+                let at = app.drawing.page;
+                if app.drawing.page_json.len() <= at && at < 64 {
+                    app.drawing.page_json.resize(at + 1, None);
+                }
+                if let Some(slot) = app.drawing.page_json.get_mut(at) {
+                    *slot = Some(v);
+                }
             }
             None => app.drawing.error = Some("the drawing could not be read back".into()),
         },
