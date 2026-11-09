@@ -26,17 +26,19 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
+          # The commit is in the file names, so a new download never has the same name as an old one.
+          $sha = $env:GITHUB_SHA.Substring(0, 7)
           New-Item -ItemType Directory -Path pack | Out-Null
-          Copy-Item target/release-pc/solidcraft.exe pack/DraftNew.exe
-          Compress-Archive -Path pack/* -DestinationPath draftbench-windows.zip
+          Copy-Item target/release-pc/solidcraft.exe "pack/DraftNew-$sha.exe"
+          Compress-Archive -Path pack/* -DestinationPath "draftbench-windows-$sha.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: draftbench-windows
-          path: draftbench-windows.zip
+          path: draftbench-windows-*.zip
       - name: Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="windows-${GITHUB_SHA::7}"
-          gh release create "$tag" draftbench-windows.zip --prerelease --title "DraftNew for Windows ($tag)" --notes "Desktop build of ${GITHUB_SHA::7}. Unzip and run DraftNew.exe." --target "$GITHUB_SHA"
+          gh release create "$tag" "draftbench-windows-${GITHUB_SHA::7}.zip" --prerelease --title "DraftNew for Windows ($tag)" --notes "Desktop build of ${GITHUB_SHA::7}. Unzip and run DraftNew-${GITHUB_SHA::7}.exe." --target "$GITHUB_SHA"
