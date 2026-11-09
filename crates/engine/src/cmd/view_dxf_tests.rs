@@ -233,3 +233,50 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     assert_eq!(dashed["sketch"], 2);
     assert!((length(&dashed) - 80.).abs() < 1e-3, "{}", length(&dashed));
 }
+
+/// The horizontal visible lines of a sheet at its lowest and highest level, as (from, to) along x.
+fn level_runs(sheet: &Value, top: bool) -> Vec<(f64, f64)> {
+    let mut lines: Vec<(f64, f64, f64)> = Vec::new();
+    for item in sheet["items"].as_array().into_iter().flatten() {
+        if item["layer"] != "visible" {
+            continue;
+        }
+        let Some(l) = item["line"].as_array() else { continue };
+        let n = |i: usize, k: usize| l.get(i).and_then(|p| p.get(k)).and_then(Value::as_f64).unwrap_or(f64::NAN);
+        let (x0, y0, x1, y1) = (n(0, 0), n(0, 1), n(1, 0), n(1, 1));
+        if (y0 - y1).abs() < 1e-6 {
+            lines.push((y0, x0.min(x1), x0.max(x1)));
+        }
+    }
+    let level = lines.iter().map(|l| l.0).fold(if top { f64::MIN } else { f64::MAX }, |a, b| if top { a.max(b) } else { a.min(b) });
+    lines.into_iter().filter(|l| (l.0 - level).abs() < 1e-3).map(|l| (l.1, l.2)).collect()
+}
+
+/// How much of the span [from, to] the runs cover.
+fn covered(mut runs: Vec<(f64, f64)>, from: f64, to: f64) -> f64 {
+    runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut total, mut reach) = (0.0, from);
+    for (a, b) in runs {
+        let (a, b) = (a.max(reach), b.min(to));
+        if b > a {
+            total += b - a;
+            reach = b;
+        }
+    }
+    total
+}
+
+#[test]
+fn a_section_through_a_hole_keeps_the_top_and_bottom_lines_across_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius":3,"height":10,"base":[20,15,0],"operation":"cut","targets":["Plate"]}));
+    let sheet = run(&mut s, "drawing.sheet", json!({"placements":[{"view":"front","x":150,"y":150,"scale":1,"section":{"axis":"y","at":15}}]}));
+    for top in [false, true] {
+        let runs = level_runs(&sheet, top);
+        let (lo, hi) = runs.iter().fold((f64::MAX, f64::MIN), |(l, h), r| (l.min(r.0), h.max(r.1)));
+        assert!((hi - lo - 40.0).abs() < 0.2, "the plate is 40 wide: {runs:?}");
+        let across = covered(runs.clone(), lo + 17.0, lo + 23.0);
+        assert!(across > 5.9, "the line across the hole at the {} is drawn ({across} of 6 mm): {runs:?}", if top { "top" } else { "bottom" });
+    }
+}

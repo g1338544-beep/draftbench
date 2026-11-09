@@ -1242,7 +1242,10 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
     // straight through both of its ends, nothing changes there and the line is left out. A step or corner keeps it.
     if out.len().saturating_mul(cut.len()) <= 40_000_000 {
         let tol = 0.02;
-        let smooth = |p: Vec2| -> bool {
+        let smooth = |p: Vec2, along: Vec2| -> bool {
+            // A wall the line crosses: an outline running along the line itself (the bottom of the part under a
+            // rim circle seen edge-on) is not one, and the line stays.
+            let across_wall = |d: Vec2| (d.x * along.y - d.y * along.x).abs() > 0.2 * d.len() * along.len().max(1e-12);
             let mut dirs: Vec<Vec2> = Vec::new();
             for (a, b) in cut {
                 let (da, db) = (a.dist(p), b.dist(p));
@@ -1257,7 +1260,7 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                         let t = ((p.x - a.x) * d.x + (p.y - a.y) * d.y) / l2;
                         let q = Vec2::new(a.x + d.x * t, a.y + d.y * t);
                         if t > 0.0 && t < 1.0 && q.dist(p) <= tol {
-                            return true;
+                            return across_wall(d);
                         }
                     }
                 }
@@ -1279,14 +1282,14 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                             back = true;
                         }
                     }
-                    fwd && back
+                    fwd && back && across_wall(*d1)
                 }
                 _ => false,
             }
         };
         // The end of a seam drawn from a circle's polyline sits near the wall, not exactly on it: look at the
         // nearest point of the outline within a little over half a millimetre.
-        let smooth_near = |p: Vec2| -> bool {
+        let smooth_near = |p: Vec2, along: Vec2| -> bool {
             let mut best: Option<(f64, Vec2)> = None;
             for (a, b) in cut {
                 let (d, l2) = (Vec2::new(b.x - a.x, b.y - a.y), (b.x - a.x).powi(2) + (b.y - a.y).powi(2));
@@ -1297,9 +1300,12 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                     best = Some((dist, q));
                 }
             }
-            best.is_some_and(|(_, q)| smooth(q))
+            best.is_some_and(|(_, q)| smooth(q, along))
         };
-        out.retain(|(a, b)| !(smooth_near(*a) && smooth_near(*b)));
+        out.retain(|(a, b)| {
+            let along = Vec2::new(b.x - a.x, b.y - a.y);
+            !(smooth_near(*a, along) && smooth_near(*b, along))
+        });
         // A level piece lying in the hole of the section (between two walls) at a height where both walls run
         // straight through is either a seam across the bore or something hidden behind the far wall of the bore:
         // either way nothing is seen there. A corner (a rim of the bore) keeps its line.
@@ -1317,7 +1323,7 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                 .collect();
             xs.sort_by(|p, q| p.total_cmp(q));
             xs.windows(2).enumerate().any(|(k, w)| match (w.first(), w.get(1)) {
-                (Some(&xl), Some(&xr)) => k % 2 == 1 && xl < m && m < xr && smooth(Vec2::new(xl, c)) && smooth(Vec2::new(xr, c)),
+                (Some(&xl), Some(&xr)) => k % 2 == 1 && xl < m && m < xr && smooth(Vec2::new(xl, c), Vec2::new(1.0, 0.0)) && smooth(Vec2::new(xr, c), Vec2::new(1.0, 0.0)),
                 _ => false,
             })
         };
@@ -1339,8 +1345,8 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                 }
                 ends.sort_by(|p, q| along(*p).total_cmp(&along(*q)));
                 if let (Some(lo), Some(hi)) = (ends.first(), ends.last())
-                    && smooth_near(*lo)
-                    && smooth_near(*hi)
+                    && smooth_near(*lo, if horizontal { Vec2::new(1.0, 0.0) } else { Vec2::new(0.0, 1.0) })
+                    && smooth_near(*hi, if horizontal { Vec2::new(1.0, 0.0) } else { Vec2::new(0.0, 1.0) })
                 {
                     out.retain(|(a, b)| !on(*a, *b));
                 }

@@ -1463,7 +1463,9 @@ fn parse(v: &Value) -> Option<Sheet> {
 
 /// Start an Update: the model first, then each placed view, one stage per frame.
 fn begin(app: &mut SolveApp) {
-    begin_keep(app, false);
+    // Adding a view, switching sheet and the like lay the sheet out again from the model the drawing was last
+    // updated from: only the Update button takes the model as it is now.
+    begin_keep(app, true);
 }
 
 /// Start composing the sheet stage by stage. With `keep`, the model it was last computed from stays (a
@@ -2321,7 +2323,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             }
         }
         "drawing.ribbon.fit" => fit(app),
-        "drawing.ribbon.update" => begin(app),
+        "drawing.ribbon.update" => begin_keep(app, false),
         "drawing.ribbon.panel" => {
             let open = app.drawing.panel_open.unwrap_or(!app.drawing.phone);
             app.drawing.panel_open = Some(!open);
@@ -4006,7 +4008,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.sheet = None;
             app.drawing.error = Some(e);
         } else if app.drawing.steps.is_empty() {
-            update(app);
+            if app.drawing.freeze_steps {
+                // Not an Update: the sheet keeps the model it was last updated from.
+                refresh(app);
+                fit(app);
+            } else {
+                update(app);
+            }
         }
         return;
     }
