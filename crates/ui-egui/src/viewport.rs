@@ -648,7 +648,7 @@ impl BodyDraw {
             }
             for w in e.windows(2) {
                 let (a, b) = (w[0].to_f32(), w[1].to_f32());
-                out.line(a, b, edge_col, 1.9, false);
+                out.line(a, b, edge_col, 1.4, false);
                 if hidden_edges {
                     let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
                     let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
