@@ -261,7 +261,7 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
     let orange = egui::Color32::from_rgb(240, 150, 40);
     // The picked axis: a ring on its tip; and the WCS as it would stand under the pointer.
     if let Some(k) = ARMED.with(Cell::get) {
-        if let Some(tip) = axes(&w).get(k).and_then(|d| proj.to_screen(w.origin + *d * len)) {
+        if let Some(tip) = self::axes(&w).get(k).and_then(|d| proj.to_screen(w.origin + *d * len)) {
             painter.circle_stroke(tip, 11.0, Stroke::new(2.5, orange));
         }
         if let Some((dir, what)) = PREVIEW.with(Cell::get)
