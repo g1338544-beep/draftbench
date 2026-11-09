@@ -7628,6 +7628,11 @@ fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4], user_cols: &[LineCol]) -> (St
             }
         };
         match shape {
+            Shape::Text(p, h, t, _, _) if pdf_has_thai(t) => {
+                if let Some((hex, w)) = pdf_thai_run(t, *h) {
+                    let _ = writeln!(c, "BT {r:.3} {g:.3} {b:.3} rg /F2 {h:.3} Tf {:.3} {:.3} Td <{hex}> Tj ET", p.x - w / 2.0, p.y);
+                }
+            }
             Shape::Text(p, h, t, _, _) => {
                 let bytes: Vec<u8> = t.chars().map(|ch| if (ch as u32) < 256 { ch as u32 as u8 } else { b'?' }).collect();
                 let mut esc = String::new();
@@ -7693,6 +7698,10 @@ fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
         out.extend(body);
         out.extend(b"\nendobj\n");
     };
+    // The Thai face is embedded only when a page uses it; its four objects follow the pages.
+    let thai_id = next;
+    let uses_thai = pages.iter().any(|p| p.content.contains("/F2 "));
+    let font_resources = if uses_thai { format!("/F1 3 0 R /F2 {thai_id} 0 R") } else { "/F1 3 0 R".to_string() };
     let kids: String = ids.iter().map(|id| format!("{id} 0 R ")).collect();
     object(&mut out, b"<< /Type /Catalog /Pages 2 0 R >>");
     object(&mut out, format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", pages.len()).as_bytes());
@@ -7707,7 +7716,7 @@ fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
         content.push_str(&p.content);
         object(
             &mut out,
-            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> /XObject << {pictures}>> >> >>", p.w, p.h, id + 1).as_bytes(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents {} 0 R /Resources << /Font << {font_resources} >> /XObject << {pictures}>> >> >>", p.w, p.h, id + 1).as_bytes(),
         );
         object(&mut out, format!("<< /Length {} >>\nstream\n{content}endstream", content.len()).as_bytes());
         for (k, (pic, _)) in p.images.iter().enumerate() {
@@ -7724,6 +7733,9 @@ fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
             object(&mut out, &mask);
         }
     }
+    if uses_thai {
+        pdf_thai_objects(&mut out, &mut offsets, thai_id);
+    }
     let xref = out.len();
     out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
     for o in &offsets {
@@ -7731,6 +7743,71 @@ fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
     }
     out.extend(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", offsets.len() + 1).as_bytes());
     out
+}
+
+/// Whether a text has a letter of the Thai block, which the PDF's Helvetica cannot draw.
+fn pdf_has_thai(text: &str) -> bool {
+    text.chars().any(|c| ('\u{0E00}'..='\u{0E7F}').contains(&c))
+}
+
+/// Thai vowels and tone marks that sit above or below a letter and take no room of their own.
+fn is_thai_mark(c: char) -> bool {
+    matches!(u32::from(c), 0x0E31 | 0x0E34..=0x0E3A | 0x0E47..=0x0E4E)
+}
+
+/// A text in the embedded Thai face: its glyph numbers as hex for a `Tj`, and its width in mm at
+/// `size`. A letter the face lacks is skipped; marks add no width. `None` if the face can't be read.
+fn pdf_thai_run(text: &str, size: f32) -> Option<(String, f32)> {
+    use std::fmt::Write as _;
+    let face = ttf_parser::Face::parse(crate::fonts::thai_font_bytes(), 0).ok()?;
+    let em = f32::from(face.units_per_em()).max(1.0);
+    let mut hex = String::new();
+    let mut width = 0.0f32;
+    for c in text.chars().take(500) {
+        let Some(gid) = face.glyph_index(c) else { continue };
+        let _ = write!(hex, "{:04X}", gid.0);
+        if !is_thai_mark(c) {
+            width += f32::from(face.glyph_hor_advance(gid).unwrap_or(0)) / em * size;
+        }
+    }
+    Some((hex, width))
+}
+
+/// The four objects of the embedded Thai font (Type0, CID font, descriptor, font file), numbered
+/// from `first`, which must be the next object number.
+fn pdf_thai_objects(out: &mut Vec<u8>, offsets: &mut Vec<usize>, first: usize) {
+    let bytes = crate::fonts::thai_font_bytes();
+    let Ok(face) = ttf_parser::Face::parse(bytes, 0) else { return };
+    let em = f32::from(face.units_per_em()).max(1.0);
+    let widths: String = (0..face.number_of_glyphs())
+        .map(|g| {
+            let w = (f32::from(face.glyph_hor_advance(ttf_parser::GlyphId(g)).unwrap_or(0)) / em * 1000.0).round();
+            format!("{w:.0} ")
+        })
+        .collect();
+    let mut object = |out: &mut Vec<u8>, body: &[u8]| {
+        offsets.push(out.len());
+        out.extend(format!("{} 0 obj\n", offsets.len()).as_bytes());
+        out.extend(body);
+        out.extend(b"\nendobj\n");
+    };
+    object(out, format!("<< /Type /Font /Subtype /Type0 /BaseFont /NotoSansThai /Encoding /Identity-H /DescendantFonts [{} 0 R] >>", first + 1).as_bytes());
+    object(
+        out,
+        format!(
+            "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /NotoSansThai /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {} 0 R /CIDToGIDMap /Identity /DW 500 /W [0 [{widths}]] >>",
+            first + 2
+        )
+        .as_bytes(),
+    );
+    object(
+        out,
+        format!("<< /Type /FontDescriptor /FontName /NotoSansThai /Flags 4 /FontBBox [-500 -400 1500 1100] /ItalicAngle 0 /Ascent 1069 /Descent -293 /CapHeight 714 /StemV 80 /FontFile2 {} 0 R >>", first + 3).as_bytes(),
+    );
+    let mut file = format!("<< /Length {} /Length1 {} >>\nstream\n", bytes.len(), bytes.len()).into_bytes();
+    file.extend(bytes);
+    file.extend(b"\nendstream");
+    object(out, &file);
 }
 
 fn sheet_page(sheet: &Sheet, cols: [u8; 4], user_cols: &[LineCol], images: Vec<(Picture, [f32; 4])>) -> PdfPage {

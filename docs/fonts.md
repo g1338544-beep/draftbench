@@ -22,6 +22,13 @@ for the selected language. The web app installs Plex at startup and adds its
 bundled Japanese font asynchronously when needed, preserving the interface faces
 and any font preference.
 
+Thai: Noto Sans Thai (SIL OFL 1.1, `assets/fonts/noto-sans-thai/`) is bundled as the last
+fallback in every family, so Thai draws on the web and on a desktop without a Thai font (a
+system Thai face replaces it on desktop). The PDF export embeds it for sheet texts with Thai
+letters; letters are placed one after another with marks taking no width, without full Thai
+shaping, so stacked vowel and tone marks may sit close together. In DXF, such texts use a
+`Thai` text style naming `tahoma.ttf`.
+
 ## Type scale and metrics
 
 Text sizes come from `theme::Tokens`, with identical values in the light and dark

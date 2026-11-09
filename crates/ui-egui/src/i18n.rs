@@ -55,6 +55,7 @@ static PORTUGUESE_BR: Catalog =
 static ROMANIAN: Catalog = Catalog::new("ro", "Română", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/ro.json")));
 static RUSSIAN: Catalog = Catalog::new("ru", "Русский", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/ru.json")));
 static SWEDISH: Catalog = Catalog::new("sv", "Svenska", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/sv.json")));
+static THAI: Catalog = Catalog::new("th", "ไทย", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/th.json")));
 static TURKISH: Catalog = Catalog::new("tr", "Türkçe", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/tr.json")));
 static UKRAINIAN: Catalog = Catalog::new("uk", "Українська", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/uk.json")));
 static VIETNAMESE: Catalog = Catalog::new("vi", "Tiếng Việt", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/vi.json")));
@@ -85,6 +86,7 @@ pub const LOCALES: &[&Catalog] = &[
     &ROMANIAN,
     &RUSSIAN,
     &SWEDISH,
+    &THAI,
     &TURKISH,
     &UKRAINIAN,
     &VIETNAMESE,
@@ -722,6 +724,18 @@ mod tests {
         assert_eq!(uk.dynamic("Parameters (5)"), "Параметри (5)");
         assert_eq!(uk.dynamic("4 degrees of freedom"), "4 ступенів вільності");
         assert_eq!(uk.dynamic("Sketch of bracket"), "Sketch of bracket");
+    }
+
+    #[test]
+    fn thai_catalog_translates_commands_and_labels_and_falls_back_to_english() {
+        let th = Locale::for_language("th");
+        assert_eq!(th.name(), "ไทย");
+        assert!(is_supported("th"));
+        assert_eq!(th.text("ui.preferences"), "การตั้งค่า");
+        assert_eq!(th.text("cmd.construct_plane"), "ระนาบ");
+        assert_eq!(th.text("ui.extrude"), "อัดขึ้นรูป");
+        // A message without a Thai translation shows in English.
+        assert_eq!(th.text("ui.agent_chat"), Locale::for_language("en").text("ui.agent_chat"));
     }
 
     #[test]

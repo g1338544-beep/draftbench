@@ -6,6 +6,14 @@ use std::sync::Arc;
 use egui::{FontDefinitions, FontFamily, FontId, RichText};
 
 const PLEX_SANS: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf"));
+/// Noto Sans Thai (OFL), bundled so Thai draws on the web, where no system font is reachable,
+/// and on a desktop without a Thai font. A system Thai font replaces it in `install_fonts`.
+const THAI_BUNDLED: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/noto-sans-thai/NotoSansThai-Variable.ttf"));
+/// The bundled Thai face, for the PDF export to embed.
+pub fn thai_font_bytes() -> &'static [u8] {
+    THAI_BUNDLED
+}
+
 const PLEX_MONO: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf"));
 const WEIGHTS: [(&str, f32); 4] = [("plex-sans", 400.0), ("ui-medium", 500.0), ("ui-semibold", 600.0), ("ui-bold", 700.0)];
 
@@ -30,7 +38,8 @@ pub fn base_font_definitions() -> FontDefinitions {
     }
     fonts.font_data.insert("plex-mono".to_owned(), Arc::new(egui::FontData::from_static(PLEX_MONO)));
     fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "plex-mono".to_owned());
-    with_symbol_fallback(fonts)
+    let fonts = with_symbol_fallback(fonts);
+    with_fallback(fonts.clone(), THAI_FALLBACK, THAI_BUNDLED.to_vec()).unwrap_or(fonts)
 }
 
 fn medium_family() -> FontFamily {
@@ -1121,6 +1130,15 @@ mod tests {
         assert!(!thai(egui::FontDefinitions::default()), "the built-in faces have no Thai");
         let Some(bytes) = found.into_iter().next() else { return };
         assert!(thai(with_fallback(egui::FontDefinitions::default(), THAI_FALLBACK, bytes).unwrap()), "Thai draws with the fallback");
+    }
+
+    /// The bundled Thai face is in the base fonts, so Thai draws with no system font at all.
+    #[test]
+    fn the_base_fonts_draw_thai() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(base_font_definitions());
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        assert!(ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::proportional(14.0), "ภาษาไทย สวัสดี")));
     }
 
     #[test]
