@@ -5402,19 +5402,29 @@ pub fn ruled_probe_dir(b: &ModelBody, at: Vec3, picks: &[Vec3], mode: usize, ang
     let r = kernel::Ruled { distance: d, mode, flip, corners: kernel::RuledCorners::Mitre, face };
     let strip = kernel::ruled_surface(&b.body, if picks.is_empty() { std::slice::from_ref(&at) } else { picks }, &r).ok()?;
     let m = strip.tessellate(d * 0.05).ok()?;
+    let mesh = b.mesh();
+    // The strip's points near `at`, and among them the ones lying on an edge of the body (the picked edge
+    // itself). Both sets cover the same stretch of the edge, so the way a curved edge bends away from `at`
+    // (or an end of the edge cutting the stretch short) cancels in the difference of their means.
+    let on_edge = |q: Vec3| mesh.edges.iter().flat_map(|e| e.windows(2)).any(|w| match (w.first(), w.get(1)) {
+        (Some(a), Some(c)) => q.dist_to_segment(*a, *c) <= size * 1e-6 + 1e-7,
+        _ => false,
+    });
     let (mut sum, mut n) = (Vec3::ZERO, 0usize);
-    for q in &m.positions {
-        if q.dist(at) <= d * 1.5 {
-            sum = sum + *q;
-            n += 1;
+    let (mut edge_sum, mut edge_n) = (Vec3::ZERO, 0usize);
+    for q in m.positions.iter().filter(|q| q.dist(at) <= d * 1.5).take(4000) {
+        sum = sum + *q;
+        n += 1;
+        if on_edge(*q) {
+            edge_sum = edge_sum + *q;
+            edge_n += 1;
         }
     }
     if n == 0 {
         return None;
     }
-    let mut v = (sum * (1.0 / n as f64)) - at;
+    let mut v = if edge_n > 0 && edge_n < n { (sum * (1.0 / n as f64)) - (edge_sum * (1.0 / edge_n as f64)) } else { (sum * (1.0 / n as f64)) - at };
     // Square to the edge: points picked near an end of an edge pull the mean along the edge as well.
-    let mesh = b.mesh();
     let nearest = mesh
         .edges
         .iter()
