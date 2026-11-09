@@ -9,6 +9,28 @@ use solidcraft_engine::geom::Vec3;
 use crate::viewport::{Hit, Proj};
 use crate::SolveApp;
 
+/// A rotation handle being turned: about axis `k`, in the plane of the other two as they stood when
+/// the press happened.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RotGrab {
+    k: usize,
+    origin: Vec3,
+    a: Vec3,
+    b: Vec3,
+    n: Vec3,
+    /// The pointer's angle in that plane at the press.
+    start: f64,
+    /// The turn so far, in degrees (kept continuous past half a turn).
+    turn: f64,
+    /// The turn already made on the WCS, in degrees.
+    applied: f64,
+    /// The pointer's last raw angle, to unwrap the turn.
+    last: f64,
+}
+
+/// The angle snap of a turned handle (degrees); Alt turns it freely.
+const ROT_SNAP: f64 = 45.0;
+
 /// Which part of the triad is being dragged.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Grab {
@@ -17,6 +39,8 @@ enum Grab {
     /// An axis tip (0 XC, 1 YC, 2 ZC): the origin slides along that axis; where the pointer
     /// grabbed it (along the axis) and the origin then.
     Axis(usize, f64, Vec3),
+    /// A rotation handle on an arc between two axes (WCS Dynamics).
+    Rot(RotGrab),
 }
 
 thread_local! {
@@ -131,10 +155,40 @@ fn length(proj: &Proj) -> f64 {
     (proj.cam.distance * 0.12).clamp(1e-3, 1e6)
 }
 
+/// The other two axes of a turn about axis `k`, in right-handed order (a, b, k).
+fn plane_axes(w: &solidcraft_engine::cmd::wcs::Wcs, k: usize) -> (Vec3, Vec3) {
+    match k {
+        0 => (w.y, w.z()),
+        1 => (w.z(), w.x),
+        _ => (w.x, w.y),
+    }
+}
+
+/// Where the rotation handle about axis `k` stands: the middle of the arc between the other two axes.
+fn rot_handle_pos(w: &solidcraft_engine::cmd::wcs::Wcs, proj: &Proj, k: usize) -> Option<Pos2> {
+    let (a, b) = plane_axes(w, k);
+    proj.to_screen(w.origin + (a + b) * (length(proj) * 0.6 * std::f64::consts::FRAC_1_SQRT_2))
+}
+
+/// The pointer's angle (radians) in the plane through `g.origin` with normal `g.n`.
+fn plane_angle(g: &RotGrab, proj: &Proj, pos: Pos2) -> Option<f64> {
+    let (from, dir) = proj.ray(pos);
+    let den = dir.dot(g.n);
+    if den.abs() < 1e-9 {
+        return None;
+    }
+    let t = (g.origin - from).dot(g.n) / den;
+    let v = from + dir * t - g.origin;
+    Some(v.dot(g.b).atan2(v.dot(g.a)))
+}
+
 /// The handle (0 XC, 1 YC, 2 ZC tip, 3 the origin dot) under a screen point.
 fn handle_at(w: &solidcraft_engine::cmd::wcs::Wcs, proj: &Proj, pos: Pos2) -> Option<usize> {
     if proj.to_screen(w.origin).is_some_and(|o| (o - pos).length() <= 12.0) {
         return Some(3);
+    }
+    if (0..3).any(|k| rot_handle_pos(w, proj, k).is_some_and(|h| (h - pos).length() <= 10.0)) {
+        return Some(4);
     }
     let len = length(proj);
     axes(w).into_iter().position(|dir| proj.to_screen(w.origin + dir * len).is_some_and(|tip| (tip - pos).length() <= 12.0))
@@ -226,6 +280,20 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
         let len = length(&proj);
         let (ray_from, ray_dir) = proj.ray(pos);
         let mut grab = None;
+        for k in 0..3 {
+            if let Some(h) = rot_handle_pos(&w, &proj, k)
+                && (h - pos).length() <= 10.0
+            {
+                let (a, b) = plane_axes(&w, k);
+                let n = [w.x, w.y, w.z()].get(k).copied().unwrap_or(w.z());
+                let mut g = RotGrab { k, origin: w.origin, a, b, n, start: 0.0, turn: 0.0, applied: 0.0, last: 0.0 };
+                if let Some(angle) = plane_angle(&g, &proj, pos) {
+                    g.start = angle;
+                    g.last = angle;
+                    grab = Some(Grab::Rot(g));
+                }
+            }
+        }
         for (k, dir) in axes(&w).into_iter().enumerate() {
             if let Some(tip) = proj.to_screen(w.origin + dir * len)
                 && (tip - pos).length() <= 12.0
@@ -251,6 +319,7 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
         }
         LAST.with(|l| l.set(None));
         LASTPOS.with(|l| l.set(None));
+        ROT_READ.with(|r| r.set(None));
         GRAB.with(|g| g.set(None));
         SNAP.with(|s| s.set(None));
         return;
@@ -260,7 +329,34 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
     if LASTPOS.with(|l| l.replace(Some(pos))).is_some_and(|old| (old - pos).length() < 0.5) {
         return;
     }
+    if let Grab::Rot(mut g) = grab {
+        if let Some(angle) = plane_angle(&g, &proj, pos) {
+            // Unwrap so a turn past half a turn goes on instead of jumping.
+            let mut step = angle - g.last;
+            while step > std::f64::consts::PI {
+                step -= std::f64::consts::TAU;
+            }
+            while step < -std::f64::consts::PI {
+                step += std::f64::consts::TAU;
+            }
+            g.last = angle;
+            g.turn += step.to_degrees();
+            let free = ui.input(|i| i.modifiers.alt);
+            let shown = if free { g.turn.round() } else { (g.turn / ROT_SNAP).round() * ROT_SNAP };
+            let delta = shown - g.applied;
+            if delta.abs() > 1e-9 {
+                let cmd = ["wcs.rotate_x", "wcs.rotate_y", "wcs.rotate_z"].get(g.k).copied().unwrap_or("wcs.rotate_z");
+                let _ = app.run(cmd, json!({"angle": delta}));
+                g.applied = shown;
+            }
+            ROT_READ.with(|r| r.set(Some((pos, g.applied))));
+            GRAB.with(|c| c.set(Some(Grab::Rot(g))));
+        }
+        ui.ctx().request_repaint();
+        return;
+    }
     let target = match grab {
+        Grab::Rot(_) => None,
         Grab::Origin => {
             let hits = crate::viewport::pick(app, &proj, pos);
             let vertex = hits.iter().find_map(|h| if let Hit::Vertex { point, .. } = h { Some(*point) } else { None });
@@ -320,6 +416,8 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
 }
 
 thread_local! {
+    /// While a rotation handle turns: where the pointer is and the angle made so far.
+    static ROT_READ: Cell<Option<(Pos2, f64)>> = const { Cell::new(None) };
     static LASTPOS: Cell<Option<Pos2>> = const { Cell::new(None) };
     static LAST: Cell<Option<String>> = const { Cell::new(None) };
 }
@@ -347,6 +445,28 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
         painter.text(tip + v / v.length().max(1.0) * 12.0, Align2::CENTER_CENTER, label, FontId::proportional(13.0), colour);
     }
     let orange = egui::Color32::from_rgb(240, 150, 40);
+    // Rotation handles: an arc between each pair of axes with a dot in the middle; dragging the dot
+    // turns the WCS about the third axis (45° steps, Alt for free turning).
+    for (k, colour) in [(0usize, egui::Color32::from_rgb(220, 70, 70)), (1, egui::Color32::from_rgb(70, 170, 70)), (2, egui::Color32::from_rgb(70, 110, 230))] {
+        let (a, b) = plane_axes(&w, k);
+        let r = len * 0.6;
+        let pts: Vec<Pos2> = (0..=16)
+            .filter_map(|i| {
+                let t = std::f64::consts::FRAC_PI_2 * i as f64 / 16.0;
+                proj.to_screen(w.origin + (a * t.cos() + b * t.sin()) * r)
+            })
+            .collect();
+        if pts.len() > 1 {
+            painter.add(egui::Shape::line(pts, Stroke::new(1.5, colour.gamma_multiply(0.7))));
+        }
+        if let Some(h) = rot_handle_pos(&w, proj, k) {
+            painter.circle_filled(h, 5.0, orange);
+            painter.circle_stroke(h, 5.0, Stroke::new(1.0, egui::Color32::WHITE));
+        }
+    }
+    if let Some((at, angle)) = ROT_READ.with(Cell::get) {
+        painter.text(at + egui::vec2(14.0, -14.0), Align2::LEFT_BOTTOM, format!("Angle {angle:.1}°   Snap {ROT_SNAP:.0}°  (Alt: free)"), FontId::proportional(13.0), orange);
+    }
     // The picked axis: a ring on its tip; and the WCS as it would stand under the pointer.
     if let Some(k) = ARMED.with(Cell::get) {
         if let Some(tip) = self::axes(&w).get(k).and_then(|d| proj.to_screen(w.origin + *d * len)) {
