@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSPECT")
         .icon("move")
         .noundo()
-        .params("origin?: [x,y,z]; x_dir?: [x,y,z]; z_dir?: [x,y,z] (turns the WCS so ZC points this way, XC kept as close as it can); reset?: bool"),
+        .params("origin?: [x,y,z]; x_dir?: [x,y,z]; z_dir?: [x,y,z] (turns the WCS so ZC points this way, XC kept as close as it can); align?: {axis: \"x\"|\"y\"|\"z\", dir: [x,y,z]} (turns the whole WCS by the smallest turn that makes that axis point along dir; the origin stays); reset?: bool"),
     CommandSpec::new("wcs.reset", "Reset WCS", reset).at("SOLID", "INSPECT").icon("revert").noundo().params("No parameters. Puts the WCS back on the world axes"),
 ];
 
@@ -107,6 +107,26 @@ fn circle_centre(s: &Session, pick: Vec3) -> Option<Vec3> {
     round_centre(s, pick, None)
 }
 
+/// The WCS turned by the smallest turn that makes its axis `axis` (0 XC, 1 YC, 2 ZC) point along the
+/// unit direction `want`; the origin stays. `None` when the result is not a finite frame.
+pub fn aligned(w: &Wcs, axis: usize, want: Vec3) -> Option<Wcs> {
+    let [x, y, z] = [w.x, w.y, w.z()];
+    let from = [x, y, z].get(axis).copied()?;
+    let k = from.cross(want);
+    let sin = k.len();
+    let cos = from.dot(want);
+    let (k, deg) = if sin > 1e-12 {
+        (k / sin, sin.atan2(cos).to_degrees())
+    } else if cos > 0.0 {
+        (Vec3::Z, 0.0)
+    } else {
+        // Pointing the opposite way: half a turn about one of the other axes.
+        ([x, y, z].get((axis + 1) % 3).copied()?, 180.0)
+    };
+    let next = Wcs { origin: w.origin, x: turn(w.x, k, deg).normalized()?, y: turn(w.y, k, deg).normalized()? };
+    [next.x, next.y].iter().all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite()).then_some(next)
+}
+
 /// `v` turned by `deg` about the unit axis `k`.
 fn turn(v: Vec3, k: Vec3, deg: f64) -> Vec3 {
     let (sn, cs) = deg.to_radians().sin_cos();
@@ -150,6 +170,16 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         let d = vec3(v).ok_or_else(|| bad(cmd, format!("{what} must be [x, y, z]")))?;
         d.normalized().ok_or_else(|| bad(cmd, format!("{what} must not be zero")))
     };
+    if let Some(a) = p.get("align") {
+        let axis = match a.get("axis").and_then(Value::as_str) {
+            Some("x") => 0,
+            Some("y") => 1,
+            Some("z") => 2,
+            _ => return Err(bad(cmd, "align.axis must be x, y or z")),
+        };
+        let want = unit(a.get("dir").ok_or_else(|| bad(cmd, "align needs a dir"))?, "align.dir")?;
+        w = aligned(&w, axis, want).ok_or_else(|| bad(cmd, "align.dir has no direction"))?;
+    }
     if let Some(v) = p.get("z_dir") {
         let z = unit(v, "z_dir")?;
         // Keep XC as close as it can: its part across the new ZC, else any perpendicular.
@@ -168,4 +198,38 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "values must be finite"));
     }
     Ok(store(s, w))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn near(a: Vec3, b: Vec3) -> bool {
+        (a - b).len() < 1e-9
+    }
+
+    /// `align` turns the WCS by the smallest turn that points the chosen axis along a face normal or an edge,
+    /// keeps the origin and stays a right-handed frame.
+    #[test]
+    fn align_turns_the_chosen_axis_onto_a_direction() {
+        let mut s = Session::default();
+        s.execute("wcs.origin", &json!({"point": [1, 2, 3]})).unwrap();
+        for (axis, dir) in [("x", [0.0, 0.0, 1.0]), ("y", [1.0, 1.0, 0.0]), ("z", [0.0, 0.6, 0.8]), ("z", [0.0, 0.0, -1.0]), ("x", [-1.0, 0.0, 0.0])] {
+            s.execute("wcs.set", &json!({"reset": true})).unwrap();
+            s.execute("wcs.origin", &json!({"point": [1, 2, 3]})).unwrap();
+            s.execute("wcs.set", &json!({"align": {"axis": axis, "dir": dir}})).unwrap();
+            let w = s.wcs.unwrap();
+            let want = Vec3::new(dir[0], dir[1], dir[2]).normalized().unwrap();
+            let got = match axis {
+                "x" => w.x,
+                "y" => w.y,
+                _ => w.z(),
+            };
+            assert!(near(got, want), "{axis} -> {dir:?}: {got:?}");
+            assert!(near(w.origin, Vec3::new(1.0, 2.0, 3.0)), "the origin stays");
+            assert!(w.x.dot(w.y).abs() < 1e-9 && (w.x.len() - 1.0).abs() < 1e-9 && (w.y.len() - 1.0).abs() < 1e-9, "a square, unit frame");
+        }
+        assert!(s.execute("wcs.set", &json!({"align": {"axis": "w", "dir": [0, 0, 1]}})).is_err());
+        assert!(s.execute("wcs.set", &json!({"align": {"axis": "x", "dir": [0, 0, 0]}})).is_err());
+    }
 }
