@@ -1663,9 +1663,22 @@ fn begin_keep(app: &mut SolveApp, keep: bool) {
 /// Run the sheet command with the bodies shown or hidden as they were when the drawing was last updated:
 /// switching a body on or off in 3D changes the drawing only when Update is pressed.
 fn run_sheet(app: &mut SolveApp, p: Value) -> Result<Value, String> {
+    run_sheet_command(app, "drawing.sheet", p)
+}
+
+/// Export the sheet to DXF from the model it shows, not the model as it is now: an export that took the
+/// current model would also replace the engine's kept scene, and the picture would change by itself.
+fn export_sheet(app: &mut SolveApp, mut p: Value) -> Result<Value, String> {
+    if app.drawing.drawn_rev != 0 && app.drawing.drawn_design == app.session.doc.name && app.drawing.cache_vis == app.drawing.drawn_visibility {
+        p["freeze"] = json!(true);
+    }
+    run_sheet_command(app, "file.export_drawing_dxf", p)
+}
+
+fn run_sheet_command(app: &mut SolveApp, command: &str, p: Value) -> Result<Value, String> {
     let kept = app.drawing.drawn_visibility.clone().map(|v| std::mem::replace(&mut app.session.visibility, v));
     app.drawing.cache_vis = Some(app.session.visibility.clone());
-    let r = app.run("drawing.sheet", p);
+    let r = app.run(command, p);
     if let Some(now) = kept {
         app.session.visibility = now;
     }
@@ -2601,7 +2614,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             app.pick_save(&name, &["dxf"], move |app, path| {
                 let Some(path) = path else { return };
                 p["path"] = json!(path);
-                if app.run("file.export_drawing_dxf", p).is_ok() {
+                if export_sheet(app, p).is_ok() {
                     app.set_status(format!("Exported drawing sheet {path}"), false);
                 }
             });
@@ -4174,7 +4187,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                         app.pick_save(&name, &["dxf"], move |app, path| {
                             let Some(path) = path else { return };
                             p["path"] = json!(path);
-                            if app.run("file.export_drawing_dxf", p).is_ok() {
+                            if export_sheet(app, p).is_ok() {
                                 app.set_status(format!("Exported drawing sheet {path}"), false);
                             }
                         });
