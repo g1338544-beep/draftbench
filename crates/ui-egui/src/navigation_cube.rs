@@ -11,9 +11,21 @@ const HALF: f64 = 40.0;
 // The remaining regions belong to the face, including the middle of each edge.
 const INSET: f64 = 0.68;
 
+thread_local! {
+    /// The moved WCS the cube follows this frame (`None` on the world axes): TOP, FRONT and the
+    /// rest then stand for the WCS's own axes. Set by [`show`]; Reset puts the world faces back.
+    static CUBE_WCS: std::cell::Cell<Option<solidcraft_engine::cmd::wcs::Wcs>> = const { std::cell::Cell::new(None) };
+}
+
+/// A vector of the cube's own frame in the world: carried by the WCS when it has moved.
+fn cube_world(cam: &Camera, v: Vec3) -> Vec3 {
+    let w = cam.from_frame(v);
+    CUBE_WCS.with(std::cell::Cell::get).map_or(w, |t| t.x * w.x + t.y * w.y + t.z() * w.z)
+}
+
 fn project(cam: &Camera, v: Vec3, scale: f64) -> egui::Vec2 {
     let (r, u, _) = cam.basis();
-    let v = cam.from_frame(v);
+    let v = cube_world(cam, v);
     vec2((v.dot(r) * scale) as f32, -(v.dot(u) * scale) as f32)
 }
 
@@ -39,7 +51,7 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
     }
     let mut out = Vec::new();
     let mut add = |d: Vec3, normal: Vec3, mut vertices: Vec<Vec3>, axes: Option<(Vec3, Vec3)>| {
-        let depth = cam.from_frame(normal).dot(cam.back());
+        let depth = cube_world(cam, normal).dot(cam.back());
         if depth <= 1e-5 {
             return;
         }
@@ -141,6 +153,7 @@ fn control(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, action: &str, to
 }
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    CUBE_WCS.with(|c| c.set(moved_wcs(app)));
     let outer = axis_rect(app, rect);
     if !outer.is_positive() {
         app.viewport.axis_drag = None;
@@ -187,7 +200,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ui.interact(Rect::from_center_size(hover.unwrap_or(face.centre), vec2(2.0, 2.0)), ui.id().with("navigation_cube_tip"), Sense::hover())
             .on_hover_text(format!("{} view. Drag to orbit{}.", face.label, if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }));
         if ui.input(|i| i.pointer.primary_clicked()) {
-            navigate(app, None, Some(face.direction));
+            // A moved WCS: look along the face's WCS direction, given back in the cube's own frame.
+            let dir = if CUBE_WCS.with(std::cell::Cell::get).is_some() { app.cam.to_frame(cube_world(&app.cam, face.direction)) } else { face.direction };
+            navigate(app, None, Some(dir));
         }
     }
     let square_on = faces.iter().filter(|f| f.text_axes.is_some()).count() == 1;
@@ -246,6 +261,24 @@ mod tests {
         // These tests inspect shapes without uploading textures to a renderer.
         output.textures_delta.clear();
         output
+    }
+
+    /// A moved WCS carries the cube with it: seen from the front, the face towards the viewer is the
+    /// one that points along the WCS's own axis, and the world faces come back with Reset.
+    #[test]
+    fn the_cube_follows_a_moved_wcs_and_the_world_faces_come_back() {
+        let mut cam = Camera::default();
+        cam.set_view(StandardView::Front);
+        let nearest = |cam: &Camera| facets(cam, Pos2::ZERO, HALF).last().map(|f| f.label.clone());
+        CUBE_WCS.with(|c| c.set(None));
+        let world = nearest(&cam);
+        // XC along X, YC up, so ZC points at the viewer's side of the world (-Y).
+        let w = solidcraft_engine::cmd::wcs::Wcs { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        CUBE_WCS.with(|c| c.set(Some(w)));
+        let moved = nearest(&cam);
+        CUBE_WCS.with(|c| c.set(None));
+        assert_ne!(world, moved, "the faces are the WCS's");
+        assert_eq!(world, nearest(&cam), "Reset gives the world faces back");
     }
 
     #[test]
