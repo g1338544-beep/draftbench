@@ -38,7 +38,17 @@ struct RotEdit {
     snap: String,
 }
 
+/// What the Move window holds: the origin before the axis was dragged and the distance since.
+#[derive(Clone, Debug)]
+struct MoveEdit {
+    k: usize,
+    base: Vec3,
+    dir: Vec3,
+    dist: String,
+}
+
 thread_local! {
+    static MOVE_EDIT: RefCell<Option<MoveEdit>> = const { RefCell::new(None) };
     static ROT_EDIT: RefCell<Option<RotEdit>> = const { RefCell::new(None) };
     /// The angle snap of a turned handle, in degrees; Alt turns it freely.
     static SNAP_DEG: Cell<f64> = const { Cell::new(45.0) };
@@ -46,6 +56,33 @@ thread_local! {
 
 fn snap_deg() -> f64 {
     SNAP_DEG.with(Cell::get)
+}
+
+/// The Move window of an axis that was clicked or dragged: the distance along it (type a number and
+/// press Enter to put the origin there, measured from where it stood). Called once per frame.
+pub fn move_window(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(mut e) = MOVE_EDIT.with(|r| r.borrow().clone()) else { return };
+    if app.session.wcs.is_none() {
+        MOVE_EDIT.with(|r| *r.borrow_mut() = None);
+        return;
+    }
+    let name = ["XC", "YC", "ZC"].get(e.k).copied().unwrap_or("ZC");
+    let title = format!("Move along {name}");
+    let mut commit = false;
+    let (closed, _) = crate::ui_kit::Window::new(egui::Id::new("sc_wcs_move"), "settings", &title).actions("", "Close", None).show(ctx, true, |ui| {
+        crate::ui_kit::row(ui, crate::i18n::tr_label("Distance"), |ui| {
+            let (enter, _) = crate::ui_kit::text_field(ui, &mut e.dist, "mm");
+            commit |= enter;
+        });
+    });
+    if commit
+        && let Ok(v) = app.session.doc.eval(&e.dist, solidcraft_engine::doc::expr::Kind::Length)
+        && v.is_finite()
+    {
+        let q = e.base + e.dir * v;
+        let _ = app.run("wcs.origin", json!({"point": [q.x, q.y, q.z]}));
+    }
+    MOVE_EDIT.with(|r| *r.borrow_mut() = if closed { None } else { Some(e) });
 }
 
 /// The Angle window beside a turned WCS: the turn made (type a number and press Enter to turn to
@@ -343,6 +380,7 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
                     g.start = angle;
                     g.last = angle;
                     grab = Some(Grab::Rot(g));
+                    MOVE_EDIT.with(|r| *r.borrow_mut() = None);
                 }
             }
         }
@@ -353,6 +391,8 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
                 let t = nearest_on_line(w.origin, dir, ray_from, ray_dir).unwrap_or(0.0);
                 grab = Some(Grab::Axis(k, t, w.origin));
                 PRESS.with(|p| p.set(Some(pos)));
+                ROT_EDIT.with(|r| *r.borrow_mut() = None);
+                MOVE_EDIT.with(|r| *r.borrow_mut() = Some(MoveEdit { k, base: w.origin, dir, dist: "0".into() }));
             }
         }
         // The origin wins over an axis tip when they overlap (an axis seen end-on).
@@ -467,6 +507,13 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
         let same = LAST.with(|l| l.replace(Some(key.clone())).is_some_and(|old| old == key));
         if !same {
             let _ = app.run("wcs.origin", p);
+            if let (Some(now), true) = (app.session.wcs, matches!(grab, Grab::Axis(..))) {
+                MOVE_EDIT.with(|r| {
+                    if let Some(e) = r.borrow_mut().as_mut() {
+                        e.dist = format!("{:.2}", (now.origin - e.base).dot(e.dir));
+                    }
+                });
+            }
         }
     }
     ui.ctx().request_repaint();

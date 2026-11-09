@@ -1884,6 +1884,7 @@ impl SolveApp {
         reveal::show(self, ui.ctx());
         wcs_rotate::show(self, ui.ctx());
         wcs_triad::angle_window(self, ui.ctx());
+        wcs_triad::move_window(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
         script_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
