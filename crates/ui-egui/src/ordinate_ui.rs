@@ -22,9 +22,35 @@ pub(super) struct OrdState {
     pub axis: u8,
     /// The selected leader (an index into `items`).
     pub sel: Option<usize>,
+    /// The leader whose end the pointer is dragging.
+    pub drag: Option<usize>,
 }
 
 impl OrdState {
+    /// A press at `s` on a leader's free end (the selected one first): take it to drag.
+    pub fn start_drag(&mut self, s: Pos2, tol: f32) -> bool {
+        let at_end = |i: usize| self.items.get(i).is_some_and(|(p, axis, level, ang)| (end_of(*p, *axis, *level, *ang) - s).length() <= tol);
+        let pick = self.sel.filter(|i| at_end(*i)).or_else(|| (0..self.items.len()).rev().find(|i| at_end(*i)));
+        self.drag = pick;
+        if pick.is_some() {
+            self.sel = pick;
+        }
+        pick.is_some()
+    }
+
+    /// The pointer is at `s` while dragging: the end follows it, so the leader's level and lean both change.
+    pub fn drag_to(&mut self, s: Pos2) {
+        let Some(it) = self.drag.and_then(|i| self.items.get_mut(i)) else { return };
+        let (p, axis) = (it.0, it.1);
+        let (along, across) = if axis == 1 { (s.x - p.x, s.y - p.y) } else { (s.y - p.y, s.x - p.x) };
+        if along.abs() < 1.0 {
+            return;
+        }
+        let level = if axis == 1 { s.x } else { s.y };
+        it.2 = (level * 10.0).round() / 10.0;
+        it.3 = ((across / along).atan().to_degrees()).clamp(-75.0, 75.0);
+    }
+
     /// The saved form, which is also what the engine takes (`null` while there is no datum).
     pub fn to_json(&self) -> Value {
         let Some(o) = self.origin else { return Value::Null };

@@ -4503,6 +4503,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let orig = app.drawing.placed.get(v).map_or([0.0; 4], |p| p.letter_off);
             app.drawing.letter_drag = Some((v, k, s, orig));
             app.drawing.selected = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.sym.armed.is_none())
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = pointer
+            && app.drawing.ord.start_drag(s, 6.0 / map.as_ref().map_or(1.0, |m| m.px_per_mm()).max(1e-3))
+        {
+            // The end of an ordinate leader: drag it anywhere, and the leader leans toward it.
+            app.drawing.selected = None;
+            app.drawing.ft_sel = None;
         } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.sym.armed.is_none())
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
@@ -4677,6 +4685,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if response.drag_stopped() || !response.dragged() {
             app.drawing.fl_drag = None;
+            refresh(app);
+        }
+    }
+    // Dragging an ordinate leader's end: the number goes where the pointer goes.
+    if app.drawing.ord.drag.is_some() {
+        if let Some(s) = response.interact_pointer_pos().and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q))) {
+            app.drawing.ord.drag_to(s);
+        }
+        if response.drag_stopped() || !response.dragged() {
+            app.drawing.ord.drag = None;
             refresh(app);
         }
     }
@@ -5622,7 +5640,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.letter_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() && app.drawing.sym.drag.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.letter_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() && app.drawing.sym.drag.is_none() && app.drawing.ord.drag.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
