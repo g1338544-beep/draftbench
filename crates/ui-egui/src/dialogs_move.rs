@@ -39,7 +39,7 @@ pub fn inputs(mode: usize) -> Vec<SelInput> {
     match mode {
         FREE => v.push(SelInput::new("Pivot", POINTS, false)),
         ROTATE => {
-            v.push(SelInput::new("Specify Vector", AXES | EDGES, false));
+            v.push(SelInput::new("Specify Vector", AXES | EDGES | PLANAR_FACES, false));
             // A point the axis passes through: without one the axis runs where it was picked.
             v.push(SelInput::new("Specify Axis Point", POINTS, false));
         }
@@ -219,7 +219,7 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
             }
         }
         ROTATE => {
-            let (mut o, a) = items(d, 1).first().and_then(|s| axis_line(app, s)).ok_or("select an axis or a straight edge first")?;
+            let (mut o, a) = items(d, 1).first().and_then(|s| turn_axis(app, s)).ok_or("select an axis, a straight edge or a flat face first")?;
             // The axis may be moved to pass through another point.
             if let Some(through) = sel_point(app, items(d, 2).first()) {
                 o = through;
@@ -346,16 +346,18 @@ pub fn point_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
 /// circle edge, the middle of a face, a vertex. Drawn as dots so the pick can be checked.
 pub fn point_markers(app: &SolveApp, d: &Dialog) -> Vec<(Vec3, &'static str)> {
     let Kind::Move { mode, .. } = &d.kind else { return Vec::new() };
-    let names: &[&'static str] = match *mode {
-        POINT_TO_POINT => &["From", "To"],
-        POINT_TO_POSITION => &["Point"],
-        FREE => &["Pivot"],
+    // (input number, name): input 0 is the bodies.
+    let slots: &[(usize, &'static str)] = match *mode {
+        POINT_TO_POINT => &[(1, "From"), (2, "To")],
+        POINT_TO_POSITION => &[(1, "Point")],
+        FREE => &[(1, "Pivot")],
+        ROTATE => &[(2, "Axis point")],
+        ALIGN_AXIS => &[(2, "Pivot")],
         _ => &[],
     };
-    names
+    slots
         .iter()
-        .enumerate()
-        .filter_map(|(k, n)| if *mode == POINT_TO_POINT { point_of(app, d, k + 1) } else { sel_point(app, items(d, k + 1).first()) }.map(|p| (p, *n)))
+        .filter_map(|(i, n)| if *mode == POINT_TO_POINT { point_of(app, d, *i) } else { sel_point(app, items(d, *i).first()) }.map(|p| (p, *n)))
         .collect()
 }
 
@@ -363,7 +365,11 @@ pub fn point_markers(app: &SolveApp, d: &Dialog) -> Vec<(Vec3, &'static str)> {
 /// the middle of a face, a vertex. Shown as a ring before the click.
 pub fn hover_point(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     let Kind::Move { mode, .. } = &d.kind else { return None };
-    if !matches!(*mode, POINT_TO_POINT | POINT_TO_POSITION | FREE) || d.active == 0 {
+    if !matches!(*mode, POINT_TO_POINT | POINT_TO_POSITION | FREE | ROTATE | ALIGN_AXIS) || d.active == 0 {
+        return None;
+    }
+    // Angle and Align Axis also pick vectors: the ring belongs to the point input only.
+    if (*mode == ROTATE || *mode == ALIGN_AXIS) && d.active != 2 {
         return None;
     }
     let sel = match app.viewport.hover.as_ref()? {
@@ -373,6 +379,15 @@ pub fn hover_point(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
         _ => return None,
     };
     sel_point(app, Some(&sel))
+}
+
+/// The axis an Angle move turns about: an axis or straight edge, or the normal of a flat face
+/// (through the picked point of that face).
+fn turn_axis(app: &SolveApp, s: &Sel) -> Option<(Vec3, Vec3)> {
+    if let Sel::Face { point, .. } = s {
+        return vector_of(app, s).map(|n| (*point, n));
+    }
+    axis_line(app, s)
 }
 
 /// An axis line: origin axes and sketch lines, or a straight body edge.

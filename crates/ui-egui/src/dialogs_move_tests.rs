@@ -118,3 +118,18 @@ fn align_axis_to_vector_turns_from_onto_to_about_the_pivot() {
     assert!(move_dialog(ROTATE).inputs.iter().any(|i| i.label == "Specify Axis Point"));
     assert!(params(&SolveApp::new(Session::default(), Services::default()), &d).is_err(), "nothing picked: an error, not a panic");
 }
+
+/// Angle and Align Axis mark their picked point, and Angle turns about the normal of a flat face.
+#[test]
+fn angle_and_align_mark_their_point_and_angle_takes_a_flat_face_as_its_vector() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let point = Vec3::new(3.0, 4.0, 20.0);
+    for mode in [ROTATE, ALIGN_AXIS] {
+        let mut d = move_dialog(mode);
+        assert!(point_markers(&app, &d).is_empty(), "nothing picked yet");
+        d.inputs[2].items = vec![Sel::Vertex { body: "Body1".into(), point }];
+        assert_eq!(point_markers(&app, &d).len(), 1, "the picked point is marked");
+    }
+    assert!(inputs(ROTATE)[1].accept & PLANAR_FACES != 0, "the vector may be a flat face");
+}
