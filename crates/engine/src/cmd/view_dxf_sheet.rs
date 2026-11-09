@@ -365,7 +365,16 @@ fn manual_once(
                 }
             }
             let behind = match line_plane {
-                Some(_) if section_path.is_some() => Vec::new(),
+                Some((normal, _, angles)) if section_path.is_some() => {
+                    // What each piece of the stepped cut shows beyond its own plane, kept to that piece's stretch.
+                    let pts3: Vec<Vec3> = section_path.iter().flatten().map(|q| src_point(*q)).collect();
+                    let mut far: Vec<(Vec2, Vec2)> = Vec::new();
+                    for (lo, hi, offset) in stepped_pieces(&pts3, normal, angles).into_iter().take(12) {
+                        let piece = clip_x(&cut_plane(scene, angles, normal, offset), lo, hi);
+                        far.extend(clip_x(&behind_edges(scene, angles, normal, offset, &piece), lo, hi));
+                    }
+                    far
+                }
                 Some((normal, offset, angles)) => behind_edges(scene, angles, normal, offset, &cut),
                 None => {
                     let normal = match axis {
@@ -1140,28 +1149,35 @@ fn stepped_pieces(pts: &[Vec3], normal: Vec3, angles: (f64, f64)) -> Vec<(f64, f
     ranges
 }
 
+/// The parts of the segments lying between the vertical lines `x = lo` and `x = hi`.
+fn clip_x(segs: &[(Vec2, Vec2)], lo: f64, hi: f64) -> Vec<(Vec2, Vec2)> {
+    let mut out = Vec::new();
+    for (a, b) in segs {
+        let dx = b.x - a.x;
+        let (t0, t1) = if dx.abs() < 1e-12 {
+            if a.x >= lo && a.x <= hi { (0.0, 1.0) } else { continue }
+        } else {
+            let (mut ta, mut tb) = ((lo - a.x) / dx, (hi - a.x) / dx);
+            if ta > tb {
+                std::mem::swap(&mut ta, &mut tb);
+            }
+            (ta.max(0.0), tb.min(1.0))
+        };
+        if t0 >= t1 {
+            continue;
+        }
+        let at = |t: f64| Vec2::new(a.x + dx * t, a.y + (b.y - a.y) * t);
+        out.push((at(t0), at(t1)));
+    }
+    out
+}
+
 fn stepped_cut(scene: &meshes::Scene, pts: &[Vec3], normal: Vec3, angles: (f64, f64)) -> (Vec<(Vec2, Vec2)>, Vec<(Vec2, Vec2)>) {
     let ranges = stepped_pieces(pts, normal, angles);
     let (mut cut, mut closing) = (Vec::new(), Vec::new());
     for (lo, hi, offset) in ranges.into_iter().take(12) {
         let segs = cut_plane(scene, angles, normal, offset);
-        for (a, b) in &segs {
-            let dx = b.x - a.x;
-            let (t0, t1) = if dx.abs() < 1e-12 {
-                if a.x >= lo && a.x <= hi { (0.0, 1.0) } else { continue }
-            } else {
-                let (mut ta, mut tb) = ((lo - a.x) / dx, (hi - a.x) / dx);
-                if ta > tb {
-                    std::mem::swap(&mut ta, &mut tb);
-                }
-                (ta.max(0.0), tb.min(1.0))
-            };
-            if t0 >= t1 {
-                continue;
-            }
-            let at = |t: f64| Vec2::new(a.x + dx * t, a.y + (b.y - a.y) * t);
-            cut.push((at(t0), at(t1)));
-        }
+        cut.extend(clip_x(&segs, lo, hi));
         for x in [lo, hi] {
             let xs = x + 1.3e-5;
             let mut ys: Vec<f64> = segs
