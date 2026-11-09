@@ -522,6 +522,7 @@
   "cmd.construct_axis_through_cylinder": "円柱/円錐/トーラスを通る軸",
   "cmd.construct_axis_two_planes": "2平面を通る軸",
   "cmd.construct_axis_two_points": "2点を通る軸",
+  "cmd.construct_plane": "平面",
   "cmd.construct_plane_along_path": "パスに沿った平面",
   "cmd.construct_plane_midplane": "中間平面",
   "cmd.construct_plane_perpendicular": "垂直平面",

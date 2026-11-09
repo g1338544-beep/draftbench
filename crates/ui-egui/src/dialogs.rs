@@ -212,6 +212,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Halfway between two planes or planar faces.
             Midplane,
+            /// A plane made from whatever is picked: the picks decide which kind (`construct.plane`).
+            PlaneAuto {
+                distance: String,
+            },
             /// An imported mesh body rebuilt as editable faces (#3001).
             MeshConvert {
                 tolerance: String,
@@ -650,6 +654,14 @@ impl Dialog {
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
             ),
             "mesh.convert" => Dialog::new(Kind::MeshConvert { tolerance: "0.05 mm".into() }, vec![SelInput::new("Mesh body", BODIES, false)]),
+            "construct.plane" => Dialog::new(
+                Kind::PlaneAuto { distance: "10 mm".into() },
+                vec![SelInput::new(
+                    "References",
+                    PLANES | PLANAR_FACES | FACES | EDGES | AXES | selection::VERTICES | selection::POINTS | selection::SKETCH_POINTS | CURVES,
+                    true,
+                )],
+            ),
             "construct.plane.midplane" => Dialog::new(
                 Kind::Midplane,
                 vec![SelInput::new("First plane", PLANES | PLANAR_FACES, false), SelInput::new("Second plane", PLANES | PLANAR_FACES, false)],
@@ -963,6 +975,7 @@ impl Dialog {
                 | Kind::Loft { .. }
                 | Kind::PathPlane { .. }
                 | Kind::Midplane
+                | Kind::PlaneAuto { .. }
                 | Kind::Construct { .. }
                 | Kind::Move { .. }
                 | Kind::Hole { .. }
@@ -1747,6 +1760,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Measure { .. } => "MEASURE",
         Kind::Material { .. } => "PHYSICAL MATERIAL",
         Kind::Midplane => "MIDPLANE",
+        Kind::PlaneAuto { .. } => "PLANE",
         Kind::MeshConvert { .. } => "CONVERT MESH",
         Kind::Construct { title, .. } => title,
         Kind::PathPlane { .. } => "PLANE ALONG PATH",
@@ -3613,6 +3627,21 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 _ => return Err("pick the mesh body to convert".into()),
             };
             ("mesh.convert", json!({"body": body, "tolerance": tolerance}))
+        }
+        Kind::PlaneAuto { distance } => {
+            need(0, "a plane, face, line or point")?;
+            let mut refs = Vec::new();
+            for sel in sels(d, 0) {
+                refs.push(match sel {
+                    Sel::Plane { name } => json!(name),
+                    face @ Sel::Face { .. } => match crate::sketch_attachment_ui::face_plane(app, face) {
+                        Some(plane) => plane,
+                        None => construct_ref(app, face)?,
+                    },
+                    other => construct_ref(app, other)?,
+                });
+            }
+            ("construct.plane", json!({"refs": refs, "distance": distance}))
         }
         Kind::Midplane => {
             need(0, "the first plane")?;

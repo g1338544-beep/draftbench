@@ -6,7 +6,7 @@
 //! `GeoRef` (`{"type": "edge", "at": …}`). Picked faces and edges are stored with their
 //! persistent names.
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use solidcraft_doc::construct::{AxisDef, GeoRef, PointDef};
 use solidcraft_doc::{FeatureKind, PlaneRef};
 
@@ -63,6 +63,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CONSTRUCT")
         .icon("point_along_path")
         .params("path: edge or sketch curve ref; t: expr, 0…1 along it (default 0.5); name?"),
+    CommandSpec::new("construct.plane", "Plane", plane_auto)
+        .at("SOLID", "CONSTRUCT")
+        .icon("plane_three_points")
+        .params("refs: 1…3 refs, the plane made from what they are: one plane or face (offset by `distance`, default 10 mm; a curved face gives its tangent plane), two planes or faces (midplane), two lines (through both), a line and a point (through both), a plane or face and a line (through the line, square to it), three points; distance?: expr; name?"),
     CommandSpec::new("construct.plane.midplane", "Midplane", plane_mid)
         .at("SOLID", "CONSTRUCT")
         .icon("plane_midplane")
@@ -215,6 +219,63 @@ fn point_along(s: &mut Session, p: &Value) -> Result<Value> {
     let path = geo(s, p.get("path"), cmd, "path")?;
     let t = t_param(s, p, cmd)?;
     point(s, p, PointDef::AlongPath { path, t })
+}
+
+/// One command for every plane made from picks: what the picks are decides which plane it is.
+fn plane_auto(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "construct.plane";
+    let refs = p.get("refs").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`refs` must list 1…3 references"))?;
+    if refs.is_empty() || refs.len() > 3 {
+        return Err(bad(cmd, "pick 1 to 3 references"));
+    }
+    #[derive(Clone, Copy, PartialEq)]
+    enum Pick {
+        Surface,
+        Line,
+        Point,
+    }
+    let mut kinds = Vec::new();
+    for r in refs {
+        kinds.push(match geo(s, Some(r), cmd, "refs")? {
+            GeoRef::Plane { .. } | GeoRef::Face { .. } => Pick::Surface,
+            GeoRef::Edge { .. } | GeoRef::World { .. } | GeoRef::Axis { .. } | GeoRef::SketchCurve { .. } => Pick::Line,
+            _ => Pick::Point,
+        });
+    }
+    // The call to a specific plane command: the same parameters (the name), the refs in their places.
+    let with = |pairs: &[(&str, Value)]| -> Value {
+        let mut q = p.as_object().cloned().unwrap_or_default();
+        q.remove("refs");
+        q.remove("distance");
+        for (k, v) in pairs {
+            q.insert((*k).to_string(), v.clone());
+        }
+        Value::Object(q)
+    };
+    let r = |i: usize| refs.get(i).cloned().unwrap_or(Value::Null);
+    match kinds.as_slice() {
+        [Pick::Surface] => {
+            let distance = p.get("distance").cloned().unwrap_or_else(|| json!("10 mm"));
+            let offset = super::features::plane_offset(s, &with(&[("base", r(0)), ("offset", distance)]));
+            match offset {
+                Ok(v) => Ok(v),
+                // A curved face has no offset plane: the plane that touches it where it was picked.
+                Err(e) if refs.first().is_some_and(|f| f.get("face").is_some()) => plane_tangent(s, &with(&[("face", r(0))])).map_err(|_| e),
+                Err(e) => Err(e),
+            }
+        }
+        [Pick::Surface, Pick::Surface] => plane_mid(s, &with(&[("a", r(0)), ("b", r(1))])),
+        [Pick::Line, Pick::Line] => plane_edges(s, &with(&[("a", r(0)), ("b", r(1))])),
+        [Pick::Line, Pick::Point] => plane_edges(s, &with(&[("a", r(0)), ("b", r(1))])),
+        [Pick::Point, Pick::Line] => plane_edges(s, &with(&[("a", r(1)), ("b", r(0))])),
+        [Pick::Surface, Pick::Line] => plane_perpendicular(s, &with(&[("plane", r(0)), ("line", r(1))])),
+        [Pick::Line, Pick::Surface] => plane_perpendicular(s, &with(&[("plane", r(1)), ("line", r(0))])),
+        [Pick::Point, Pick::Point, Pick::Point] => plane_points(s, &with(&[("a", r(0)), ("b", r(1)), ("c", r(2))])),
+        _ => Err(bad(
+            cmd,
+            "pick a plane or face; two planes; two lines; a line and a point; a plane and a line; or three points",
+        )),
+    }
 }
 
 fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {

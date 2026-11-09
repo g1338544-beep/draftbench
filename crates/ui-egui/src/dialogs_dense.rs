@@ -36,6 +36,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Loft { .. } => Some("solid.loft"),
         Kind::Sweep { .. } => Some("solid.sweep"),
         Kind::Midplane => Some("construct.plane.midplane"),
+        Kind::PlaneAuto { .. } => Some("construct.plane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
         Kind::Construct { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
@@ -753,6 +754,38 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
         }
         Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::Construct { t: None, .. } => {}
+        Kind::PlaneAuto { distance } => {
+            // What the picks make, said as they are picked; a distance only for a single plane.
+            let kinds: Vec<u8> = d
+                .inputs
+                .first()
+                .map(|i| {
+                    i.items
+                        .iter()
+                        .map(|x| match x {
+                            Sel::Plane { .. } | Sel::Face { .. } => 0,
+                            Sel::Edge { .. } | Sel::Axis { .. } | Sel::SketchCurve { .. } => 1,
+                            _ => 2,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let (surfaces, lines, points) = (kinds.iter().filter(|k| **k == 0).count(), kinds.iter().filter(|k| **k == 1).count(), kinds.iter().filter(|k| **k == 2).count());
+            let made = match (surfaces, lines, points) {
+                (0, 0, 0) => "Click a plane or face, two lines, a line and a point, or three points.",
+                (1, 0, 0) => "Offset plane: set the distance below.",
+                (2, 0, 0) => "Midplane between the two planes.",
+                (0, 2, 0) => "Plane through the two lines.",
+                (0, 1, 1) => "Plane through the line and the point.",
+                (1, 1, 0) => "Plane through the line, square to the plane.",
+                (0, 0, 3) => "Plane through the three points.",
+                _ => "These picks do not make a plane: remove one, or add the missing one.",
+            };
+            ui.small(made);
+            if surfaces == 1 && lines == 0 && points == 0 {
+                enter |= expr_row(ui, "Distance", distance);
+            }
+        }
         Kind::Rib { thickness, depth, flip, normal, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);

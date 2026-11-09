@@ -546,6 +546,18 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             Plane::new(o, dir, n.cross(dir)).ok_or_else(degenerate)
         }
         PlaneRef::TwoEdges { a, b } => {
+            // A line and a point: the plane through both.
+            let line_and_point = match (is_point_ref(a), is_point_ref(b)) {
+                (false, true) => Some((a, b)),
+                (true, false) => Some((b, a)),
+                _ => None,
+            };
+            if let Some((l, q)) = line_and_point {
+                let (o, d) = line(ctx, l)?;
+                let at = point(ctx, q)?;
+                let n = d.cross(at - o).normalized().ok_or_else(|| bad("the point lies on the line"))?;
+                return Plane::new(o, d, n.cross(d)).ok_or_else(degenerate);
+            }
             let ((o1, d1), (o2, d2)) = (line(ctx, a)?, line(ctx, b)?);
             let n = match d1.cross(d2).normalized() {
                 Some(n) if (o2 - o1).dot(n).abs() <= 1e-6 * (1.0 + (o2 - o1).len()) => n,
@@ -582,6 +594,11 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         }
         _ => ctx.doc.resolve_plane_in(ctx.vals, p, ctx.depth + 1, Some(ctx.st)),
     }
+}
+
+/// Whether a reference is a point (rather than a line, plane or face).
+fn is_point_ref(g: &GeoRef) -> bool {
+    matches!(g, GeoRef::Point { .. } | GeoRef::Origin | GeoRef::Vertex { .. } | GeoRef::ConstructPoint { .. } | GeoRef::SketchPoint { .. })
 }
 
 impl GeoRef {

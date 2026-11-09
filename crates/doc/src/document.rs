@@ -68,7 +68,7 @@ pub enum PlaneRef {
     },
     /// Halfway between two planes (or planar faces); bisecting them when they meet at an angle.
     Midplane { a: Box<GeoRef>, b: Box<GeoRef> },
-    /// Through two straight edges (lines) that lie in one plane.
+    /// Through two straight edges (lines) that lie in one plane, or through a line and a point.
     TwoEdges { a: Box<GeoRef>, b: Box<GeoRef> },
     /// Through three points.
     ThreePoints { a: Box<GeoRef>, b: Box<GeoRef>, c: Box<GeoRef> },

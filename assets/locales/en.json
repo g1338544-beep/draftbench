@@ -522,6 +522,7 @@
   "cmd.construct_axis_through_cylinder": "Axis Through Cylinder/Cone/Torus",
   "cmd.construct_axis_two_planes": "Axis Through Two Planes",
   "cmd.construct_axis_two_points": "Axis Through Two Points",
+  "cmd.construct_plane": "Plane",
   "cmd.construct_plane_along_path": "Plane Along Path",
   "cmd.construct_plane_midplane": "Midplane",
   "cmd.construct_plane_perpendicular": "Perpendicular Plane",

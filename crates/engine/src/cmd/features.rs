@@ -1627,7 +1627,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
     }
 }
 
-fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.offset";
     let d = req_expr(cmd, p, "offset")?;
     check_expr(s, &d, Kind::Length, cmd, "offset")?;

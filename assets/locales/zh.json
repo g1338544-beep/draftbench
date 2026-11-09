@@ -522,6 +522,7 @@
   "cmd.construct_axis_through_cylinder": "过圆柱/圆锥/圆环的轴",
   "cmd.construct_axis_two_planes": "过两个平面的轴",
   "cmd.construct_axis_two_points": "过两点的轴",
+  "cmd.construct_plane": "平面",
   "cmd.construct_plane_along_path": "沿路径的平面",
   "cmd.construct_plane_midplane": "中平面",
   "cmd.construct_plane_perpendicular": "垂直平面",
