@@ -315,6 +315,17 @@ impl Out {
     }
 }
 
+/// The text style of a text with Thai letters: the shape fonts (`txt`) of the Standard style
+/// draw none, so such a text names a TrueType face that does (Tahoma ships with Windows;
+/// other readers substitute a Thai face for it).
+const THAI_STYLE: &str = "Thai";
+const THAI_STYLE_FONT: &str = "tahoma.ttf";
+
+/// Whether a text holds a letter of the Thai block.
+fn has_thai(s: &str) -> bool {
+    s.chars().any(|c| ('\u{0E00}'..='\u{0E7F}').contains(&c))
+}
+
 /// A text on one line, as a TEXT entity holds it: at most 250 characters, control characters as
 /// spaces, letters outside ASCII as `\U+XXXX` (`?` beyond the first 65536).
 fn text_value(s: &str) -> String {
@@ -450,17 +461,19 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
     }
     o.code(0, "ENDTAB");
     // The one text style, which a TEXT entity uses when it names none.
-    let t = o.table("STYLE", 1);
-    o.record("STYLE", "AcDbTextStyleTableRecord", &t);
-    o.code(2, "Standard");
-    o.code(70, 0);
-    o.num(40, 0.0);
-    o.num(41, 1.0);
-    o.num(50, 0.0);
-    o.code(71, 0);
-    o.num(42, 2.5);
-    o.code(3, "txt");
-    o.code(4, "");
+    let t = o.table("STYLE", 2);
+    for (name, font) in [("Standard", "txt"), (THAI_STYLE, THAI_STYLE_FONT)] {
+        o.record("STYLE", "AcDbTextStyleTableRecord", &t);
+        o.code(2, name);
+        o.code(70, 0);
+        o.num(40, 0.0);
+        o.num(41, 1.0);
+        o.num(50, 0.0);
+        o.code(71, 0);
+        o.num(42, 2.5);
+        o.code(3, font);
+        o.code(4, "");
+    }
     o.code(0, "ENDTAB");
     // The registered application that owns the standard entity data.
     let t = o.table("APPID", 1);
@@ -572,6 +585,9 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> String 
                 o.num(40, *height);
                 o.code(1, text_value(text));
                 o.num(50, *angle_deg);
+                if has_thai(text) {
+                    o.code(7, THAI_STYLE);
+                }
                 // Centred (72 = 1): a reader that places the text by the second alignment point
                 // and one that takes the first both put its middle on `at`.
                 o.code(72, 1);
@@ -792,17 +808,19 @@ pub fn write_dxf_r12(layers: &[DxfLayer], entities: &[DxfEntity]) -> String {
 
     o.code(0, "TABLE");
     o.code(2, "STYLE");
-    o.code(70, 1);
-    o.code(0, "STYLE");
-    o.code(2, "STANDARD");
-    o.code(70, 0);
-    o.num(40, 0.0);
-    o.num(41, 1.0);
-    o.num(50, 0.0);
-    o.code(71, 0);
-    o.num(42, 2.5);
-    o.code(3, "txt");
-    o.code(4, "");
+    o.code(70, 2);
+    for (name, font) in [("STANDARD", "txt"), (THAI_STYLE, THAI_STYLE_FONT)] {
+        o.code(0, "STYLE");
+        o.code(2, name);
+        o.code(70, 0);
+        o.num(40, 0.0);
+        o.num(41, 1.0);
+        o.num(50, 0.0);
+        o.code(71, 0);
+        o.num(42, 2.5);
+        o.code(3, font);
+        o.code(4, "");
+    }
     o.code(0, "ENDTAB");
     o.code(0, "ENDSEC");
 
@@ -840,6 +858,9 @@ pub fn write_dxf_r12(layers: &[DxfLayer], entities: &[DxfEntity]) -> String {
                 let marked = text.replace(['\u{d8}', '\u{2300}'], "%%c").replace('\u{b0}', "%%d").replace('\u{b1}', "%%p");
                 o.code(1, text_value(&marked));
                 o.num(50, *angle_deg);
+                if has_thai(text) {
+                    o.code(7, THAI_STYLE);
+                }
                 o.code(72, 1);
                 o.point(11, *at);
             }
@@ -1137,6 +1158,13 @@ mod tests {
         assert!(last(40) < at(41) && last(41) < at(10), "{:?}", e.1);
     }
 
+    #[test]
+    fn thai_text_is_written_as_code_points_in_a_style_with_a_thai_font() {
+        assert!(has_thai("ขนาด 10") && !has_thai("size 10"));
+        assert_eq!(text_value("ก"), "\\U+0E01");
+        assert_eq!(THAI_STYLE_FONT, "tahoma.ttf");
+    }
+
     /// The records of a symbol table, each as its group codes after the type.
     fn table_records(p: &[(i32, String)], table: &str) -> Vec<Vec<(i32, String)>> {
         let start = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, table)).unwrap();
@@ -1217,7 +1245,7 @@ mod tests {
         );
         // Its style is in the STYLE table, and the layer it is on in the LAYER table.
         let p = pairs(&dxf);
-        assert_eq!(table_records(&p, "STYLE").iter().map(|r| field(r, 2)).collect::<Vec<_>>(), ["Standard"]);
+        assert_eq!(table_records(&p, "STYLE").iter().map(|r| field(r, 2)).collect::<Vec<_>>(), ["Standard", "Thai"]);
         assert!(text.1.contains(&(8, "NOTES".to_string())));
         // The reader finds the text where it was put, as high and as turned.
         let back = read_dxf(&dxf).unwrap();
