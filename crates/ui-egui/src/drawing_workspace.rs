@@ -418,6 +418,8 @@ pub struct State {
     drag_end: Option<(usize, bool)>,
     /// The centre line last clicked, as its two ends on the sheet.
     sel_centre: Option<(Pos2, Pos2)>,
+    /// The hand-drawn line last clicked: whether it is a circle or arc, and its place in `vlines` / `vcurves`.
+    sel_hand: Option<(bool, usize)>,
     /// A frame being dragged over empty sheet, and the frame kept as the selection of centre lines.
     box_sel: Option<(Pos2, Pos2)>,
     /// A title block text being dragged (cell, pointer at the start, its move at the start); a title
@@ -588,6 +590,7 @@ impl Default for State {
             drag_dim: None,
             drag_end: None,
             sel_centre: None,
+            sel_hand: None,
             box_sel: None,
             cell_drag: None,
             grid_drag: None,
@@ -2130,6 +2133,24 @@ fn erase_centre(app: &mut SolveApp, mut r: [f32; 4], any_line: bool) {
     }
     app.drawing.sel_centre = None;
     app.drawing.dirty_marks = true;
+}
+
+/// The hand-drawn line under a sheet point: a line, or the rim of a circle or arc.
+fn hand_hit(d: &State, s: Pos2, tol: f32) -> Option<(bool, usize)> {
+    let line = d.vlines.iter().enumerate().filter(|(_, c)| c.iter().all(|v| v.is_finite())).map(|(i, c)| (dist_to_segment(s, (pos2(c[0], c[1]), pos2(c[2], c[3]))), (false, i)));
+    let curve = d.vcurves.iter().enumerate().filter(|(_, c)| c.iter().all(|v| v.is_finite())).map(|(i, c)| (((s - pos2(c[0], c[1])).length() - c[2]).abs(), (true, i)));
+    line.chain(curve).filter(|(dist, _)| *dist <= tol).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, k)| k)
+}
+
+/// Remove one hand-drawn line or curve (nothing if the place is gone).
+fn delete_hand(d: &mut State, curve: bool, i: usize) {
+    if curve && i < d.vcurves.len() {
+        d.vcurves.remove(i);
+    } else if !curve && i < d.vlines.len() {
+        d.vlines.remove(i);
+    }
+    d.sel_hand = None;
+    d.dirty_marks = true;
 }
 
 /// Delete the dimensions any of whose lines the frame `r` touches; how many went.
@@ -4410,8 +4431,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && response.clicked()
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
         {
-            app.drawing.sel_centre = centre_hit(s);
-            app.drawing.selected = if app.drawing.sel_centre.is_some() { None } else { hit(s).map(|b| b.0) };
+            // A line drawn by hand is taken first; then a centre line.
+            app.drawing.sel_hand = hand_hit(&app.drawing, s, tol);
+            app.drawing.sel_centre = if app.drawing.sel_hand.is_some() { None } else { centre_hit(s) };
+            app.drawing.selected = if app.drawing.sel_centre.is_some() || app.drawing.sel_hand.is_some() { None } else { hit(s).map(|b| b.0) };
             app.drawing.sel_dim = None;
         }
     }
@@ -4688,6 +4711,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         app.drawing.sel_centre = None;
         erase_line(app, a, b);
+    }
+    // Delete takes the hand-drawn line that was clicked.
+    if let Some((curve, i)) = app.drawing.sel_hand
+        && app.drawing.sel_centre.is_none()
+        && app.drawing.sel_dim.is_none()
+        && app.drawing.selected.is_none()
+        && !ui.ctx().egui_wants_keyboard_input()
+        && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+    {
+        delete_hand(&mut app.drawing, curve, i);
+        refresh(app);
     }
     if let Some(i) = app.drawing.sel_dim
         && !ui.ctx().egui_wants_keyboard_input()
@@ -6491,6 +6525,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(220, 60, 60, 40));
         painter.rect_stroke(r, 0.0, Stroke::new(1.5, Color32::from_rgb(220, 60, 60)), egui::StrokeKind::Inside);
     }
+    if let Some((curve, i)) = app.drawing.sel_hand
+        && app.drawing.sel_centre.is_none()
+    {
+        let accent = Tokens::get().accent;
+        if !curve && let Some(c) = app.drawing.vlines.get(i) {
+            painter.line_segment([map(pos2(c[0], c[1])), map(pos2(c[2], c[3]))], Stroke::new(3.0, accent));
+        } else if curve && let Some(c) = app.drawing.vcurves.get(i) {
+            let n = 72;
+            let a1 = if c[4] < c[3] { c[4] + 360.0 } else { c[4] };
+            let (a0, a1) = (c[3].to_radians(), a1.to_radians());
+            let pts: Vec<Pos2> = (0..=n).map(|k| {
+                let t = a0 + (a1 - a0) * k as f32 / n as f32;
+                map(pos2(c[0] + c[2] * t.cos(), c[1] + c[2] * t.sin()))
+            }).collect();
+            painter.add(egui::Shape::line(pts, Stroke::new(3.0, accent)));
+        }
+    }
     if let Some((a, b)) = app.drawing.sel_centre.map(|(a, b)| app.drawing.cl_drag.map_or((a, b), |d| (d.2, d.3))) {
         let accent = Tokens::get().accent;
         painter.line_segment([map(a), map(b)], Stroke::new(3.0, accent));
@@ -7620,5 +7671,23 @@ mod hand_drawn_tests {
         assert_eq!(app.drawing.vlines.len(), 1);
         assert_eq!(app.drawing.vcurves.len(), 1);
         assert_eq!(centre_in_box(app, frame), 0);
+    }
+
+    /// A click takes the hand-drawn line or circle under it, and Delete removes just that one.
+    #[test]
+    fn a_hand_drawn_line_is_picked_by_a_click_and_deleted_alone() {
+        let mut h = crate::scenario::Harness::new();
+        let d = &mut h.app.drawing;
+        d.vlines = vec![[0.0, 0.0, 10.0, 0.0], [0.0, 20.0, 10.0, 20.0]];
+        d.vcurves = vec![[50.0, 50.0, 5.0, 0.0, 360.0]];
+        assert_eq!(hand_hit(d, pos2(5.0, 0.5), 1.0), Some((false, 0)));
+        assert_eq!(hand_hit(d, pos2(55.2, 50.0), 1.0), Some((true, 0)), "the rim of a circle");
+        assert_eq!(hand_hit(d, pos2(50.0, 50.0), 1.0), None, "its middle is empty");
+        d.sel_hand = Some((false, 0));
+        delete_hand(d, false, 0);
+        assert_eq!(d.vlines, vec![[0.0, 20.0, 10.0, 20.0]]);
+        assert!(d.sel_hand.is_none());
+        delete_hand(d, true, 9);
+        assert_eq!(d.vcurves.len(), 1, "a place that is gone changes nothing");
     }
 }
