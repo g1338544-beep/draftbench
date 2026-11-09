@@ -1481,6 +1481,11 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         app.preferences.viewport_bg = hex.to_string();
                     }
                 }
+                // Any colour of your own.
+                let mut rgb = crate::viewport::parse_hex_colour(&app.preferences.viewport_bg).unwrap_or([230, 233, 238]);
+                if ui_kit::color_field(ui, &mut rgb).changed() {
+                    app.preferences.viewport_bg = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+                }
             });
             for (label, which) in [("Edge colour", 0), ("Sketch line colour", 1)] {
                 ui_kit::row(ui, app.tr_label(label), |ui| {
