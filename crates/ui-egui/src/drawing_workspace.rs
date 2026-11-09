@@ -2541,7 +2541,7 @@ fn remove_view(app: &mut SolveApp, i: usize) {
         app.drawing.marks.retain(|m| !inside(pos2(m[0], m[1])));
         let ord = &mut app.drawing.ord;
         let ords = ord.items.len();
-        ord.items.retain(|(q, _, _)| !inside(*q));
+        ord.items.retain(|(q, ..)| !inside(*q));
         ord.sel = None;
         if ord.items.is_empty() {
             ord.origin = None;
@@ -5639,6 +5639,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         refresh(app);
     }
     ordinate_ui::window(app, ui.ctx());
+    let leader_changed = ordinate_ui::editor(app, ui.ctx());
+    symbols_ui::after(app, leader_changed);
     let symbol_changed = symbols_ui::editor(app, ui.ctx());
     symbols_ui::after(app, symbol_changed);
     dimension_window(app, ui.ctx());

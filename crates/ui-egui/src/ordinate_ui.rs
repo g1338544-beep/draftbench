@@ -11,12 +11,13 @@ use super::{SolveApp, Tokens, refresh, snap_point};
 
 const MAX_ORDINATES: usize = 600;
 
-/// The datum, the points measured from it (point, axis 0 = along x / 1 = along y, level of the leader's end).
+/// The datum, the points measured from it (point, axis 0 = along x / 1 = along y, level of the leader's end,
+/// lean of the leader in degrees off square).
 #[derive(Default)]
 pub(super) struct OrdState {
     pub tool: bool,
     pub origin: Option<Pos2>,
-    pub items: Vec<(Pos2, u8, f32)>,
+    pub items: Vec<(Pos2, u8, f32, f32)>,
     /// The axis a click measures along: 0 = X, 1 = Y.
     pub axis: u8,
     /// The selected leader (an index into `items`).
@@ -27,7 +28,7 @@ impl OrdState {
     /// The saved form, which is also what the engine takes (`null` while there is no datum).
     pub fn to_json(&self) -> Value {
         let Some(o) = self.origin else { return Value::Null };
-        let items: Vec<Value> = self.items.iter().map(|(p, axis, at)| json!({"p": [p.x, p.y], "axis": if *axis == 1 { "y" } else { "x" }, "at": at})).collect();
+        let items: Vec<Value> = self.items.iter().map(|(p, axis, at, ang)| json!({"p": [p.x, p.y], "axis": if *axis == 1 { "y" } else { "x" }, "at": at, "ang": ang})).collect();
         json!({"o": [o.x, o.y], "items": items})
     }
 
@@ -49,10 +50,17 @@ impl OrdState {
             for it in list.iter().take(MAX_ORDINATES) {
                 let (Some(p), Some(at)) = (it.get("p").and_then(pt), it.get("at").and_then(Value::as_f64).filter(|a| a.is_finite() && a.abs() < 1e5)) else { continue };
                 let axis = u8::from(it.get("axis").and_then(Value::as_str) == Some("y"));
-                self.items.push((p, axis, at as f32));
+                let ang = it.get("ang").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0).clamp(-75.0, 75.0);
+                self.items.push((p, axis, at as f32, ang as f32));
             }
         }
     }
+}
+
+/// Where a leader ends: at its level, off square by `ang` degrees.
+fn end_of(p: Pos2, axis: u8, level: f32, ang: f32) -> Pos2 {
+    let lean = ang.clamp(-75.0, 75.0).to_radians().tan();
+    if axis == 1 { pos2(level, p.y + (level - p.x) * lean) } else { pos2(p.x + (level - p.y) * lean, level) }
 }
 
 /// Where the leader of a point ends: in a row just above the view it lies on (for x), or in a column
@@ -90,18 +98,65 @@ pub(super) fn window(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// The selected leader's settings: its lean off square and its length, to ease crowded numbers apart.
+/// True when something changed.
+pub(super) fn editor(app: &mut SolveApp, ctx: &egui::Context) -> bool {
+    let Some(i) = app.drawing.ord.sel.filter(|i| *i < app.drawing.ord.items.len()) else { return false };
+    let Some(&(p, axis, level, ang)) = app.drawing.ord.items.get(i) else { return false };
+    let (mut ang_now, mut len) = (ang, (if axis == 1 { level - p.x } else { level - p.y }).abs());
+    let mut remove = false;
+    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_ordinate_leader"), "ordinate", "Ordinate leader").fields().show_body(ctx, |ui| {
+        ui.label("Angle (off square)");
+        ui.horizontal(|ui| {
+            crate::ui_kit::number_field(ui, &mut ang_now, -75.0..=75.0, 1.0, "°");
+            for (label, d) in [("−15°", -15.0), ("+15°", 15.0)] {
+                if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small).clicked() {
+                    ang_now = (ang_now + d).clamp(-75.0, 75.0);
+                }
+            }
+            if crate::ui_kit::button(ui, "0°", crate::ui_kit::Button::Small).clicked() {
+                ang_now = 0.0;
+            }
+        });
+        ui.label("Length (mm on the sheet)");
+        crate::ui_kit::number_field(ui, &mut len, 2.0..=400.0, 1.0, "mm");
+        if crate::ui_kit::button(ui, "Delete", crate::ui_kit::Button::Small).clicked() {
+            remove = true;
+        }
+    });
+    if remove {
+        app.drawing.ord.items.remove(i);
+        app.drawing.ord.sel = None;
+        return true;
+    }
+    if closed {
+        app.drawing.ord.sel = None;
+    }
+    let sign = if (if axis == 1 { level - p.x } else { level - p.y }) < 0.0 { -1.0 } else { 1.0 };
+    let new_level = if axis == 1 { p.x } else { p.y } + sign * len;
+    if (ang_now - ang).abs() > 1e-4 || (new_level - level).abs() > 1e-4 {
+        if let Some(it) = app.drawing.ord.items.get_mut(i) {
+            it.2 = new_level;
+            it.3 = ang_now.clamp(-75.0, 75.0);
+        }
+        return true;
+    }
+    false
+}
+
 /// The leader (index into `items`) within `tol` mm of `at`: along its line, or around its number.
 fn hit(st: &OrdState, at: Pos2, tol: f32) -> Option<usize> {
-    st.items.iter().enumerate().find_map(|(i, (p, axis, level))| {
-        let end = if *axis == 1 { pos2(*level, p.y) } else { pos2(p.x, *level) };
-        let (lo, hi) = (pos2(p.x.min(end.x) - tol, p.y.min(end.y) - tol), pos2(p.x.max(end.x) + tol, p.y.max(end.y) + tol));
-        let near_line = at.x >= lo.x && at.x <= hi.x && at.y >= lo.y && at.y <= hi.y;
-        // The number sits beyond the leader's end, about 8 mm long.
-        let dir = if *axis == 1 { vec2((end.x - p.x).signum(), 0.0) } else { vec2(0.0, (end.y - p.y).signum()) };
+    st.items.iter().enumerate().find_map(|(i, (p, axis, level, ang))| {
+        let end = end_of(*p, *axis, *level, *ang);
+        // Along the leader, or around its number beyond the end (about 8 mm long).
+        let dir = (end - *p).normalized();
         let far = end + dir * 8.0;
-        let (nlo, nhi) = (pos2(end.x.min(far.x) - tol, end.y.min(far.y) - tol), pos2(end.x.max(far.x) + tol, end.y.max(far.y) + tol));
-        let near_number = at.x >= nlo.x && at.x <= nhi.x && at.y >= nlo.y && at.y <= nhi.y;
-        (near_line || near_number).then_some(i)
+        let near = |a: Pos2, b: Pos2| {
+            let ab = b - a;
+            let t = if ab.length_sq() < 1e-9 { 0.0 } else { ((at - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+            (at - (a + ab * t)).length() <= tol
+        };
+        (near(*p, end) || near(end, far)).then_some(i)
     })
 }
 
@@ -174,7 +229,7 @@ pub(super) fn tool_input(app: &mut SolveApp, ui: &egui::Ui, response: &egui::Res
         return false;
     }
     let axis = st.axis.min(1);
-    st.items.push((s, axis, if axis == 1 { ly } else { lx }));
+    st.items.push((s, axis, if axis == 1 { ly } else { lx }, 0.0));
     true
 }
 
@@ -188,8 +243,8 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, to_screen: &dyn Fn(
         painter.line_segment([c - vec2(9.0, 0.0), c + vec2(9.0, 0.0)], Stroke::new(1.5, accent));
         painter.line_segment([c - vec2(0.0, 9.0), c + vec2(0.0, 9.0)], Stroke::new(1.5, accent));
     }
-    if let Some((p, axis, level)) = st.sel.and_then(|i| st.items.get(i)) {
-        let end = if *axis == 1 { pos2(*level, p.y) } else { pos2(p.x, *level) };
+    if let Some((p, axis, level, ang)) = st.sel.and_then(|i| st.items.get(i)) {
+        let end = end_of(*p, *axis, *level, *ang);
         painter.line_segment([to_screen(*p), to_screen(end)], Stroke::new(3.0, Color32::from_rgb(230, 80, 60)));
     }
     if st.tool
