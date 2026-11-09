@@ -1,0 +1,36 @@
+name: Diag2
+on:
+  push:
+    branches: [diag2]
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p solidcraft-cli
+      - run: |
+          mkdir -p out
+          ./target/release/solidcraft-cli run tmpdiag/f.json --allow-errors 2>out/dbg.txt | grep -i error | head
+          pip install ezdxf matplotlib --break-system-packages -q
+          python3 - <<'PY'
+          import ezdxf, matplotlib
+          matplotlib.use('Agg')
+          import matplotlib.pyplot as plt
+          from ezdxf.addons.drawing import RenderContext, Frontend
+          from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+          doc=ezdxf.readfile('out/flange.dxf')
+          fig=plt.figure(figsize=(16,11),dpi=110); ax=fig.add_axes([0,0,1,1])
+          Frontend(RenderContext(doc),MatplotlibBackend(ax)).draw_layout(doc.modelspace())
+          fig.savefig('out/flange.png')
+          for e in doc.modelspace():
+              if e.dxftype()=='LINE' and e.dxf.layer in ('CENTER','VISIBLE','HIDDEN'):
+                  a,b=e.dxf.start,e.dxf.end
+                  print(e.dxf.layer, round(a.x,1),round(a.y,1),round(b.x,1),round(b.y,1))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flange
+          path: out/
