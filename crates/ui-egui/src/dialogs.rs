@@ -2021,9 +2021,40 @@ fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, range: std::
     let mut activate: Option<usize> = None;
     let mut remove = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
+    // Loft and Sweep: say what to do first, and show only the inputs that matter yet.
+    if range.start == 0 {
+        match d.kind {
+            Kind::Loft { .. } => {
+                ui.small(tr("Click one profile in each sketch, in the order the solid should pass through them (two or more)."));
+            }
+            Kind::Sweep { .. } => {
+                ui.small(tr("1. Click the profile.  2. Click the path it travels along."));
+            }
+            _ => {}
+        }
+    }
+    let sweep_direction = matches!(&d.kind, Kind::Sweep { opts, .. } if crate::dialogs_sweep::takes_direction(opts));
+    let filled = |k: usize| d.inputs.get(k).is_some_and(|x| !x.items.is_empty());
+    let hidden: Vec<bool> = (0..d.inputs.len())
+        .map(|i| match (&d.kind, i) {
+            (Kind::Sweep { .. }, 2) => !sweep_direction && !filled(2),
+            (Kind::Sweep { .. }, 4) => !filled(3) && !filled(4),
+            (Kind::Loft { .. }, 2) => !filled(1) && !filled(2),
+            _ => false,
+        })
+        .collect();
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
+        if hidden.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        let label = match (&d.kind, inp.label) {
+            (Kind::Loft { .. }, "Profiles") => "Profiles (in order)",
+            (Kind::Loft { .. } | Kind::Sweep { .. }, "Rail") => "Guide Curves (optional)",
+            (Kind::Loft { .. } | Kind::Sweep { .. }, "Second Rail") => "Second Guide (optional)",
+            (_, other) => other,
+        };
         let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
-        form_row(ui, inp.label, |ui| {
+        form_row(ui, label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active;
                 // A chip: "↖ Select" (outlined) while empty, "N selected" (filled) once picked.
@@ -2084,9 +2115,11 @@ fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, range: std::
                 }
             });
         });
-        if matches!(d.kind, Kind::SketchModify(_)) && inp.multi {
+        if (matches!(d.kind, Kind::SketchModify(_)) || (matches!(d.kind, Kind::Loft { .. }) && i == 0)) && inp.multi {
+            let numbered = matches!(d.kind, Kind::Loft { .. });
             for (index, item) in inp.items.iter().enumerate() {
-                if crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &selection_label(s, item)).clicked() {
+                let words = if numbered { format!("{}. {}", index + 1, selection_label(s, item)) } else { selection_label(s, item) };
+                if crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &words).clicked() {
                     remove = Some((i, index));
                 }
             }

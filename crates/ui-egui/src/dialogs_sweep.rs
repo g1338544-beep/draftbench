@@ -76,6 +76,11 @@ impl SweepOpts {
     }
 }
 
+/// Whether the sweep takes a picked direction (the Follow Direction orientation).
+pub fn takes_direction(o: &SweepOpts) -> bool {
+    o.orientation == DIRECTION
+}
+
 /// The origin axis a direction runs along (its way), if any.
 fn world_axis(d: Vec3) -> Option<&'static str> {
     [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)].into_iter().find(|(_, a)| d.cross(*a).len() < 1e-9 && d.dot(*a) > 0.0).map(|(n, _)| n)
