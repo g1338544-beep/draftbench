@@ -1201,13 +1201,9 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
         odd
     };
     let mut out = Vec::new();
-    // Which mesh edge each piece of `out` came from (pieces of one edge sit next to each other).
-    let mut ids: Vec<usize> = Vec::new();
-    let mut edge_no = 0usize;
     for placed in &scene.placements {
         let Some(mesh) = scene.meshes.get(placed.mesh) else { continue };
         for (i, edge) in mesh.edges.iter().enumerate() {
-            edge_no += 1;
             // Seams of one smooth surface (a bore split in two, a cylinder's seam line) and tangent joins are
             // not edges of the part: `visibility` was taken from the mesh before its seam flags were dropped.
             if !placed.visibility.get(i).copied().unwrap_or(true) {
@@ -1238,7 +1234,6 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                     continue;
                 }
                 out.push((pa, pb));
-                ids.push(edge_no);
             }
         }
     }
@@ -1304,43 +1299,29 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
             }
             best.is_some_and(|(_, q)| smooth(q))
         };
-        // One whole edge (a circle seen edge-on) lying level, starting and ending on a straight stretch of the
-        // outline, is a seam across the hole: other edges at the same level (a flange rim) must not decide.
-        let mut drop_ids: Vec<usize> = Vec::new();
-        let mut start = 0;
-        while start < out.len() {
-            let id = ids.get(start).copied().unwrap_or(0);
-            let mut end = start;
-            while end < out.len() && ids.get(end).copied() == Some(id) {
-                end += 1;
-            }
-            let group = out.get(start..end).unwrap_or(&[]);
-            if group.len() >= 2 {
-                for horizontal in [true, false] {
-                    let along = |q: Vec2| if horizontal { q.x } else { q.y };
-                    let across = |q: Vec2| if horizontal { q.y } else { q.x };
-                    let c = group.first().map_or(0.0, |(a, _)| across(*a));
-                    if group.iter().all(|(a, b)| (across(*a) - c).abs() < 2e-4 && (across(*b) - c).abs() < 2e-4) {
-                        let pts = || group.iter().flat_map(|(a, b)| [*a, *b]);
-                        let lo = pts().min_by(|p, q| along(*p).total_cmp(&along(*q)));
-                        let hi = pts().max_by(|p, q| along(*p).total_cmp(&along(*q)));
-                        if let (Some(lo), Some(hi)) = (lo, hi)
-                            && smooth_near(lo)
-                            && smooth_near(hi)
-                        {
-                            drop_ids.push(id);
-                            break;
-                        }
-                    }
-                }
-            }
-            start = end.max(start + 1);
-        }
-        if !drop_ids.is_empty() {
-            let keep: Vec<bool> = ids.iter().map(|i| drop_ids.binary_search(i).is_err()).collect();
-            out = out.into_iter().zip(keep).filter_map(|(seg, k)| k.then_some(seg)).collect();
-        }
         out.retain(|(a, b)| !(smooth_near(*a) && smooth_near(*b)));
+        // A level piece lying in the hole of the section (between two walls) at a height where both walls run
+        // straight through is either a seam across the bore or something hidden behind the far wall of the bore:
+        // either way nothing is seen there. A corner (a rim of the bore) keeps its line.
+        let in_void_between_straight_walls = |a: Vec2, b: Vec2| -> bool {
+            if (a.y - b.y).abs() > 1e-6 {
+                return false;
+            }
+            let (c, m) = (a.y, (a.x + b.x) / 2.0);
+            let yy = c + 1e-4;
+            let mut xs: Vec<f64> = cut
+                .iter()
+                .filter(|(p, q)| (p.y > yy) != (q.y > yy))
+                .map(|(p, q)| p.x + (yy - p.y) / (q.y - p.y) * (q.x - p.x))
+                .filter(|x| x.is_finite())
+                .collect();
+            xs.sort_by(|p, q| p.total_cmp(q));
+            xs.windows(2).enumerate().any(|(k, w)| match (w.first(), w.get(1)) {
+                (Some(&xl), Some(&xr)) => k % 2 == 1 && xl < m && m < xr && smooth(Vec2::new(xl, c)) && smooth(Vec2::new(xr, c)),
+                _ => false,
+            })
+        };
+        out.retain(|(a, b)| !in_void_between_straight_walls(*a, *b));
         // A circular seam seen edge-on arrives as many short pieces end to end: where such a run, taken whole,
         // starts and ends on the smooth outline (a bore wall either side), all of it is left out.
         for horizontal in [true, false] {
