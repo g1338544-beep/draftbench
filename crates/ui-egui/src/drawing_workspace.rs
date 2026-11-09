@@ -2511,6 +2511,29 @@ fn remove_view(app: &mut SolveApp, i: usize) {
     if i >= app.drawing.placed.len() {
         return;
     }
+    // What was measured or marked on this view goes with it: dimensions, ordinates and centre marks whose
+    // points lie on the view (a little past its edge, for a point on the outline).
+    let on_view = app.drawing.sheet.as_ref().and_then(|sh| sh.boxes.iter().find(|b| b.0 == i).copied());
+    if let Some(b) = on_view {
+        let pad = 3.0;
+        let inside = |q: Pos2| (q.x - b.1).abs() <= b.3 / 2.0 + pad && (q.y - b.2).abs() <= b.4 / 2.0 + pad;
+        let (dims, marks) = (app.drawing.dims.len(), app.drawing.marks.len());
+        app.drawing.dims.retain(|d| !(inside(d.a) && inside(d.b)));
+        app.drawing.marks.retain(|m| !inside(pos2(m[0], m[1])));
+        let ord = &mut app.drawing.ord;
+        let ords = ord.items.len();
+        ord.items.retain(|(q, _, _)| !inside(*q));
+        ord.sel = None;
+        if ord.items.is_empty() {
+            ord.origin = None;
+        }
+        let gone = dims - app.drawing.dims.len() + marks - app.drawing.marks.len() + ords - app.drawing.ord.items.len();
+        app.drawing.sel_hand = None;
+        app.drawing.sel_dim = None;
+        if gone > 0 {
+            app.set_status(format!("Removed the view with its {gone} dimensions and marks"), false);
+        }
+    }
     app.drawing.placed.remove(i);
     app.drawing.centre_cut.clear();
     for v in &mut app.drawing.placed {
