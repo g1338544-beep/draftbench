@@ -643,6 +643,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
     if matches!(d.kind, Kind::Move { mode, .. } if mode == crate::dialogs_move::POINT_TO_POINT) {
         enter |= crate::dialogs_move::point_rows(app, d, ui);
     }
+    if matches!(d.kind, Kind::Move { mode, .. } if mode == crate::dialogs_move::ALIGN_AXIS) {
+        crate::dialogs_move::align_rows(d, ui);
+    }
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));

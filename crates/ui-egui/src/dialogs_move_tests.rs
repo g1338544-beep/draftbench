@@ -99,3 +99,22 @@ fn point_to_point_takes_the_origin_point() {
     let p = params(&h.app, &d).unwrap();
     assert_eq!(p["translate"], json!([mm(-hi.x), mm(-hi.y), mm(-hi.z)]), "the corner goes onto the origin");
 }
+
+/// Align Axis to Vector turns the bodies about the pivot so From lands on To; Rotate may take its own axis point.
+#[test]
+fn align_axis_to_vector_turns_from_onto_to_about_the_pivot() {
+    let (axis, th) = align_turn(Vec3::X, Vec3::Y).expect("two directions");
+    assert!((axis - Vec3::Z).len() < 1e-12 && (th - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    let (axis, th) = align_turn(Vec3::Z, Vec3::new(0.0, 0.0, 5.0)).expect("the same way");
+    assert!(th == 0.0 && (axis - Vec3::Z).len() < 1e-12, "already aligned: no turn");
+    let (axis, th) = align_turn(Vec3::X, Vec3::new(-2.0, 0.0, 0.0)).expect("opposite");
+    assert!((th - std::f64::consts::PI).abs() < 1e-12 && axis.dot(Vec3::X).abs() < 1e-12, "half a turn about a direction across");
+    let r = gizmo::rotation(axis, th);
+    assert!((gizmo::apply(&r, Vec3::X) - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-9);
+    assert!(align_turn(Vec3::ZERO, Vec3::X).is_none(), "a zero vector has no direction");
+    assert_eq!(TYPES[ALIGN_AXIS], "Align Axis to Vector");
+    let d = move_dialog(ALIGN_AXIS);
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Bodies", "Specify From Vector", "Specify Pivot Point", "Specify To Vector"]);
+    assert!(move_dialog(ROTATE).inputs.iter().any(|i| i.label == "Specify Axis Point"));
+    assert!(params(&SolveApp::new(Session::default(), Services::default()), &d).is_err(), "nothing picked: an error, not a panic");
+}

@@ -1,4 +1,4 @@
-//! Move/Copy: the move types (Free Move, Translate, Rotate, Point to Point, Point to Position),
+//! Move/Copy: the move types (Free Move, Translate, Angle, Point to Point, Point to Position, Align Axis to Vector),
 //! their rows and inputs, the triad on the canvas and the solid.move they make. Nothing
 //! moves until a value is typed or the triad is dragged.
 
@@ -12,15 +12,19 @@ use solidcraft_engine::geom::Vec3;
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::gizmo::{self, Change, Drag};
-use crate::selection::{AXES, BODIES, EDGES, FACES, ORIGIN, SelInput, VERTICES};
+use crate::selection::{AXES, BODIES, EDGES, FACES, ORIGIN, PLANAR_FACES, SelInput, VERTICES};
 
-pub const TYPES: [&str; 5] = ["Free Move", "Translate", "Rotate", "Point to Point", "Point to Position"];
+pub const TYPES: [&str; 6] = ["Free Move", "Translate", "Angle", "Point to Point", "Point to Position", "Align Axis to Vector"];
 pub const FREE: usize = 0;
 pub const TRANSLATE: usize = 1;
 pub const ROTATE: usize = 2;
 pub const POINT_TO_POINT: usize = 3;
 pub const POINT_TO_POSITION: usize = 4;
+/// Turn the bodies about a pivot so the vector picked as From points along the vector picked as To.
+pub const ALIGN_AXIS: usize = 5;
 const POINTS: u16 = VERTICES | FACES | EDGES | ORIGIN;
+/// What gives a direction: an axis, a straight edge, or a flat face (its normal).
+const VECTORS: u16 = AXES | EDGES | PLANAR_FACES;
 
 /// A fresh Move dialog of a type (all values zero).
 pub fn kind(mode: usize) -> Kind {
@@ -34,7 +38,16 @@ pub fn inputs(mode: usize) -> Vec<SelInput> {
     let mut v = vec![SelInput::new("Bodies", BODIES, true)];
     match mode {
         FREE => v.push(SelInput::new("Pivot", POINTS, false)),
-        ROTATE => v.push(SelInput::new("Axis", AXES | EDGES, false)),
+        ROTATE => {
+            v.push(SelInput::new("Specify Vector", AXES | EDGES, false));
+            // A point the axis passes through: without one the axis runs where it was picked.
+            v.push(SelInput::new("Specify Axis Point", POINTS, false));
+        }
+        ALIGN_AXIS => {
+            v.push(SelInput::new("Specify From Vector", VECTORS, false));
+            v.push(SelInput::new("Specify Pivot Point", POINTS, false));
+            v.push(SelInput::new("Specify To Vector", VECTORS, false));
+        }
         POINT_TO_POINT => {
             v.push(SelInput::new("From", POINTS, false));
             v.push(SelInput::new("To", POINTS, false));
@@ -206,12 +219,27 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
             }
         }
         ROTATE => {
-            let (o, a) = items(d, 1).first().and_then(|s| axis_line(app, s)).ok_or("select an axis or a straight edge first")?;
+            let (mut o, a) = items(d, 1).first().and_then(|s| axis_line(app, s)).ok_or("select an axis or a straight edge first")?;
+            // The axis may be moved to pass through another point.
+            if let Some(through) = sel_point(app, items(d, 2).first()) {
+                o = through;
+            }
             let th = ang(app, angle)?;
             let r = gizmo::rotation(a, th);
             p["translate"] = num(o - gizmo::apply(&r, o));
             p["axis"] = json!([a.x, a.y, a.z]);
             p["angle"] = json!(angle);
+        }
+        ALIGN_AXIS => {
+            let flip = |key: &str, v: Vec3| if d.extra.get(key).and_then(Value::as_bool).unwrap_or(false) { -v } else { v };
+            let from = items(d, 1).first().and_then(|s| vector_of(app, s)).map(|v| flip("reverse_from", v)).ok_or("select the From vector first (an axis, a straight edge or a flat face)")?;
+            let to = items(d, 3).first().and_then(|s| vector_of(app, s)).map(|v| flip("reverse_to", v)).ok_or("select the To vector first (an axis, a straight edge or a flat face)")?;
+            let piv = sel_point(app, items(d, 2).first()).or_else(|| bodies_center(app, d)).ok_or("select bodies first")?;
+            let (axis, th) = align_turn(from, to).ok_or("the vectors need a direction")?;
+            let r = gizmo::rotation(axis, th);
+            p["translate"] = num(piv - gizmo::apply(&r, piv));
+            p["axis"] = json!([axis.x, axis.y, axis.z]);
+            p["angle"] = json!(deg(th));
         }
         POINT_TO_POINT => {
             let from = point_of(app, d, 1).ok_or("select the point to move from first")?;
@@ -228,6 +256,44 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
         p["copy"] = json!(true);
     }
     Ok(p)
+}
+
+/// The direction a pick stands for: an axis or a straight edge along it, or a flat face's normal.
+fn vector_of(app: &SolveApp, s: &Sel) -> Option<Vec3> {
+    if let Sel::Face { body, index, .. } = s {
+        let (_, n) = crate::dialogs::planar_face(&app.session, body, *index)?;
+        return n.normalized();
+    }
+    axis_line(app, s).map(|(_, dir)| dir)
+}
+
+/// The axis (unit) and angle (radians) of the smallest turn that takes direction `from` onto `to`.
+/// Opposite directions turn half a turn about a direction across them.
+pub(crate) fn align_turn(from: Vec3, to: Vec3) -> Option<(Vec3, f64)> {
+    let (f, t) = (from.normalized()?, to.normalized()?);
+    let k = f.cross(t);
+    let (sin, cos) = (k.len(), f.dot(t));
+    if sin > 1e-12 {
+        return Some((k / sin, sin.atan2(cos)));
+    }
+    if cos > 0.0 {
+        return Some((Vec3::Z, 0.0));
+    }
+    let across = if f.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+    Some((f.cross(across).normalized()?, std::f64::consts::PI))
+}
+
+/// Align Axis to Vector: the switches that turn the From or To vector round.
+pub fn align_rows(d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    let mut changed = false;
+    for (label, key) in [("Reverse From vector", "reverse_from"), ("Reverse To vector", "reverse_to")] {
+        let mut on = d.extra.get(key).and_then(Value::as_bool).unwrap_or(false);
+        if crate::ui_kit::checkbox(ui, label, &mut on).changed() {
+            d.extra.insert(key.into(), json!(on));
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// A From / To point typed in the rows (X, Y, Z from the origin), when there is one.

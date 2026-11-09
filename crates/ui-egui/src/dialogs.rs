@@ -1000,7 +1000,7 @@ impl Dialog {
             // translate, the angle for Rotate. Point to Point is two picks with nothing to type.
             Kind::Move { mode, x, angle, .. } => match *mode {
                 crate::dialogs_move::ROTATE => ("Angle", ValueKind::Angle, angle),
-                crate::dialogs_move::POINT_TO_POINT => return None,
+                crate::dialogs_move::POINT_TO_POINT | crate::dialogs_move::ALIGN_AXIS => return None,
                 _ => ("X", ValueKind::Length, x),
             },
             Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
