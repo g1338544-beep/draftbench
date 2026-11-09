@@ -486,6 +486,11 @@ fn pattern_dir(app: &SolveApp, d: &Dialog) -> Option<Vec2> {
 /// (#2462): the picked second direction, the one an edited pattern was made with, or square to
 /// the first, as the command does.
 pub fn arrow2(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
+    // A move's Y Distance grows along the sketch's own y axis (X has the first arrow).
+    if let Kind::SketchModify(Mod::Move { .. }) = &d.kind {
+        let plane = app.session.world_state().sketch(app.session.active_sketch?)?.plane;
+        return plane.y.normalized();
+    }
     let Kind::SketchModify(Mod::PatternRect { alignment2, reversed2, .. }) = &d.kind else { return None };
     let plane = app.session.world_state().sketch(app.session.active_sketch?)?.plane;
     let dir = match d.inputs.get(2).and_then(|i| i.items.first()) {

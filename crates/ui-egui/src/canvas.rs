@@ -658,6 +658,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if let Some(n2) = pattern_dir2(app, d) {
         let spacing2 = match &mut d.kind {
             Kind::PatternRect { spacing2, .. } | Kind::SketchModify(crate::sketch_modify_ui::Mod::PatternRect { spacing2, .. }) => Some(spacing2),
+            // A sketch move's Y Distance, along the sketch's own y axis.
+            Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { y, .. }) => Some(y),
             _ => None,
         };
         if let Some(spacing2) = spacing2
