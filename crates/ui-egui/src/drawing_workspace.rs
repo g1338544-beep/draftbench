@@ -6913,14 +6913,26 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
                 guides.push([f - u * 400.0, f + u * 400.0]);
                 p = f + u * d.dot(u);
             }
-            // Only the hole the pointer lines up with best: several nearly parallel guides would pile up.
+            // Only the circle the pointer lines up with best: several nearly parallel guides would pile up.
+            // The pointer lands on a line through a centre when that centre is within reach of it (in mm, so it
+            // works far from the first point too); the biggest circle's centre, the middle of the part, also shows
+            // its guide from a wider angle, so the way to the middle is easy to find.
+            let biggest = sheet.rounds().circles.iter().take(400).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(q, _)| *q);
             let mut best: Option<(f32, egui::Vec2)> = None;
             for (q, _) in sheet.rounds().circles.iter().take(400) {
                 let e = *q - f;
                 let el = e.length();
-                let off = (d.x * e.y - d.y * e.x).abs() / (len * el).max(1e-9);
-                if el > tol && off <= 0.026 && d.dot(e) > 0.0 && best.is_none_or(|(b, _)| off < b) {
+                let off = (d.x * e.y - d.y * e.x).abs() / len.max(1e-9);
+                if el > tol && off <= tol * 0.5 && d.dot(e) > 0.0 && best.is_none_or(|(b, _)| off < b) {
                     best = Some((off, e / el));
+                }
+            }
+            if let Some(q) = biggest {
+                let e = q - f;
+                let el = e.length();
+                let ang = (d.x * e.y - d.y * e.x).abs() / (len * el).max(1e-9);
+                if el > tol && ang <= 0.1 && d.dot(e) > 0.0 && best.is_none_or(|(_, u)| (u.x * e.y - u.y * e.x).abs() / el > 1e-3) {
+                    guides.push([f - e / el * 400.0, f + e / el * 400.0]);
                 }
             }
             if let Some((_, u)) = best {
@@ -7724,6 +7736,23 @@ mod hand_drawn_tests {
         let past = free_spot_on(&sheet(vec![parent, blocker]), pos2(220.0, 200.0), size, Some((true, 200.0)));
         assert_eq!(past.y, 200.0);
         assert!(past.x >= 287.0, "past the other view, not on top of it");
+    }
+
+    /// An angled cutting line lands on the line through the middle of the part when the pointer is near it,
+    /// and shows that guide from a wider angle.
+    #[test]
+    fn an_angled_cut_finds_the_middle_of_the_part() {
+        let items = vec![(Layer::Visible, Shape::Circle(pos2(100.0, 100.0), 50.0)), (Layer::Visible, Shape::Circle(pos2(100.0, 100.0), 10.0)), (Layer::Visible, Shape::Circle(pos2(140.0, 60.0), 4.0))];
+        let sheet = Sheet { width: 420.0, height: 297.0, note: String::new(), items, boxes: Vec::new(), scales: Vec::new(), centres: Vec::new(), rounds: std::sync::OnceLock::new() };
+        let first = pos2(40.0, 40.0);
+        // The middle lies 45 degrees from the first point; the pointer is a hair off that line, far beyond the middle.
+        let (p, guides) = section_snap(&sheet, pos2(171.0, 170.0), Some(first), 3.0);
+        assert!(((p.x - first.x) - (p.y - first.y)).abs() < 1e-3, "the point is on the line through the middle: {p:?}");
+        assert!(!guides.is_empty());
+        // A wide miss only shows the guide, it does not move the point.
+        let (q, g) = section_snap(&sheet, pos2(160.0, 200.0), Some(first), 3.0);
+        assert!((q.x - 160.0).abs() < 1e-3 && (q.y - 200.0).abs() < 1e-3, "{q:?}");
+        let _ = g;
     }
 
     /// A click takes the hand-drawn line or circle under it, and Delete removes just that one.
