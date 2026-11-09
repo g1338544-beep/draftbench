@@ -6659,6 +6659,10 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
             }
         }
     }
+    // Where lines and circles cross: the cutting line's point lands exactly on the crossing.
+    if let Some(q) = intersection_near(sheet, p, tol * 0.5) {
+        p = q;
+    }
     (p, guides)
 }
 
@@ -6739,6 +6743,87 @@ fn free_spot(sheet: &Sheet, prefer: Pos2, size: (f32, f32)) -> Pos2 {
 }
 
 /// The nearest drawn corner, end, centre or circle quadrant within `tol` mm of `p`.
+/// Where the lines and circles of the sheet cross near `p`: the crossing nearest to it within `tol`.
+fn intersection_near(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
+    let reach = tol * 4.0;
+    let mut segs: Vec<(Pos2, Pos2)> = Vec::new();
+    let mut rings: Vec<(Pos2, f32)> = Vec::new();
+    for (layer, shape) in &sheet.items {
+        if matches!(layer, Layer::Text | Layer::Dim) {
+            continue;
+        }
+        match shape {
+            Shape::Line(a, b) => {
+                if dist_to_segment(p, (*a, *b)) <= reach {
+                    segs.push((*a, *b));
+                }
+            }
+            Shape::Poly(points) => {
+                for w in points.windows(2) {
+                    if let (Some(a), Some(b)) = (w.first(), w.get(1))
+                        && dist_to_segment(p, (*a, *b)) <= reach
+                    {
+                        segs.push((*a, *b));
+                    }
+                }
+            }
+            Shape::Circle(c, r) | Shape::Arc(c, r, _, _) => {
+                if ((p - *c).length() - *r).abs() <= reach {
+                    rings.push((*c, *r));
+                }
+            }
+            Shape::Text(..) => {}
+        }
+        if segs.len() >= 80 && rings.len() >= 20 {
+            break;
+        }
+    }
+    segs.truncate(80);
+    rings.truncate(20);
+    let mut best: Option<(f32, Pos2)> = None;
+    let mut offer = |q: Pos2| {
+        let d = (q - p).length();
+        if q.x.is_finite() && q.y.is_finite() && d <= tol && best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, q));
+        }
+    };
+    for (i, (a, b)) in segs.iter().enumerate() {
+        let r = *b - *a;
+        for (c, d) in segs.iter().skip(i + 1) {
+            let s2 = *d - *c;
+            let den = r.x * s2.y - r.y * s2.x;
+            if den.abs() < 1e-9 {
+                continue;
+            }
+            let ca = *c - *a;
+            let t = (ca.x * s2.y - ca.y * s2.x) / den;
+            let u = (ca.x * r.y - ca.y * r.x) / den;
+            if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+                offer(*a + r * t);
+            }
+        }
+        for (c, rad) in &rings {
+            // |a + r t - c|^2 = rad^2
+            let f = *a - *c;
+            let (qa, qb, qc) = (r.x * r.x + r.y * r.y, 2.0 * (f.x * r.x + f.y * r.y), f.x * f.x + f.y * f.y - rad * rad);
+            if qa < 1e-12 {
+                continue;
+            }
+            let disc = qb * qb - 4.0 * qa * qc;
+            if disc < 0.0 {
+                continue;
+            }
+            let root = disc.sqrt();
+            for t in [(-qb - root) / (2.0 * qa), (-qb + root) / (2.0 * qa)] {
+                if (0.0..=1.0).contains(&t) {
+                    offer(*a + r * t);
+                }
+            }
+        }
+    }
+    best.map(|(_, q)| q)
+}
+
 fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
     let mut best: Option<(f32, Pos2)> = None;
     let mut offer = |q: Pos2| {
@@ -6784,6 +6869,9 @@ fn snap_point(sheet: &Sheet, p: Pos2, tol: f32) -> Option<Pos2> {
             Shape::Arc(c, _, _, _) => offer(*c),
             Shape::Text(..) => {}
         }
+    }
+    if let Some(q) = intersection_near(sheet, p, tol) {
+        offer(q);
     }
     // Pointing into a hole (not only at its centre) takes the hole's centre, as long as no
     // corner or end point is nearer.
