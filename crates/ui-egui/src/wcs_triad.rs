@@ -121,7 +121,8 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
             ui.ctx().request_repaint();
             if pressed && !over_handle {
                 if let Some((dir, _)) = target {
-                    let _ = app.run("wcs.set", json!({"align": {"axis": ["x", "y", "z"].get(k).copied().unwrap_or("z"), "dir": [dir.x, dir.y, dir.z]}}));
+                    let axis = ["x", "y", "z"].get(k).copied().unwrap_or("z");
+                    let _ = app.run("wcs.set", json!({"align": {"axis": axis, "dir": [dir.x, dir.y, dir.z]}}));
                 }
                 ARMED.with(|a| a.set(None));
                 PREVIEW.with(|p| p.set(None));
