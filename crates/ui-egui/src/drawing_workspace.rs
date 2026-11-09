@@ -1244,6 +1244,11 @@ fn add_shaded_view(app: &mut SolveApp) {
 
 /// Show another sheet of the drawing.
 fn switch_page(app: &mut SolveApp, to: usize) {
+    switch_page_with(app, to, false);
+}
+
+/// Show another sheet; with `fresh` a sheet not made yet is made from the bodies shown in 3D now.
+fn switch_page_with(app: &mut SolveApp, to: usize, fresh: bool) {
     let st = &mut app.drawing;
     st.pages = st.all_pages();
     let Some(next) = st.pages.get(to).cloned() else { return };
@@ -1270,7 +1275,7 @@ fn switch_page(app: &mut SolveApp, to: usize) {
         fit(app);
         return;
     }
-    begin_keep(app, true);
+    begin_keep(app, !fresh);
 }
 
 /// Add a blank sheet after the last one and switch to it.
@@ -1282,7 +1287,7 @@ fn add_page(app: &mut SolveApp) {
     st.pages = st.all_pages();
     let n = st.pages.len() + 1;
     st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": [], "flines": [], "texts": [], "paper": st.paper, "landscape": st.landscape, "block_detail": true, "block_free": false, "block_w": "190"}));
-    switch_page(app, n - 1);
+    switch_page_with(app, n - 1, true);
 }
 
 /// A copy of the sheet on screen, right after it: its views, dimensions, title block and texts, to carry on from.
