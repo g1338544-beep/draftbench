@@ -1931,8 +1931,28 @@ fn finish(
     Ok(Built { sheet: (sheet_w, sheet_h), layers, entities, summary, path })
 }
 
+/// The Show lines switches (`layers_off`: visible, hidden, centre, dimensions, text) leave those
+/// lines out of the exported file, as they leave them off the sheet on screen. The on-screen
+/// preview keeps every entity so the lines can be switched back on.
+fn apply_layers_off(p: &Value, entities: &mut Vec<DxfEntity>) {
+    let off: Vec<bool> = p.get("layers_off").and_then(Value::as_array).map(|a| a.iter().take(5).map(|v| v.as_bool().unwrap_or(false)).collect()).unwrap_or_default();
+    if !off.iter().any(|o| *o) {
+        return;
+    }
+    let hidden = |i: usize| off.get(i).copied().unwrap_or(false);
+    entities.retain(|e| match e.layer.as_str() {
+        "VISIBLE" => !hidden(0),
+        "HIDDEN" => !hidden(1),
+        "CENTER" => !hidden(2),
+        "DIM" => !hidden(3),
+        "TEXT" => !hidden(4),
+        _ => true,
+    });
+}
+
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
-    let b = build(s, p)?;
+    let mut b = build(s, p)?;
+    apply_layers_off(p, &mut b.entities);
     let dxf = solidcraft_io::write_dxf_r12(&b.layers, &b.entities);
     let mut result = b.summary;
     if let Some(path) = b.path {

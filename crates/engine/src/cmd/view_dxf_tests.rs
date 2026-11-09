@@ -280,3 +280,16 @@ fn a_section_through_a_hole_keeps_the_top_and_bottom_lines_across_it() {
         assert!(across > 5.9, "the line across the hole at the {} is drawn ({across} of 6 mm): {runs:?}", if top { "top" } else { "bottom" });
     }
 }
+
+/// The Show lines switches leave the lines out of the exported file but not out of the preview.
+#[test]
+fn layers_off_leaves_lines_out_of_the_export_only() {
+    let mut s = sample();
+    let c = camera(StandardView::Top);
+    let layers = |r: &Value| r["dxf"].as_str().unwrap_or_default().matches("VISIBLE").count();
+    let all = run(&mut s, CMD, json!({"camera": c, "hidden": "omit"}));
+    let off = run(&mut s, CMD, json!({"camera": c, "hidden": "omit", "layers_off": [true, false, false, false, false]}));
+    assert!(layers(&off) < layers(&all), "visible lines are left out of the file");
+    let preview = run(&mut s, "drawing.sheet", json!({"camera": c, "hidden": "omit", "layers_off": [true, false, false, false, false]}));
+    assert!(preview.to_string().contains("\"visible\""), "the preview still holds them");
+}
