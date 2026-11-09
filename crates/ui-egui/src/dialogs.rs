@@ -4099,7 +4099,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "the target body")?;
             need(1, "tool bodies")?;
             let target = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
-            let tools: Vec<String> = sels(d, 1).body_names().into_iter().filter(|n| *n != target).collect();
+            let mut tools: Vec<String> = Vec::new();
+            for n in sels(d, 1).body_names() {
+                if n != target && !tools.contains(&n) {
+                    tools.push(n);
+                }
+            }
+            // Every pick was the target itself (clicking another part of it counts as it): say so, rather
+            // than let the command report an empty list.
+            if tools.is_empty() {
+                return Err(format!("the tool bodies are all {target}, the target itself: pick a different body to combine it with"));
+            }
             if d.extra.get("cavity").and_then(Value::as_bool).unwrap_or(false) {
                 ("solid.cavity", json!({"target": target, "tools": tools, "keep_tools": keep_tools}))
             } else {
