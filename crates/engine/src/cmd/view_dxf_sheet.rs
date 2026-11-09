@@ -256,6 +256,10 @@ fn manual_once(
             match n[..] {
                 // Reversing the line turns the arrows, and the way the section looks, the other way round.
                 [x1, y1, x2, y2] if n.iter().all(|v| v.is_finite() && v.abs() < 1e5) && ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt() > 1e-6 => {
+                    // However it was drawn, a line starts as read left to right (or, nearly upright, bottom to
+                    // top), so the first cut always looks the usual way; turning it round is the user's choice.
+                    let drawn_back = if (x2 - x1).abs() >= (y2 - y1).abs() { x2 < x1 } else { y2 < y1 };
+                    let (x1, y1, x2, y2) = if drawn_back { (x2, y2, x1, y1) } else { (x1, y1, x2, y2) };
                     Some(if flip { [x2, y2, x1, y1] } else { [x1, y1, x2, y2] })
                 }
                 _ => None,
@@ -269,6 +273,13 @@ fn manual_once(
                 return None;
             }
             let mut pts: Vec<Vec2> = n.chunks_exact(2).filter_map(|c| if let [x, y] = c { Some(Vec2::new(*x, *y)) } else { None }).collect();
+            // Read the usual way whichever end it was drawn from (see the straight line above).
+            if let (Some(f), Some(l)) = (pts.first().copied(), pts.last().copied()) {
+                let drawn_back = if (l.x - f.x).abs() >= (l.y - f.y).abs() { l.x < f.x } else { l.y < f.y };
+                if drawn_back {
+                    pts.reverse();
+                }
+            }
             if flip {
                 pts.reverse();
             }
