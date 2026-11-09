@@ -1219,7 +1219,7 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                     continue;
                 }
                 let (pa, pb) = (Vec2::new(a.dot(right), a.dot(up)), Vec2::new(b.dot(right), b.dot(up)));
-                if (pa.x - pb.x).hypot(pa.y - pb.y) < 1e-6 || inside(Vec2::new((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0)) {
+                if (pa.x - pb.x).hypot(pa.y - pb.y) < 1e-6 || inside(Vec2::new((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0 + 1e-4)) {
                     continue;
                 }
                 out.push((pa, pb));
@@ -1273,7 +1273,22 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                 _ => false,
             }
         };
-        out.retain(|(a, b)| !(smooth(*a) && smooth(*b)));
+        // The end of a seam drawn from a circle's polyline sits near the wall, not exactly on it: look at the
+        // nearest point of the outline within a little over half a millimetre.
+        let smooth_near = |p: Vec2| -> bool {
+            let mut best: Option<(f64, Vec2)> = None;
+            for (a, b) in cut {
+                let (d, l2) = (Vec2::new(b.x - a.x, b.y - a.y), (b.x - a.x).powi(2) + (b.y - a.y).powi(2));
+                let t = if l2 > 1e-12 { (((p.x - a.x) * d.x + (p.y - a.y) * d.y) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                let q = Vec2::new(a.x + d.x * t, a.y + d.y * t);
+                let dist = q.dist(p);
+                if dist <= 0.6 && best.is_none_or(|(bd, _)| dist < bd) {
+                    best = Some((dist, q));
+                }
+            }
+            best.is_some_and(|(_, q)| smooth(q))
+        };
+        out.retain(|(a, b)| !(smooth_near(*a) && smooth_near(*b)));
         // A circular seam seen edge-on arrives as many short pieces end to end: where such a run, taken whole,
         // starts and ends on the smooth outline (a bore wall either side), all of it is left out.
         for horizontal in [true, false] {
@@ -1291,8 +1306,8 @@ fn behind_edges(scene: &meshes::Scene, (yaw, pitch): (f64, f64), normal: Vec3, o
                 }
                 ends.sort_by(|p, q| along(*p).total_cmp(&along(*q)));
                 if let (Some(lo), Some(hi)) = (ends.first(), ends.last())
-                    && smooth(*lo)
-                    && smooth(*hi)
+                    && smooth_near(*lo)
+                    && smooth_near(*hi)
                 {
                     out.retain(|(a, b)| !on(*a, *b));
                 }
