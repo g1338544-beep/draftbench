@@ -34,7 +34,12 @@ jobs:
       - name: Install trunk
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -sSL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.local/bin"
+          # The download sometimes comes back as an error page: try again, and only unpack a real archive.
+          for try in 1 2 3 4 5 6; do
+            curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/trunk.tar.gz && tar -xzf /tmp/trunk.tar.gz -C "$HOME/.local/bin" && break
+            echo "trunk download failed (try $try), waiting"; sleep $((try * 15))
+          done
+          test -x "$HOME/.local/bin/trunk"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build the web app
         working-directory: apps/solidcraft-web
