@@ -1189,8 +1189,7 @@ fn shaded_picture_now(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
         2 => scene.meshes.clear(),
         _ => {}
     }
-    let pw = ((v.w * 5.0) as usize).clamp(160, 1600);
-    let ph = ((pw as f32 * v.ratio.clamp(0.2, 3.0)) as usize).clamp(80, 2400);
+    let (pw, ph) = picture_size(v.w, v.ratio);
     let white = solidcraft_engine::render::Rgb(255, 255, 255);
     let canvas = match v.bg {
         2 => solidcraft_engine::render::render_transparent(&mut scene, &cam, pw, ph),
@@ -1207,6 +1206,26 @@ fn shaded_picture_now(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
     }
     app.drawing.shaded_cache.push((key, picture.clone(), None));
     Some(picture)
+}
+
+/// The pixel size of a view's colour picture: about 5 px per mm of its width, in the shape of the view. A
+/// long thin view (a section of a plate) keeps its shape: squeezing it toward a squarer picture would show
+/// the camera a narrower window than the view, and the colour would fill the whole frame.
+fn picture_size(w: f32, ratio: f32) -> (usize, usize) {
+    let ratio = if ratio.is_finite() { ratio.clamp(0.005, 200.0) } else { 0.75 };
+    let pw = (w.max(0.0) * 5.0).clamp(160.0, 1600.0);
+    let ph = pw * ratio;
+    let mut k = 1.0f32;
+    if ph < 64.0 {
+        k = 64.0 / ph;
+    }
+    if ph * k > 2400.0 {
+        k = 2400.0 / ph;
+    }
+    if pw * k > 2400.0 {
+        k = 2400.0 / pw;
+    }
+    (((pw * k).round() as usize).max(8), ((ph * k).round() as usize).max(8))
 }
 
 /// The camera angles of a placed view.
@@ -8024,5 +8043,20 @@ mod hand_drawn_tests {
         assert!(d.sel_hand.is_none());
         delete_hand(d, true, 9);
         assert_eq!(d.vcurves.len(), 1, "a place that is gone changes nothing");
+    }
+}
+
+#[cfg(test)]
+mod picture_size_tests {
+    use super::picture_size;
+
+    #[test]
+    fn a_long_thin_view_keeps_its_shape() {
+        let (w, h) = picture_size(230.0, 0.045);
+        assert!((w as f32 / h as f32 - 1.0 / 0.045).abs() < 1.0, "{w}x{h}");
+        let (w, h) = picture_size(50.0, 0.75);
+        assert_eq!((w, h), (250, 188));
+        let (w, h) = picture_size(f32::NAN, f32::NAN);
+        assert!(w >= 8 && h >= 8 && w <= 2400 && h <= 2400);
     }
 }
