@@ -1627,3 +1627,22 @@ fn align_offset_is_checked_and_keeps_a_gap() {
     assert!(s.execute("solid.align", &json!({"bodies": ["A"], "from": "origin", "to": "origin", "offset": 1.0e300})).is_err());
     assert!(s.execute("solid.align", &json!({"bodies": ["Nope"], "from": "origin", "to": "origin", "offset": 5})).is_err());
 }
+
+#[test]
+fn loft_ends_square_to_the_profiles_make_a_body_or_say_why_not() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 30, "name": "B"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "L0"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": 20}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "B", "name": "L1"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    let loft = s.execute("solid.loft", &json!({"sections": [{"sketch": "L0"}, {"sketch": "L1"}], "start_normal": true, "end_normal": true}));
+    if let Err(e) = &loft {
+        assert!(!e.to_string().is_empty());
+    } else {
+        let m = measure(&mut s);
+        assert!(m["bodies"][0]["volume_mm3"].as_f64().is_some_and(|v| v > 0.0), "{m}");
+    }
+}

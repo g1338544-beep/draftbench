@@ -3572,6 +3572,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let sections: Vec<Value> = sections.into_iter().map(|(sk, v)| json!({"sketch": sk, "profiles": v})).collect();
             let mut p = json!({"sections": sections, "operation": OPS.get(*operation).copied().unwrap_or("new")});
             crate::dialogs_sweep::rail_params(app, *rail_fit, [sels(d, 1), sels(d, 2)], &mut p)?;
+            for key in ["start_normal", "end_normal"] {
+                if d.extra.get(key).and_then(Value::as_bool).unwrap_or(false) {
+                    p[key] = json!(true);
+                }
+            }
             ("solid.loft", p)
         }
         Kind::Sweep { operation, opts } => {
@@ -5006,8 +5011,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Loft { sections, operation, targets, rails, rail_fit } => {
+        FeatureKind::Loft { sections, operation, targets, rails, rail_fit, start_normal, end_normal } => {
             let mut d = start("solid.loft")?;
+            for (key, on) in [("start_normal", start_normal), ("end_normal", end_normal)] {
+                if *on {
+                    d.extra.insert(key.into(), json!(true));
+                }
+            }
             d.kind = Kind::Loft { operation: op_index(operation), rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) };
             for (inp, items) in d.inputs.iter_mut().skip(1).zip(crate::dialogs_sweep::rail_sels(rails)) {
                 inp.items = items;

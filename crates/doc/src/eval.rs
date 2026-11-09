@@ -4353,7 +4353,7 @@ fn feature_tools_with_constructor(
             };
             Ok(unnamed(vec![kernel::sweep_helix_with(&plane, &region, *base, axis, tight.abs().min(pitch.abs()), &lift, n + 2.0 * ends)?]))
         }
-        FeatureKind::Loft { sections, rails, rail_fit, .. } => {
+        FeatureKind::Loft { sections, rails, rail_fit, start_normal, end_normal, .. } => {
             let mut secs = Vec::new();
             let mut sketches = Vec::new();
             for sec in sections {
@@ -4368,7 +4368,16 @@ fn feature_tools_with_constructor(
             // Its caps are the first and last sections, its sides named by the curves they run
             // between.
             let body = if rails.is_empty() {
-                kernel::loft_regions(&secs)?
+                // Square to the end profiles: a copy of each end section a little way inwards makes the
+                // smooth surface leave and arrive along the profile's normal.
+                let mut shaped = secs.clone();
+                if *end_normal {
+                    add_end_guide(&mut shaped, true);
+                }
+                if *start_normal {
+                    add_end_guide(&mut shaped, false);
+                }
+                kernel::loft_regions(&shaped)?
             } else {
                 // Rails shape the sections' outlines; sections with holes wait for rails that
                 // carry the holes too.
@@ -4507,7 +4516,27 @@ pub(crate) fn kernel_rail_fit(fit: crate::RailFit) -> kernel::RailFit {
 
 /// A sweep's or a loft's guide rails as polylines in the feature's frame, each a chain of its sketch's curves
 /// (planar or 3D) from the end nearest `start` (the start of the path, the loft's first section).
-pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::SweepRail], consumer: u64, start: Vec3) -> Result<Vec<Vec<Vec3>>> {
+pub(crate) /// Add a copy of the first (or, with `last`, the last) section of a loft a fifth of the way toward its
+/// neighbour, measured along the section's normal, so a surface through them all meets the end square on.
+fn add_end_guide(secs: &mut Vec<(Plane, Region2)>, last: bool) {
+    let n = secs.len();
+    if n < 2 {
+        return;
+    }
+    let (end, next) = if last { (n - 1, n - 2) } else { (0, 1) };
+    let (Some((plane, region)), Some((other, _))) = (secs.get(end).cloned(), secs.get(next)) else { return };
+    let normal: Vec3 = plane.normal().into();
+    let along = (other.origin - plane.origin).dot(normal);
+    if !along.is_finite() || along.abs() < 1e-6 {
+        return;
+    }
+    let mut moved = plane.clone();
+    moved.origin = plane.origin + normal * (along * 0.2);
+    let at = if last { n - 1 } else { 1 };
+    secs.insert(at, (moved, region));
+}
+
+fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::SweepRail], consumer: u64, start: Vec3) -> Result<Vec<Vec<Vec3>>> {
     if rails.len() > 2 {
         return Err(DocError::Invalid("a sweep or a loft takes one or two guide rails".into()));
     }

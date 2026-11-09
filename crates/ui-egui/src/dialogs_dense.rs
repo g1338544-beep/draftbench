@@ -931,6 +931,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Loft { operation, rail_fit } => {
             choice_row(ui, "Operation", "lf_op", operation, &OP_LABELS);
             crate::dialogs_sweep::rail_fit_row(ui, "lf", rail_fit);
+            // Start / End: how the solid meets the first and last profile (not with guide curves).
+            let railed = d.inputs.get(1).is_some_and(|i| !i.items.is_empty());
+            if !railed {
+                extra_options(ui, "loft_ends", &mut d.extra, &[("Start: leave square to the first profile", "start_normal"), ("End: arrive square to the last profile", "end_normal")]);
+            }
         }
         Kind::Sweep { operation, opts } => {
             enter |= crate::dialogs_sweep::rows_with(ui, opts, "sw", |ui| {

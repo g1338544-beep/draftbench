@@ -750,6 +750,12 @@ pub enum FeatureKind {
         /// How the rails reshape the sections between.
         #[serde(default, skip_serializing_if = "RailFit::is_scale")]
         rail_fit: RailFit,
+        /// The solid leaves the first profile square to its plane (instead of heading straight for the next).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        start_normal: bool,
+        /// The solid arrives at the last profile square to its plane.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        end_normal: bool,
     },
     /// Sweep profiles along a chain of sketch curves.
     Sweep {
