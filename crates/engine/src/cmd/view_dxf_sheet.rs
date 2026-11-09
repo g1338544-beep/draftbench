@@ -2520,12 +2520,19 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
         }
     }
     line("DIM", p1, p2, entities);
-    // Arrowheads pointing at the extension lines.
+    // Arrowheads pointing at the extension lines. Too close together for two heads between the lines
+    // (they would run into each other), they go outside, pointing in, on a short extension of the line.
     let side = Vec2::new(-dir.y, dir.x);
-    for (tip, sign) in [(p1, 1.0), (p2, -1.0)] {
+    let tight = (p2.x - p1.x).hypot(p2.y - p1.y) < 2.2 * arrow;
+    let (s1, s2) = if tight { (-1.0, 1.0) } else { (1.0, -1.0) };
+    for (tip, sign) in [(p1, s1), (p2, s2)] {
         for k in [-1.0, 1.0] {
             let back = Vec2::new(tip.x + dir.x * arrow * sign + side.x * arrow * 0.3 * k, tip.y + dir.y * arrow * sign + side.y * arrow * 0.3 * k);
             line("DIM", tip, back, entities);
+        }
+        if tight {
+            let tail = Vec2::new(tip.x + dir.x * (arrow + 2.0) * sign, tip.y + dir.y * (arrow + 2.0) * sign);
+            line("DIM", tip, tail, entities);
         }
     }
     // The value above the line (rotated along it, kept readable).
@@ -2563,4 +2570,26 @@ fn dim_value(v: f64, decimals: Option<usize>) -> String {
 fn trim_mm(v: f64) -> String {
     let r = (v * 10.0).round() / 10.0;
     if (r - r.round()).abs() < 1e-9 { format!("{}", r.round() as i64) } else { format!("{r:.1}") }
+}
+
+#[cfg(test)]
+mod dimension_arrow_tests {
+    use super::*;
+
+    /// The leftmost x of the dimension's lines for a horizontal dimension from x = 0 to `to`.
+    fn leftmost(to: f64) -> f64 {
+        let mut entities = Vec::new();
+        let d = json!({"kind": "horizontal", "a": [0.0, 0.0], "b": [to, 0.0], "at": -10.0});
+        add_dimension(&mut entities, &d, &[], 3.5, 3.0, None);
+        entities
+            .iter()
+            .filter_map(|e| if let DxfShape::Line(a, b) = &e.shape { Some(a.x.min(b.x)) } else { None })
+            .fold(f64::MAX, f64::min)
+    }
+
+    #[test]
+    fn a_narrow_dimension_puts_its_arrows_outside_and_a_wide_one_keeps_them_inside() {
+        assert!(leftmost(5.0) < -4.0, "two 3 mm arrows do not fit in 5 mm: they go outside");
+        assert!(leftmost(40.0) > -1e-9, "plenty of room: the arrows stay between the extension lines");
+    }
 }
