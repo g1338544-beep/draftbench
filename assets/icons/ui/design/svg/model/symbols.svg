@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Symbols</title>
+  <path d="M14 10L50 10A4 4 0 0 1 54 14L54 50A4 4 0 0 1 50 54L14 54A4 4 0 0 1 10 50L10 14A4 4 0 0 1 14 10Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17 32L26 48L44 18L54 18" fill="none" stroke="#ffffff" stroke-width="7.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17 32L26 48L44 18L54 18" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14 56L40 56" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

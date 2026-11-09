@@ -22,6 +22,7 @@ macro_rules! planned {
 
 mod bom;
 mod browser;
+pub mod drawing_symbols;
 mod layers;
 pub(crate) mod clearance;
 mod clipboard;

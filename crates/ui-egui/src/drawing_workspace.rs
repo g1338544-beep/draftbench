@@ -10,6 +10,9 @@ use solidcraft_engine::render::Camera;
 
 use crate::{SolveApp, theme::Tokens};
 
+#[path = "drawing_symbols_ui.rs"]
+mod symbols_ui;
+
 const PAPERS: [&str; 5] = ["A0", "A1", "A2", "A3", "A4"];
 const SIZES: [(f32, f32); 5] = [(1189.0, 841.0), (841.0, 594.0), (594.0, 420.0), (420.0, 297.0), (297.0, 210.0)];
 /// AutoCAD colour numbers offered for lines, with how they look on the white sheet.
@@ -323,6 +326,8 @@ pub struct State {
     sel_grid: Option<u8>,
     /// Texts placed anywhere on the sheet, the one picked, the one being dragged (index, pointer at start, x, y), and the one in the text window.
     texts: Vec<FreeText>,
+    /// Symbols from the Symbols window: surface finish, welding, tolerance frames, mechanical signs.
+    sym: symbols_ui::SymState,
     ft_sel: Option<usize>,
     ft_drag: Option<(usize, Pos2, f32, f32)>,
     ft_edit: Option<usize>,
@@ -536,6 +541,7 @@ impl Default for State {
             cell_edit: None,
             sel_grid: None,
             texts: Vec::new(),
+            sym: symbols_ui::SymState::default(),
             ft_sel: None,
             ft_drag: None,
             ft_edit: None,
@@ -664,7 +670,7 @@ impl State {
             "dim_decimals": self.dim_decimals,
             "dim_text": self.dim_text, "dim_arrow": self.dim_arrow,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch, v.ratio, v.bg, v.style, v.zoom])).collect::<Vec<_>>(),
-            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "flines": self.flines, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
+            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "flines": self.flines, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(), "symbols": self.sym.to_json(),
             "paper": self.paper, "landscape": self.landscape,
             "block_detail": self.block_detail, "block_free": self.block_free, "block_w": self.block_w,
             "material": self.material, "qty": self.qty, "finishing": self.finishing, "heat": self.heat,
@@ -1113,6 +1119,7 @@ impl State {
             })
             .unwrap_or_default();
         self.ft_sel = None;
+        self.sym.load(d.get("symbols").and_then(serde_json::Value::as_array));
         if let Some(n) = d.get("paper").and_then(serde_json::Value::as_u64).filter(|n| *n <= 5) {
             self.paper = n as usize;
         }
@@ -1350,7 +1357,7 @@ fn add_page(app: &mut SolveApp) {
     }
     st.pages = st.all_pages();
     let n = st.pages.len() + 1;
-    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": [], "flines": [], "texts": [], "paper": st.paper, "landscape": st.landscape, "block_detail": true, "block_free": false, "block_w": "190"}));
+    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": [], "flines": [], "texts": [], "symbols": [], "paper": st.paper, "landscape": st.landscape, "block_detail": true, "block_free": false, "block_w": "190"}));
     switch_page_with(app, n - 1, true);
 }
 
@@ -1505,6 +1512,7 @@ fn params(st: &State) -> Value {
         "centre_extra": st.centre_extra.trim().parse::<f64>().ok().filter(|h| h.is_finite() && (0.0..=50.0).contains(h)).unwrap_or(3.0),
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
         "block_cells": st.cells,
+        "symbols": st.sym.to_json(),
         "free_texts": st.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
         "marks": st.marks,
         "clines": st.clines,
@@ -2548,6 +2556,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                 }
             }
         }
+        "drawing.ribbon.symbols" => app.drawing.sym.open = !app.drawing.sym.open,
         "drawing.ribbon.scale" => app.drawing.scale_edit = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()),
         "drawing.ribbon.delete" => {
             if let Some(i) = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()) {
@@ -4421,6 +4430,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let orig = app.drawing.placed.get(v).map_or([0.0; 4], |p| p.letter_off);
             app.drawing.letter_drag = Some((v, k, s, orig));
             app.drawing.selected = None;
+        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.sym.armed.is_none())
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(s) = pointer
+            && let Some(d) = app.drawing.sym.start_drag(s)
+        {
+            // A symbol from the Symbols window: drag it, or turn it by its round handle.
+            app.drawing.sym.drag = Some(d);
+            app.drawing.selected = None;
+            app.drawing.ft_sel = None;
         } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
@@ -4586,6 +4604,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if response.drag_stopped() || !response.dragged() {
             app.drawing.fl_drag = None;
+            refresh(app);
+        }
+    }
+    // Dragging a symbol: it follows the pointer (or turns with the handle) and letting go keeps it.
+    if let (Some(d), Some(m)) = (app.drawing.sym.drag, &map) {
+        if let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)) {
+            let free = ui.input(|i| i.modifiers.alt);
+            app.drawing.sym.drag_to(d, s, free);
+        }
+        if response.drag_stopped() || !response.dragged() {
+            app.drawing.sym.drag = None;
             refresh(app);
         }
     }
@@ -4878,6 +4907,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     free_text_window(app, ui);
+    {
+        let at = response.interact_pointer_pos().or(response.hover_pos()).and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q)));
+        let size = app.drawing.sheet.as_ref().map_or((0.0, 0.0), |s| (s.width, s.height));
+        let changed = symbols_ui::sheet_input(app, ui, &response, at, size);
+        symbols_ui::after(app, changed);
+    }
     if let Some(i) = app.drawing.cell_edit {
         let mut changed = false;
         let mut reset = false;
@@ -5511,7 +5546,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.letter_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.letter_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() && app.drawing.sym.drag.is_none() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -5519,6 +5554,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     orient_window(app, ui.ctx());
     setup_window(app, ui.ctx());
     base_window(app, ui.ctx());
+    if let Some((index, q)) = symbols_ui::palette(app, ui.ctx())
+        && let Some(m) = sheet_map(app, rect, extent)
+        && let Some(p) = m.to_sheet(q)
+        && app.drawing.sheet.as_ref().is_some_and(|s| p.x >= 0.0 && p.y >= 0.0 && p.x <= s.width && p.y <= s.height)
+        && app.drawing.sym.place(index, p)
+    {
+        refresh(app);
+    }
+    let symbol_changed = symbols_ui::editor(app, ui.ctx());
+    symbols_ui::after(app, symbol_changed);
     dimension_window(app, ui.ctx());
     let Some(sheet) = app.drawing.sheet.as_ref() else {
         let msg = match (&app.drawing.error, app.drawing.placed.is_empty()) {
@@ -6583,6 +6628,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             painter.circle(map(q), 4.0, Color32::WHITE, Stroke::new(2.0, accent));
         }
     }
+    symbols_ui::paint_selection(app, &painter, &map, px_per_mm);
+    symbols_ui::paint_armed(app, &painter, response.hover_pos(), px_per_mm);
     if let Some(i) = app.drawing.ft_sel
         && let Some(t) = app.drawing.texts.get(i)
     {
@@ -7508,7 +7555,7 @@ fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4], user_cols: &[LineCol]) -> (St
 
 /// A PDF with one page per `(content, width, height)` (points).
 /// One PDF page: its drawing commands (in mm), its size in points and the colour pictures on it
-/// (RGB, with the x, y, width and height of each in mm).
+/// (RGBA, with the x, y, width and height of each in mm).
 struct PdfPage {
     content: String,
     w: f32,
@@ -7524,7 +7571,8 @@ fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
     let mut next = 4;
     for p in pages {
         ids.push(next);
-        next += 2 + p.images.len();
+        // Each picture takes two objects: its colour and its transparency.
+        next += 2 + 2 * p.images.len();
     }
     let mut object = |out: &mut Vec<u8>, body: &[u8]| {
         offsets.push(out.len());
@@ -7537,23 +7585,30 @@ fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
     object(&mut out, format!("<< /Type /Pages /Kids [{kids}] /Count {} >>", pages.len()).as_bytes());
     object(&mut out, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
     for (p, id) in pages.iter().zip(&ids) {
-        let pictures: String = (0..p.images.len()).map(|k| format!("/Im{k} {} 0 R ", id + 2 + k)).collect();
-        let mut content = p.content.clone();
-        // The content is in mm; the pictures go over it in the same units.
+        let pictures: String = (0..p.images.len()).map(|k| format!("/Im{k} {} 0 R ", id + 2 + 2 * k)).collect();
+        // The content is in mm. The pictures go first, under the lines, in the same units (a picture on top hid the lines).
+        let mut content = String::new();
         for (k, (_, [x, y, w, h])) in p.images.iter().enumerate() {
             content.push_str(&format!("q {w:.3} 0 0 {h:.3} {x:.3} {y:.3} cm /Im{k} Do Q\n"));
         }
+        content.push_str(&p.content);
         object(
             &mut out,
             format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> /XObject << {pictures}>> >> >>", p.w, p.h, id + 1).as_bytes(),
         );
         object(&mut out, format!("<< /Length {} >>\nstream\n{content}endstream", content.len()).as_bytes());
-        for (pic, _) in &p.images {
-            let (rgb, w, h) = (&pic.0, pic.1, pic.2);
-            let mut body = format!("<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length {} >>\nstream\n", rgb.len()).into_bytes();
-            body.extend(rgb);
+        for (k, (pic, _)) in p.images.iter().enumerate() {
+            let (w, h) = (pic.1, pic.2);
+            let rgb: Vec<u8> = pic.0.chunks_exact(4).flat_map(|px| px.iter().take(3).copied().collect::<Vec<u8>>()).collect();
+            let alpha: Vec<u8> = pic.0.chunks_exact(4).map(|px| px.get(3).copied().unwrap_or(255)).collect();
+            let mut body = format!("<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask {} 0 R /Length {} >>\nstream\n", id + 3 + 2 * k, rgb.len()).into_bytes();
+            body.extend(&rgb);
             body.extend(b"\nendstream");
             object(&mut out, &body);
+            let mut mask = format!("<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>\nstream\n", alpha.len()).into_bytes();
+            mask.extend(&alpha);
+            mask.extend(b"\nendstream");
+            object(&mut out, &mask);
         }
     }
     let xref = out.len();
@@ -7578,17 +7633,9 @@ fn pdf_images(app: &mut SolveApp) -> Vec<(Picture, [f32; 4])> {
         .iter()
         .filter_map(|v| {
             let pic = shaded_picture(app, v)?;
-            // The PDF takes plain RGB: the picture over white paper.
-            let rgb: Vec<u8> = pic
-                .0
-                .chunks_exact(4)
-                .flat_map(|p| {
-                    let a = u32::from(p[3]);
-                    [0, 1, 2].map(|k| ((u32::from(p[k]) * a + 255 * (255 - a)) / 255) as u8)
-                })
-                .collect();
+            // RGBA: the PDF writes the colour and the transparency apart, so a picture never hides what is beside it.
             let h = v.w * v.ratio;
-            Some((std::sync::Arc::new((rgb, pic.1, pic.2)), [v.x - v.w / 2.0, v.y - h / 2.0, v.w, h]))
+            Some((pic, [v.x - v.w / 2.0, v.y - h / 2.0, v.w, h]))
         })
         .collect()
 }

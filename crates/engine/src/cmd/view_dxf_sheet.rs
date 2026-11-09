@@ -1767,6 +1767,18 @@ fn finish(
             text("TEXT", Vec2::new(x, y), th * k, body, &mut entities);
         }
     }
+    // Symbols from the palette (surface finish, welding, tolerance frames, mechanical): x, y, size factor, turn in degrees, id and words.
+    if let Some(list) = p.get("symbols").and_then(Value::as_array) {
+        for t in list.iter().take(400) {
+            let num = |k: &str| t.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e5);
+            let (Some(x), Some(y)) = (num("x"), num("y")) else { continue };
+            let k = num("k").unwrap_or(1.0).clamp(0.2, 8.0);
+            let rot = num("rot").unwrap_or(0.0);
+            let id = t.get("id").and_then(Value::as_str).unwrap_or("");
+            let words: String = t.get("text").and_then(Value::as_str).unwrap_or("").chars().take(60).collect();
+            entities.extend(super::drawing_symbols::entities(id, &words, Vec2::new(x, y), k, rot));
+        }
+    }
     // Centre lines the user erased: those touching one of the frames (x0, y0, x1, y1) go; a fifth
     // number of 1 means one exact line (its two ends) and nothing else.
     if let Some(cuts) = p.get("centre_cut").and_then(Value::as_array) {
