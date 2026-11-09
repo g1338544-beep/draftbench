@@ -150,11 +150,14 @@ struct ShadedView {
     world_half: f32,
     /// Where the view's lines are centred in the camera plane (model mm from the origin): the picture is centred there, not on the bodies' bounding box.
     centre: Option<(f32, f32)>,
+    /// A section cut (a point on the plane, its normal): the half toward the camera is cut away, so the
+    /// picture shows the cut face like the section view's lines.
+    cut: Option<([f64; 3], [f64; 3])>,
 }
 
 impl ShadedView {
     fn new(x: f32, y: f32, w: f32, yaw: f64, pitch: f64) -> Self {
-        ShadedView { x, y, w, yaw, pitch, ratio: 0.75, bg: 0, style: 0, zoom: 0.8, world_half: 0.0, centre: None }
+        ShadedView { x, y, w, yaw, pitch, ratio: 0.75, bg: 0, style: 0, zoom: 0.8, world_half: 0.0, centre: None, cut: None }
     }
 }
 
@@ -1121,7 +1124,7 @@ impl State {
 
 /// Where the picture of a shaded view is kept: its camera, size and the state of the design.
 fn shaded_key(app: &SolveApp, v: &ShadedView) -> String {
-    format!("{:.4}/{:.4}/{:.2}/{:.3}/{}/{}/{:.3}/{:.3}/{:.3}/{:.3}/{}", v.yaw, v.pitch, v.w, v.ratio, v.bg, v.style, v.zoom, v.world_half, v.centre.map_or(0.0, |c| c.0), v.centre.map_or(0.0, |c| c.1), app.session.log.len())
+    format!("{:.4}/{:.4}/{:.2}/{:.3}/{}/{}/{:.3}/{:.3}/{:.3}/{:.3}/{:?}/{}", v.yaw, v.pitch, v.w, v.ratio, v.bg, v.style, v.zoom, v.world_half, v.centre.map_or(0.0, |c| c.0), v.centre.map_or(0.0, |c| c.1), v.cut, app.session.log.len())
 }
 
 /// The picture of a shaded view, drawn now if it is not in the cache. One CPU render of the whole
@@ -1161,7 +1164,13 @@ fn shaded_picture_now(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
         let at = cam.target;
         cam.target = at + right * (f64::from(cx) - at.dot(right)) + up * (f64::from(cy) - at.dot(up));
     }
-    let mut scene = solidcraft_engine::view::scene_with_guides(&app.session, &cam, None, solidcraft_engine::view::Guides { grid: false, axes: false });
+    // The cut face must face the camera: the normal points toward the eye, and that half is cut away.
+    let section = v.cut.map(|(o, n)| {
+        let n = Vec3::new(n[0], n[1], n[2]);
+        let toward_eye = if n.dot(cam.basis().2) < 0.0 { n * -1.0 } else { n };
+        (Vec3::new(o[0], o[1], o[2]), toward_eye)
+    });
+    let mut scene = solidcraft_engine::view::scene_with_guides(&app.session, &cam, section, solidcraft_engine::view::Guides { grid: false, axes: false });
     match v.style {
         1 => scene.lines.clear(),
         2 => scene.meshes.clear(),
@@ -1202,15 +1211,39 @@ fn view_angles(v: &PlacedView) -> (f64, f64) {
     }
 }
 
+/// The cutting plane of a section view (a point on it, its normal), in model mm; None for a stepped
+/// section (its plane bends) or numbers that are not finite.
+fn section_cut(app: &SolveApp, p: &PlacedView) -> Option<([f64; 3], [f64; 3])> {
+    let centre = solidcraft_engine::view::bounds(&app.session).center();
+    let (o, n) = if let Some([x1, y1, x2, y2]) = p.section_line {
+        let (dx, dy) = (f64::from(x2 - x1), f64::from(y2 - y1));
+        ([f64::from(x1), f64::from(y1), centre.z], [-dy, dx, 0.0])
+    } else {
+        let (axis, at) = p.section.as_ref()?;
+        let mid = [centre.x, centre.y, centre.z];
+        let k = at.trim().parse::<f64>().ok().filter(|k| k.is_finite());
+        let axis = (*axis).min(2);
+        let mut o = mid;
+        if let Some(k) = k {
+            o[axis] = k;
+        }
+        let mut n = [0.0; 3];
+        n[axis] = 1.0;
+        (o, n)
+    };
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    (len.is_finite() && len > 1e-9 && o.iter().all(|c| c.is_finite())).then_some((o, [n[0] / len, n[1] / len, n[2] / len]))
+}
+
 /// The 3D colour pictures of views that have it on: each sits on its view's box at the view's
-/// scale, so it moves and rescales with the view. Turned and section views have none.
+/// scale, so it moves and rescales with the view. Turned views and stepped sections have none; a section shows its cut face.
 fn colour_views(app: &SolveApp) -> Vec<(usize, ShadedView)> {
     let Some(sh) = app.drawing.sheet.as_ref() else { return Vec::new() };
     app.drawing
         .placed
         .iter()
         .enumerate()
-        .filter(|(_, p)| p.colour && p.rot == 0 && p.section.is_none())
+        .filter(|(_, p)| p.colour && p.rot == 0 && p.section_path.is_none())
         .filter_map(|(i, p)| {
             let b = sh.boxes.iter().find(|b| b.0 == i)?;
             let k = sh.scales.iter().find(|s| s.0 == i)?.1;
@@ -1225,6 +1258,9 @@ fn colour_views(app: &SolveApp) -> Vec<(usize, ShadedView)> {
             v.style = 1;
             v.world_half = fh / 2.0 / k;
             v.centre = sh.centres.iter().find(|c| c.0 == i).map(|c| (c.1, c.2));
+            if p.section.is_some() || p.section_line.is_some() {
+                v.cut = Some(section_cut(app, p)?);
+            }
             Some((i, v))
         })
         .collect()
@@ -1840,7 +1876,7 @@ fn scale_picker(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
         Err(_) => "Auto fit".to_string(),
     };
     let mut changed = false;
-    crate::ui_kit::dropdown_menu(ui, id, &shown, |ui| {
+    crate::ui_kit::dropdown_menu_with_field(ui, id, &shown, |ui| {
         for (label, factor) in SCALES {
             if crate::ui_kit::list_picker(ui, label, label, false).clicked() {
                 *value = factor.to_string();
@@ -2493,9 +2529,9 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             // 3D View: the selected view in 3D colour, where it is (again to turn it off).
             match app.drawing.selected.filter(|i| *i < app.drawing.placed.len()) {
                 Some(i) => {
-                    let unsupported = app.drawing.placed.get(i).is_some_and(|v| v.rot != 0 || v.section.is_some());
+                    let unsupported = app.drawing.placed.get(i).is_some_and(|v| v.rot != 0 || v.section_path.is_some());
                     if unsupported {
-                        app.set_status("3D colour is not available for a turned or section view".to_string(), true);
+                        app.set_status("3D colour is not available for a turned view or a stepped section".to_string(), true);
                     } else if let Some(v) = app.drawing.placed.get_mut(i) {
                         v.colour = !v.colour;
                         refresh(app);
@@ -2503,7 +2539,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                 }
                 // Nothing selected: every view that can has it, or (when they all do) none.
                 None => {
-                    let can = |v: &PlacedView| v.rot == 0 && v.section.is_none();
+                    let can = |v: &PlacedView| v.rot == 0 && v.section_path.is_none();
                     let on = app.drawing.placed.iter().filter(|v| can(v)).any(|v| !v.colour);
                     for v in app.drawing.placed.iter_mut().filter(|v| can(v)) {
                         v.colour = on;
@@ -3625,7 +3661,6 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let mut add: Option<usize> = None;
                     let mut remove: Option<usize> = None;
                     let mut start_projected: Option<usize> = None;
-                    let mut follow_scale: Option<(usize, String)> = None;
                     if phone && crate::ui_kit::button(ui, "Close panel", crate::ui_kit::Button::Small).clicked() {
                         app.drawing.panel_open = Some(false);
                     }
@@ -3782,9 +3817,8 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             if scale_picker(ui, &format!("drawing_scale_{i}"), &mut v.scale) {
                                 dirty = true;
                             }
-                            if v.scale != before && v.detail.is_none() && v.view < 6 {
-                                follow_scale = Some((i, v.scale.clone()));
-                            }
+                            // Each view keeps its own scale: changing one never moves the others.
+                            let _ = before;
                             // The letter of a section or detail: A, B, C in order unless changed here.
                             if v.section_line.is_some() || v.section.is_some() || v.detail.is_some() {
                                 ui.horizontal(|ui| {
@@ -4130,15 +4164,6 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     if let Some(i) = start_projected {
                         app.drawing.proj_tool = Some(i);
-                    }
-                    if let Some((from, scale)) = follow_scale {
-                        // Every other standard view follows; the isometric and detail views keep their own.
-                        for (j, v) in app.drawing.placed.iter_mut().enumerate() {
-                            if j != from && v.view < 6 && v.detail.is_none() {
-                                v.scale = scale.clone();
-                            }
-                        }
-                        dirty = true;
                     }
                     if let Some(view) = add {
                         add_view(app, view);
@@ -5481,19 +5506,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.drawing.scale_edit = None;
             }
             if changed {
-                // Every other standard (orthographic) view follows the scale, aligned or placed one by one;
-                // the isometric view and detail views keep their own.
-                let scale = app.drawing.placed[i].scale.clone();
-                let group: Vec<usize> = (0..app.drawing.placed.len())
-                    .filter(|j| *j == i || app.drawing.placed.get(*j).is_some_and(|v| v.view < 6 && v.detail.is_none()))
-                    .collect();
-                for j in group {
-                    if let Some(v) = app.drawing.placed.get_mut(j)
-                        && v.detail.is_none()
-                    {
-                        v.scale = scale.clone();
-                    }
-                }
+                // Only this view takes the new scale.
                 refresh(app);
             }
         }

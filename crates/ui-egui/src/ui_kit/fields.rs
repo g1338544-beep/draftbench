@@ -192,6 +192,21 @@ pub(crate) fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str,
     response
 }
 
+/// Like `dropdown_menu`, but a click inside the list does not close it (so it can hold a text field);
+/// the content closes it itself with `ui.close()`, and a click outside still does.
+pub(crate) fn dropdown_menu_with_field(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, add: impl FnOnce(&mut Ui)) -> Response {
+    let response = egui::ComboBox::from_id_salt(id)
+        .width(dimension(ui.available_width()))
+        .height(Tokens::get().space_24 * 14.0)
+        .selected_text(current)
+        .icon(dropdown_arrow)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show_ui(ui, add)
+        .response;
+    publish(ui, &response, egui::WidgetType::ComboBox);
+    response
+}
+
 /// Selection target state; filled targets retain their reserved trailing space.
 pub(crate) struct Selection {
     pub active: bool,

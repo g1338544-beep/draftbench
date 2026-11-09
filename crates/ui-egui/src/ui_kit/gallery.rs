@@ -485,6 +485,11 @@ const ELEMENTS: &[Element] = &[
             list_picker(ui, "preset", "Preset", true);
         });
     }),
+    element!("dropdown_menu_with_field", |ui, _| {
+        dropdown_menu_with_field(ui, "gallery_menu_field", "Preset", |ui| {
+            list_picker(ui, "preset", "Preset", true);
+        });
+    }),
     element!("message_field", |ui, s| {
         message_field(ui, ui.id().with("message"), &mut s.value, "Message");
     }),
