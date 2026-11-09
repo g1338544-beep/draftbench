@@ -87,6 +87,9 @@ struct PlacedView {
     /// Projected from another view: its index, and whether it sits beside it (shares the y
     /// position) rather than above or below it (shares x).
     align: Option<(usize, bool)>,
+    /// An angled section view: it keeps to the line through its parent's centre along this unit direction
+    /// (parent, dx, dy) and slides along it.
+    axis: Option<(usize, f32, f32)>,
     /// A view taken from the 3D window's camera: its yaw and pitch (the view number is then 6).
     custom: Option<(f64, f64)>,
     /// Quarter turns (counter-clockwise) the view is turned on the sheet: a side view beside the top view.
@@ -645,7 +648,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "letter_off": v.letter_off, "flip": v.flip, "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "axis": v.axis.map(|(p, x, y)| json!([p, x, y])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "letter_off": v.letter_off, "flip": v.flip, "colour": v.colour})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals, "style": d.style})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -914,6 +917,10 @@ impl State {
                     }),
                     align: v.get("align").and_then(serde_json::Value::as_array).and_then(|a| {
                         Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?))
+                    }),
+                    axis: v.get("axis").and_then(serde_json::Value::as_array).and_then(|a| {
+                        let (p, x, y) = (a.first()?.as_u64()? as usize, a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32);
+                        (x.is_finite() && y.is_finite()).then_some((p, x, y))
                     }),
                     spin: v.get("spin").and_then(serde_json::Value::as_f64).filter(|d| d.is_finite()).map_or(0.0, |d| d as f32),
                     rot: v.get("rot").and_then(serde_json::Value::as_u64).map_or(0, |n| (n % 4) as u8),
@@ -1681,6 +1688,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         section_path: None,
         detail: None,
         align: None,
+        axis: None,
         custom: None,
         rot: 0,
         label: None,
@@ -1748,6 +1756,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         section_path: None,
         detail: None,
         align: None,
+        axis: None,
         custom: None,
         rot,
         label: None,
@@ -5686,6 +5695,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         section_path: None,
                     detail: None,
                     align: if free { None } else { Some((parent, horizontal)) },
+                    axis: None,
                     custom: None,
                     label: None,
                     letter: String::new(),
@@ -6037,7 +6047,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Section View: click two points on the Top view (hole centres snap); the cutting line runs between them.
-    let mut sec_new: Option<([f32; 4], f32, f32, f32, usize, Option<(usize, bool)>)> = None;
+    let mut sec_new: Option<([f32; 4], f32, f32, f32, usize, Option<(usize, bool)>, Option<(usize, f32, f32)>)> = None;
     let mut sec_msg: Option<String> = None;
     if let Some(mut picked) = app.drawing.sec_tool.clone() {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
@@ -6092,9 +6102,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let (nx, ny) = section_side((d.x / d.length().max(1e-6), d.y / d.length().max(1e-6)));
                             let along = if nx.abs() <= 0.1 { Some(false) } else if ny.abs() <= 0.1 { Some(true) } else { None };
                             let axis = along.map(|horizontal| (horizontal, if horizontal { bx.2 } else { bx.1 }));
-                            let at = free_spot_on(sheet, want, (bx.3, bx.4), axis);
+                            // An angled cut: its view lies on the line through the parent's centre across the cut, and slides on it.
+                            let ray = if along.is_none() { free_spot_ray(sheet, pos2(bx.1, bx.2), vec2(nx, ny), (want - pos2(bx.1, bx.2)).length(), (bx.3, bx.4)) } else { None };
+                            let at = ray.unwrap_or_else(|| free_spot_on(sheet, want, (bx.3, bx.4), axis));
                             let link = along.map(|horizontal| (bx.0, horizontal));
-                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view), link));
+                            let axis_link = ray.map(|_| (bx.0, nx, ny));
+                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view), link, axis_link));
                         }
                         (None, _, _) | (_, None, _) | (_, _, None) => sec_msg = Some("Section View needs a view on the sheet to cut: add one first".to_string()),
                         _ => {}
@@ -6627,6 +6640,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             x = parent.x as f32;
                         }
                     }
+                    // An angled section view slides along its axis through the parent's centre.
+                    if let Some((p, dx, dy)) = app.drawing.placed.get(b.0).and_then(|v| v.axis)
+                        && let Some(parent) = app.drawing.placed.get(p)
+                    {
+                        (x, y) = on_axis(parent.x as f32, parent.y as f32, dx, dy, x, y);
+                    }
                     // A standard view placed on its own (Top, Right…) slides along the line it is projected
                     // along from the Front view; Alt frees it.
                     if !ui.input(|i| i.modifiers.alt)
@@ -6639,7 +6658,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             x = parent.x as f32;
                         }
                     }
-                    if app.drawing.placed.get(b.0).is_some_and(|v| v.align.is_none()) {
+                    if app.drawing.placed.get(b.0).is_some_and(|v| v.align.is_none() && v.axis.is_none()) {
                         // Lines up with another view's centre: snaps there and shows the guide line.
                         let (sx, sy, gx, gy) = snap_axes(sheet, b.0, x, y, 14.0);
                         (x, y) = (sx, sy);
@@ -6699,6 +6718,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         section_path: None,
             detail: Some(d),
             align: None,
+            axis: None,
             custom: None,
             rot: 0,
             label: None,
@@ -6711,7 +6731,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
         begin(app);
     }
-    if let Some((line, k, x, y, from, link)) = sec_new {
+    if let Some((line, k, x, y, from, link, axis_link)) = sec_new {
         let spin = 0.0;
         let rot = 0;
         app.drawing.placed.push(PlacedView {
@@ -6727,6 +6747,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             section_path: None,
             detail: None,
             align: link,
+            axis: axis_link,
             custom: None,
             rot,
             label: None,
@@ -6754,6 +6775,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             section_path: Some(path),
             detail: None,
             align: None,
+            axis: None,
             custom: None,
             rot,
             label: None,
@@ -6774,7 +6796,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         let target = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
         app.drawing.drag = None;
-        if let (Some(s), Some(old)) = (target, app.drawing.placed.get(index).map(|v| (v.x, v.y, v.align))) {
+        if let (Some(s), Some(old)) = (target, app.drawing.placed.get(index).map(|v| (v.x, v.y, v.align, v.axis))) {
             let mut nx = f64::from((s.x + ox).clamp(0.0, sw));
             let mut ny = f64::from((s.y + oy).clamp(0.0, sh));
             // A projected view keeps its alignment with its parent.
@@ -6786,6 +6808,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 } else {
                     nx = parent.x;
                 }
+            }
+            if let Some((p, dx, dy)) = old.3
+                && let Some(parent) = app.drawing.placed.get(p)
+            {
+                let (ax, ay) = on_axis(parent.x as f32, parent.y as f32, dx, dy, nx as f32, ny as f32);
+                (nx, ny) = (f64::from(ax), f64::from(ay));
             }
             if old.2.is_none()
                 && !ui.input(|i| i.modifiers.alt)
@@ -6799,6 +6827,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             if old.2.is_none()
+                && old.3.is_none()
                 && let Some(sh) = app.drawing.sheet.as_ref()
             {
                 let (sx, sy, _, _) = snap_axes(sh, index, nx as f32, ny as f32, 14.0);
@@ -6813,7 +6842,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let mut moved = vec![index];
             for _ in 0..4 {
                 for k in 0..app.drawing.placed.len() {
-                    let follows = app.drawing.placed[k].align.is_some_and(|(p, _)| moved.contains(&p));
+                    let follows = app.drawing.placed[k].align.is_some_and(|(p, _)| moved.contains(&p)) || app.drawing.placed[k].axis.is_some_and(|(p, _, _)| moved.contains(&p));
                     if follows && !moved.contains(&k) {
                         app.drawing.placed[k].x += ddx;
                         app.drawing.placed[k].y += ddy;
@@ -7064,6 +7093,30 @@ fn free_spot_on(sheet: &Sheet, prefer: Pos2, size: (f32, f32), axis: Option<(boo
         }
     }
     free_spot_axis(sheet, prefer, size, None).unwrap_or(prefer)
+}
+
+/// The point of the line through (px, py) along the unit direction (dx, dy) nearest to (x, y).
+fn on_axis(px: f32, py: f32, dx: f32, dy: f32, x: f32, y: f32) -> (f32, f32) {
+    let t = (x - px) * dx + (y - py) * dy;
+    if t.is_finite() { (px + dx * t, py + dy * t) } else { (x, y) }
+}
+
+/// The first free place along the ray from `origin` in direction `dir`, from `start` mm out in 5 mm steps.
+fn free_spot_ray(sheet: &Sheet, origin: Pos2, dir: egui::Vec2, start: f32, size: (f32, f32)) -> Option<Pos2> {
+    let (w, h) = (size.0.clamp(10.0, 600.0), size.1.clamp(10.0, 600.0));
+    let area = |cx: f32, cy: f32| (cx - w / 2.0 - 6.0, cx + w / 2.0 + 6.0, cy - h / 2.0 - 22.0, cy + h / 2.0 + 6.0);
+    let hit = |a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)| a.0 < b.1 && b.0 < a.1 && a.2 < b.3 && b.2 < a.3;
+    let block = (sheet.width * 0.52, sheet.width, 0.0, 95.0);
+    let taken: Vec<(f32, f32, f32, f32)> = sheet.boxes.iter().map(|b| (b.1 - b.3 / 2.0 - 6.0, b.1 + b.3 / 2.0 + 6.0, b.2 - b.4 / 2.0 - 22.0, b.2 + b.4 / 2.0 + 6.0)).collect();
+    let (start, len) = (if start.is_finite() { start.max(0.0) } else { 0.0 }, dir.length());
+    if len < 1e-6 || !len.is_finite() {
+        return None;
+    }
+    let u = dir / len;
+    (0..200).map(|i| origin + u * (start + 5.0 * i as f32)).find(|q| {
+        let me = area(q.x, q.y);
+        q.x - w / 2.0 >= 15.0 && q.x + w / 2.0 <= sheet.width - 15.0 && q.y - h / 2.0 - 22.0 >= 15.0 && q.y + h / 2.0 + 6.0 <= sheet.height - 15.0 && !hit(me, block) && !taken.iter().any(|t| hit(me, *t))
+    })
 }
 
 fn free_spot_axis(sheet: &Sheet, prefer: Pos2, size: (f32, f32), axis: Option<(bool, f32)>) -> Option<Pos2> {
@@ -7811,7 +7864,7 @@ mod hand_drawn_tests {
     #[test]
     fn stretching_the_cutting_line_moves_the_section_line() {
         let sheet = Sheet { width: 420.0, height: 297.0, note: String::new(), items: Vec::new(), boxes: vec![(0, 100.0, 150.0, 80.0, 80.0)], scales: vec![(0, 2.0)], centres: vec![(0, 10.0, 20.0)], rounds: std::sync::OnceLock::new() };
-        let view = |section_line: Option<[f32; 4]>| PlacedView { view: 0, x: 100.0, y: 150.0, scale: String::new(), dashed: false, dims: false, section: section_line.map(|_| (0, String::new())), section_line, section_path: None, detail: None, align: None, custom: None, rot: 0, spin: 0.0, label: None, letter: String::new(), cap: (0.0, 0.0), letter_off: [0.0; 4], flip: false, colour: false };
+        let view = |section_line: Option<[f32; 4]>| PlacedView { view: 0, x: 100.0, y: 150.0, scale: String::new(), dashed: false, dims: false, section: section_line.map(|_| (0, String::new())), section_line, section_path: None, detail: None, align: None, axis: None, custom: None, rot: 0, spin: 0.0, label: None, letter: String::new(), cap: (0.0, 0.0), letter_off: [0.0; 4], flip: false, colour: false };
         let placed = vec![view(None), view(Some([10.0, 0.0, 10.0, 40.0]))];
         // Model (10,0)-(10,40) at scale 2 about the centre (10,20): sheet (100,110)-(100,190); the drawn chain line is 2.5 mm longer.
         let old = (pos2(100.0, 107.5), pos2(100.0, 192.5));
@@ -7822,6 +7875,18 @@ mod hand_drawn_tests {
         let (_, back) = stretch_cutting_line(&placed, &sheet, (old.1, old.0), (pos2(100.0, 212.5), pos2(100.0, 107.5))).expect("found");
         assert!((back[3] - 50.0).abs() < 1e-3 && back[1].abs() < 1e-3, "{back:?}");
         assert!(stretch_cutting_line(&placed, &sheet, (pos2(0.0, 0.0), pos2(5.0, 5.0)), old).is_none(), "an ordinary centre line is not a cutting line");
+    }
+
+    /// An angled section view is put on the line through its parent's centre across the cut, and slides on it.
+    #[test]
+    fn an_angled_section_view_keeps_to_its_axis() {
+        let sheet = Sheet { width: 420.0, height: 297.0, note: String::new(), items: Vec::new(), boxes: vec![(0, 120.0, 200.0, 80.0, 80.0)], scales: Vec::new(), centres: Vec::new(), rounds: std::sync::OnceLock::new() };
+        let u = vec2(0.6, -0.8);
+        let at = free_spot_ray(&sheet, pos2(120.0, 200.0), u, 100.0, (60.0, 30.0)).expect("room along the axis");
+        let (x, y) = on_axis(120.0, 200.0, u.x, u.y, at.x + 7.0, at.y + 3.0);
+        assert!((x - 120.0) * u.y - (y - 200.0) * u.x < 1e-3, "on the line through the parent's centre");
+        assert!((on_axis(120.0, 200.0, u.x, u.y, 120.0, 200.0).0 - 120.0).abs() < 1e-6);
+        assert!(((at.x - 120.0) * u.y - (at.y - 200.0) * u.x).abs() < 1e-3);
     }
 
     /// A click takes the hand-drawn line or circle under it, and Delete removes just that one.
