@@ -5596,6 +5596,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         refresh(app);
     }
+    ordinate_ui::window(app, ui.ctx());
     let symbol_changed = symbols_ui::editor(app, ui.ctx());
     symbols_ui::after(app, symbol_changed);
     dimension_window(app, ui.ctx());

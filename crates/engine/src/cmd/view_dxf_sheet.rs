@@ -2579,7 +2579,8 @@ fn add_ordinates(entities: &mut Vec<DxfEntity>, o: &Value, boxes: &[Value], th: 
     // One leader and its number: `from` the feature, to the level, the value in model mm.
     let one = |entities: &mut Vec<DxfEntity>, from: Vec2, horizontal_value: bool, level: f64, value: f64| {
         let shown = if value.abs() < 0.05 { 0.0 } else { value };
-        let words = format!("{}{}", if shown < 0.0 { "-" } else { "" }, dim_value(shown.abs(), decimals));
+        // Distances, not coordinates: no sign, whichever side of the datum the point lies.
+        let words = dim_value(shown.abs(), decimals);
         let len = words.chars().count() as f64 * 0.62 * th;
         if horizontal_value {
             // A vertical leader up (or down) to the level; the number turned along it.
@@ -2674,10 +2675,11 @@ mod ordinate_tests {
     }
 
     #[test]
-    fn a_point_left_of_the_datum_reads_negative() {
+    fn a_point_left_of_the_datum_reads_without_a_sign() {
         let mut entities = Vec::new();
         let o = json!({"o": [10.0, 10.0], "items": [{"p": [4.0, 30.0], "axis": "x", "at": 60.0}]});
         add_ordinates(&mut entities, &o, &[], 3.5, None);
-        assert!(entities.iter().any(|e| matches!(&e.shape, DxfShape::Text { text, .. } if text == "-6")));
+        assert!(entities.iter().any(|e| matches!(&e.shape, DxfShape::Text { text, .. } if text == "6")));
+        assert!(!entities.iter().any(|e| matches!(&e.shape, DxfShape::Text { text, .. } if text.contains('-'))));
     }
 }
