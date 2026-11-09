@@ -1905,6 +1905,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::S => save(app),
                 // NX-style: Ctrl+B hides what is selected, Ctrl+Shift+B swaps shown and hidden,
                 // Ctrl+Shift+U shows everything.
+                Key::L if !mods.shift && !mods.alt => crate::layer_window::open(app),
                 Key::B if !mods.shift && !mods.alt => crate::context_menu::toggle_visibility(app),
                 Key::B if mods.shift && !mods.alt => drop(app.run("view.invert_visibility", json!({}))),
                 Key::U if mods.shift && !mods.alt => drop(app.run("view.show_all", json!({}))),

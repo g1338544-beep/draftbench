@@ -30,6 +30,7 @@ pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod layer_window;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -394,6 +395,7 @@ pub struct SolveApp {
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
+    pub layer_window: Option<layer_window::LayerWindow>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     /// The Run Script window, when open.
@@ -559,6 +561,7 @@ impl SolveApp {
             dialog: None,
             params: None,
             design_properties: None,
+            layer_window: None,
             bom: None,
             script: None,
             material_card_review: None,
@@ -1050,6 +1053,10 @@ impl SolveApp {
         }
         if id == "parameters.change" {
             params_dialog::open(self);
+            return;
+        }
+        if matches!(id, "layer.settings" | "layer.create" | "layer.assign") {
+            layer_window::open(self);
             return;
         }
         if matches!(id, "document.metadata" | "document.metadata.set") {
@@ -1840,6 +1847,7 @@ impl SolveApp {
         self.resolve_fit(ui.ctx());
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
+        layer_window::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
         script_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());

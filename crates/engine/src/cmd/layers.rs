@@ -19,6 +19,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("layer.assign", "Move to Layer", assign).icon("reorder").noundo().params("name: an existing layer; items: [body | sketch | construction names] (they leave other layers and follow the layer's shown/hidden state)"),
     CommandSpec::new("layer.visibility", "Show/Hide Layer", layer_visibility).icon("eye").noundo().params("name; visible: bool (every item on the layer)"),
     CommandSpec::new("layer.delete", "Delete Layer", delete).icon("delete").noundo().params("name (its items are shown again and stay in the design)"),
+    CommandSpec::new("layer.settings", "Layer Settings", list).icon("folder").noundo().params("lists the layers; in the app it opens the Layer Settings window (Ctrl+L)"),
     CommandSpec::new("layer.list", "List Layers", list).icon("list").noundo().doc_only(),
     CommandSpec::new("view.hide", "Hide", hide).icon("eye").noundo().params("items?: [body | sketch | construction names] (default: the bodies of the selection, faces and edges included); hides them. Ctrl+B in the app flips what is selected"),
     CommandSpec::new("view.hide_others", "Isolate", hide_others).icon("eye").noundo().params("items?: [body names] (default: the bodies of the selection); shows those and hides every other body"),
