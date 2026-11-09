@@ -28,8 +28,60 @@ struct RotGrab {
     last: f64,
 }
 
-/// The angle snap of a turned handle (degrees); Alt turns it freely.
-const ROT_SNAP: f64 = 45.0;
+/// What the Angle window holds: the turn made by the last rotation handle and the snap.
+#[derive(Clone, Debug)]
+struct RotEdit {
+    /// The axis turned about (0 XC, 1 YC, 2 ZC) and the turn already made, in degrees.
+    k: usize,
+    applied: f64,
+    angle: String,
+    snap: String,
+}
+
+thread_local! {
+    static ROT_EDIT: RefCell<Option<RotEdit>> = const { RefCell::new(None) };
+    /// The angle snap of a turned handle, in degrees; Alt turns it freely.
+    static SNAP_DEG: Cell<f64> = const { Cell::new(45.0) };
+}
+
+fn snap_deg() -> f64 {
+    SNAP_DEG.with(Cell::get)
+}
+
+/// The Angle window beside a turned WCS: the turn made (type a number and press Enter to turn to
+/// it) and the snap step. Called once per frame.
+pub fn angle_window(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(mut e) = ROT_EDIT.with(|r| r.borrow().clone()) else { return };
+    if app.session.wcs.is_none() {
+        ROT_EDIT.with(|r| *r.borrow_mut() = None);
+        return;
+    }
+    let name = ["XC", "YC", "ZC"].get(e.k).copied().unwrap_or("ZC");
+    let title = format!("Turn about {name}");
+    let mut commit = false;
+    let (closed, _) = crate::ui_kit::Window::new(egui::Id::new("sc_wcs_angle"), "settings", &title).actions("", "Close", None).show(ctx, true, |ui| {
+        crate::ui_kit::row(ui, crate::i18n::tr_label("Angle"), |ui| {
+            let (enter, _) = crate::ui_kit::text_field(ui, &mut e.angle, "deg");
+            commit |= enter;
+        });
+        crate::ui_kit::row(ui, "Snap", |ui| {
+            crate::ui_kit::text_field(ui, &mut e.snap, "deg");
+        });
+    });
+    if let Some(step) = crate::wcs_rotate::parse_angle(&e.snap).filter(|v| *v > 0.0 && *v <= 180.0) {
+        SNAP_DEG.with(|s| s.set(step));
+    }
+    if commit && let Some(target) = crate::wcs_rotate::parse_angle(&e.angle) {
+        let delta = target - e.applied;
+        if delta.abs() > 1e-9 {
+            let cmd = ["wcs.rotate_x", "wcs.rotate_y", "wcs.rotate_z"].get(e.k).copied().unwrap_or("wcs.rotate_z");
+            if app.run(cmd, json!({"angle": delta})).is_ok() {
+                e.applied = target;
+            }
+        }
+    }
+    ROT_EDIT.with(|r| *r.borrow_mut() = if closed { None } else { Some(e) });
+}
 
 /// Which part of the triad is being dragged.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -342,7 +394,8 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
             g.last = angle;
             g.turn += step.to_degrees();
             let free = ui.input(|i| i.modifiers.alt);
-            let shown = if free { g.turn.round() } else { (g.turn / ROT_SNAP).round() * ROT_SNAP };
+            let step = snap_deg();
+            let shown = if free { g.turn.round() } else { (g.turn / step).round() * step };
             let delta = shown - g.applied;
             if delta.abs() > 1e-9 {
                 let cmd = ["wcs.rotate_x", "wcs.rotate_y", "wcs.rotate_z"].get(g.k).copied().unwrap_or("wcs.rotate_z");
@@ -350,6 +403,10 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
                 g.applied = shown;
             }
             ROT_READ.with(|r| r.set(Some((pos, g.applied))));
+            ROT_EDIT.with(|r| {
+                let snap = r.borrow().as_ref().map_or_else(|| format!("{}", snap_deg()), |x| x.snap.clone());
+                *r.borrow_mut() = Some(RotEdit { k: g.k, applied: g.applied, angle: format!("{:.1}", g.applied), snap });
+            });
             GRAB.with(|c| c.set(Some(Grab::Rot(g))));
         }
         ui.ctx().request_repaint();
@@ -465,7 +522,7 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
         }
     }
     if let Some((at, angle)) = ROT_READ.with(Cell::get) {
-        painter.text(at + egui::vec2(14.0, -14.0), Align2::LEFT_BOTTOM, format!("Angle {angle:.1}°   Snap {ROT_SNAP:.0}°  (Alt: free)"), FontId::proportional(13.0), orange);
+        painter.text(at + egui::vec2(14.0, -14.0), Align2::LEFT_BOTTOM, format!("Angle {angle:.1}°   Snap {:.0}°  (Alt: free)", snap_deg()), FontId::proportional(13.0), orange);
     }
     // The picked axis: a ring on its tip; and the WCS as it would stand under the pointer.
     if let Some(k) = ARMED.with(Cell::get) {
