@@ -5770,6 +5770,18 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let input = mb.traced();
             // The shell, and the operands of the operation that made it.
             let (nb, operands) = match direction.as_str() {
+                // No face to open: the body is hollowed out and stays closed, a void inside it.
+                "" | "inside" if open.is_empty() => {
+                    if !(t > 1e-6) {
+                        return Err(DocError::Invalid("shell thickness must be positive".into()));
+                    }
+                    let samples = face_samples(&mb);
+                    let inner = mb.before_as(crate::lineage::Operand::Inner(mb.name.clone()));
+                    let cavity = Traced::step(kernel::offset_faces(&mb.body, &samples, -t)?, &[&inner]);
+                    let cut = kernel::boolean(&mb.body, &cavity.body, BoolOp::Cut)?
+                        .ok_or_else(|| DocError::Invalid("the shell removed everything".into()))?;
+                    (cut, vec![input, cavity])
+                }
                 "" | "inside" => (kernel::shell(&mb.body, &open, t)?, vec![input]),
                 "outside" | "both" => {
                     // Walls grown out of the faces (or half out, half in): an offset body less a
@@ -5786,7 +5798,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     // The cavity's faces are the shell's inner walls, named after the faces they offset.
                     let inner = mb.before_as(crate::lineage::Operand::Inner(mb.name.clone()));
                     let cavity = if inn > 0.0 { Traced::step(kernel::offset_faces(&mb.body, &walls, -inn)?, &[&inner]) } else { inner };
-                    let cavity = Traced::step(kernel::offset_faces(&cavity.body, &open, 2.0 * t + 1.0)?, &[&cavity]);
+                    let cavity = if open.is_empty() { cavity } else { Traced::step(kernel::offset_faces(&cavity.body, &open, 2.0 * t + 1.0)?, &[&cavity]) };
                     let cut = kernel::boolean(&outer.body, &cavity.body, BoolOp::Cut)?
                         .ok_or_else(|| DocError::Invalid("the shell removed everything".into()))?;
                     (cut, vec![outer, cavity])

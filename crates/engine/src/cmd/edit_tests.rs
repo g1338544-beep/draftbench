@@ -807,3 +807,21 @@ fn renaming_a_feature_evaluates_nothing() {
     fresh.refresh();
     assert_eq!(failed(&s), failed(&fresh));
 }
+
+/// A body picked and no face: Shell hollows the whole body, closed all round. The result is a smaller
+/// volume, or a plain error naming the problem; it never panics.
+#[test]
+fn shell_without_faces_hollows_the_whole_body_or_says_why_not() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));
+    let before = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    match s.execute("solid.shell", &json!({"faces": [], "body": "Base", "thickness": 2})) {
+        Ok(_) => {
+            let after = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+            assert!(after < before, "the inside is gone: {after} < {before}");
+        }
+        Err(e) => assert!(!e.to_string().is_empty()),
+    }
+    // Without a body there is nothing to hollow: still refused.
+    assert!(s.execute("solid.shell", &json!({"faces": [], "thickness": 2})).is_err());
+}

@@ -98,7 +98,7 @@ const HOLE_LABELS: [&str; 4] = ["Simple", "Counterbore", "Countersink", "Tapered
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
     pub enum Kind {
-        Shell("solid.shell", "SHELL", [("Faces/Body", FACES, true)],
+        Shell("solid.shell", "SHELL", [("Faces/Body", FACES | BODIES, true)],
             FeatureKind::Shell { thickness, .. }) {
             thickness: String = "2 mm".into() => thickness.to_string(),
         } => json!({"thickness": thickness});
@@ -3433,8 +3433,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
         }
         Kind::Shell { .. } => {
-            need(0, "faces to remove")?;
-            ("solid.shell", json!({"faces": face_points(0)}))
+            need(0, "faces to remove, or a body to hollow out")?;
+            let faces = face_points(0);
+            let mut p = json!({"faces": faces});
+            // A body picked and no face: the whole body is hollowed out, closed all round.
+            if faces.is_empty()
+                && let Some(body) = sels(d, 0).body_names().into_iter().next()
+            {
+                p["body"] = json!(body);
+            }
+            ("solid.shell", p)
         }
         Kind::Draft { .. } => {
             need(0, "faces")?;
@@ -4677,7 +4685,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.chain_applied = false;
             d
         }
-        FeatureKind::Shell { faces, direction, tangent_chain, .. } => {
+        FeatureKind::Shell { faces, direction, tangent_chain, body, .. } => {
             let mut d = start("solid.shell")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             d.extra.insert("tangent_chain".into(), json!(tangent_chain));
@@ -4686,6 +4694,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = faces.iter().filter_map(|p| face_sel(s, p.0)).collect();
+                if faces.is_empty()
+                    && let Some(b) = body
+                {
+                    inp.items = vec![Sel::Body { name: b.to_string() }];
+                }
             }
             d
         }

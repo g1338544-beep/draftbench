@@ -101,7 +101,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
-        .params("faces: [[x,y,z] points on the faces to remove, or face names from model.faces]; thickness: expr; direction?: inside|outside|both; tangent_chain?: bool (also open faces joined smoothly to the picked ones); body?"),
+        .params("faces: [[x,y,z] points on the faces to remove, or face names from model.faces; empty with `body` hollows the whole body, closed]; thickness: expr; direction?: inside|outside|both; tangent_chain?: bool (also open faces joined smoothly to the picked ones); body?"),
     CommandSpec::new("solid.draft", "Draft", draft)
         .at("SOLID", "MODIFY")
         .icon("draft")
@@ -2197,7 +2197,9 @@ fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
 
 fn shell(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.shell";
-    let faces = face_points(s, p, cmd)?;
+    // No faces and a body: the whole body is hollowed out, closed all round.
+    let closed = str_(p, "body").is_some() && p.get("faces").is_none_or(|f| f.as_array().is_some_and(Vec::is_empty));
+    let faces = if closed { Vec::new() } else { face_points(s, p, cmd)? };
     let thickness = req_expr(cmd, p, "thickness")?;
     check_expr(s, &thickness, Kind::Length, cmd, "thickness")?;
     let direction = str_(p, "direction").map(str::to_ascii_lowercase).unwrap_or_default();
