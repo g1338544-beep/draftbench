@@ -455,6 +455,12 @@ pub struct State {
     /// What the sheet command last returned for each sheet (by number): a sheet is shown again as it was
     /// made when switched back to, whatever Update did on another sheet since.
     page_json: Vec<Option<Value>>,
+    /// The bodies each sheet was last updated with (by number), and the ones the engine's kept scene was made with.
+    page_vis: Vec<Option<solidcraft_engine::Visibility>>,
+    cache_vis: Option<solidcraft_engine::Visibility>,
+    /// The sheet being composed keeps the model it was last updated from (not an Update), though the kept
+    /// scene may be another sheet's.
+    keep_steps: bool,
     /// The stages of the sheet being composed use the model kept from the last Update.
     freeze_steps: bool,
     /// Update is recomputing the sheet from the model as it is now.
@@ -607,6 +613,9 @@ impl Default for State {
             scale_edit: None,
             drawn_rev: 0,
             page_json: Vec::new(),
+            page_vis: Vec::new(),
+            cache_vis: None,
+            keep_steps: false,
             freeze_steps: false,
             updating: false,
             drawn_visibility: None,
@@ -796,6 +805,7 @@ impl State {
             }
             self.pages.clear();
             self.page_json.clear();
+            self.page_vis.clear();
             self.page = 0;
             self.load_page(&json!({}));
             self.title.clear();
@@ -811,6 +821,7 @@ impl State {
         match d.get("pages").and_then(serde_json::Value::as_array) {
             Some(list) if !list.is_empty() => {
                 self.page_json.clear();
+                self.page_vis.clear();
                 self.pages = list.iter().take(30).cloned().collect();
                 self.page = 0;
                 if let Some(first) = self.pages.first().cloned() {
@@ -1236,6 +1247,17 @@ fn switch_page(app: &mut SolveApp, to: usize) {
     let st = &mut app.drawing;
     st.pages = st.all_pages();
     let Some(next) = st.pages.get(to).cloned() else { return };
+    // The bodies this sheet shows go with it, and the next sheet's come back.
+    let old = st.page;
+    if st.page_vis.len() <= old.max(to) {
+        st.page_vis.resize(old.max(to) + 1, None);
+    }
+    if let Some(slot) = st.page_vis.get_mut(old) {
+        *slot = st.drawn_visibility.clone();
+    }
+    if let Some(Some(v)) = st.page_vis.get(to).cloned() {
+        st.drawn_visibility = Some(v);
+    }
     st.page = to;
     st.load_page(&next);
     // A sheet already made is shown as it was made: only its own Update brings it up to date.
@@ -1277,6 +1299,9 @@ fn duplicate_page(app: &mut SolveApp) {
     let same = st.page_json.get(st.page).cloned().flatten();
     st.page_json.resize(to.max(st.page_json.len()), None);
     st.page_json.insert(to, same);
+    let vis = st.page_vis.get(st.page).cloned().flatten();
+    st.page_vis.resize(to.max(st.page_vis.len()), None);
+    st.page_vis.insert(to, vis);
     switch_page(app, to);
 }
 
@@ -1291,10 +1316,16 @@ fn delete_page(app: &mut SolveApp) {
     if st.page < st.page_json.len() {
         st.page_json.remove(st.page);
     }
+    if st.page < st.page_vis.len() {
+        st.page_vis.remove(st.page);
+    }
     let to = st.page.min(st.pages.len() - 1);
     st.page = to;
     let next = st.pages.get(to).cloned().unwrap_or_default();
     st.load_page(&next);
+    if let Some(Some(v)) = st.page_vis.get(to).cloned() {
+        st.drawn_visibility = Some(v);
+    }
     if let Some(sheet) = app.drawing.page_json.get(to).and_then(Option::as_ref).and_then(parse) {
         app.drawing.sheet = Some(sheet);
         app.drawing.steps.clear();
@@ -1520,7 +1551,9 @@ fn begin(app: &mut SolveApp) {
 /// page switch is not an Update); otherwise the model as it is now is taken.
 fn begin_keep(app: &mut SolveApp, keep: bool) {
     let keep = keep && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == app.session.doc.name && app.drawing.drawn_visibility.is_some();
-    app.drawing.freeze_steps = keep;
+    // The engine's kept scene is reused only when it was made with the bodies this sheet shows.
+    app.drawing.freeze_steps = keep && app.drawing.cache_vis == app.drawing.drawn_visibility;
+    app.drawing.keep_steps = keep;
     if !keep {
         app.drawing.drawn_visibility = Some(app.session.visibility.clone());
         app.drawing.drawn_rev = app.session.revision;
@@ -1546,6 +1579,7 @@ fn begin_keep(app: &mut SolveApp, keep: bool) {
 /// switching a body on or off in 3D changes the drawing only when Update is pressed.
 fn run_sheet(app: &mut SolveApp, p: Value) -> Result<Value, String> {
     let kept = app.drawing.drawn_visibility.clone().map(|v| std::mem::replace(&mut app.session.visibility, v));
+    app.drawing.cache_vis = Some(app.session.visibility.clone());
     let r = app.run("drawing.sheet", p);
     if let Some(now) = kept {
         app.session.visibility = now;
@@ -1557,7 +1591,7 @@ fn run_sheet(app: &mut SolveApp, p: Value) -> Result<Value, String> {
 fn refresh(app: &mut SolveApp) {
     let mut p = params(&app.drawing);
     // Until Update, the sheet keeps the model it was last computed from, whatever changed in 3D since.
-    if !app.drawing.updating && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == app.session.doc.name {
+    if !app.drawing.updating && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == app.session.doc.name && app.drawing.cache_vis == app.drawing.drawn_visibility {
         p["freeze"] = json!(true);
     }
     match run_sheet(app, p) {
@@ -4075,7 +4109,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.sheet = None;
             app.drawing.error = Some(e);
         } else if app.drawing.steps.is_empty() {
-            if app.drawing.freeze_steps {
+            if app.drawing.keep_steps {
                 // Not an Update: the sheet keeps the model it was last updated from.
                 refresh(app);
                 fit(app);
