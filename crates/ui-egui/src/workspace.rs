@@ -89,6 +89,8 @@ pub const SECTIONS: &[Section] = &[
         promoted: 3,
         ids: &["solid.move", "solid.mirror", "solid.pattern.rectangular", "solid.align", "solid.pattern.circular", "solid.pattern.path"],
     },
+    // The quick Show/Hide row: Ctrl+B, Ctrl+Shift+B and Ctrl+Shift+U as buttons.
+    Section { tab: "MODEL", panel: "VISIBILITY", promoted: 4, ids: &["view.hide", "view.hide_others", "view.invert_visibility", "view.show_all"] },
     Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 2, ids: &["construct.plane.offset", "sketch.project_to_surface"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
@@ -346,6 +348,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("surface.sweep", "Sweep"),
     ("timeline.dependents", "Dependents"),
     ("view.apply", "Restore View"),
+    ("view.invert_visibility", "Show/Hide"),
     ("view.save", "Save View"),
 ];
 

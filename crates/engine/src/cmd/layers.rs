@@ -10,7 +10,7 @@ use solidcraft_doc::Layer;
 use super::CommandSpec;
 use super::browser::{shown_item, visibility};
 use crate::params::{bad, bool_, str_};
-use crate::{Result, Session};
+use crate::{Result, Sel, Session};
 
 const MAX_LAYERS: usize = 256;
 
@@ -20,6 +20,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("layer.visibility", "Show/Hide Layer", layer_visibility).icon("eye").noundo().params("name; visible: bool (every item on the layer)"),
     CommandSpec::new("layer.delete", "Delete Layer", delete).icon("delete").noundo().params("name (its items are shown again and stay in the design)"),
     CommandSpec::new("layer.list", "List Layers", list).icon("list").noundo().doc_only(),
+    CommandSpec::new("view.hide", "Hide", hide).icon("eye").noundo().params("items?: [body | sketch | construction names] (default: the bodies of the selection, faces and edges included); hides them. Ctrl+B in the app flips what is selected"),
+    CommandSpec::new("view.hide_others", "Isolate", hide_others).icon("eye").noundo().params("items?: [body names] (default: the bodies of the selection); shows those and hides every other body"),
     CommandSpec::new("view.show_all", "Show All", show_all).icon("eye").noundo().params("shows every body, sketch, construction item and layer"),
     CommandSpec::new("view.invert_visibility", "Show Hidden / Hide Shown", invert).icon("eye").noundo().params("swaps shown and hidden bodies and sketches"),
 ];
@@ -133,6 +135,44 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
     Ok(json!({"layers": s.visibility.layers}))
 }
 
+/// The bodies the selection stands for: a body, or the body of a picked face, edge or vertex.
+fn selected_bodies(s: &Session) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for sel in &s.selection {
+        if let Sel::Body { name } | Sel::Face { body: name, .. } | Sel::Edge { body: name, .. } | Sel::Vertex { body: name, .. } = sel
+            && !out.contains(name)
+        {
+            out.push(name.clone());
+        }
+    }
+    out
+}
+
+/// The items to act on: `items`, else the selection's bodies.
+fn targets(s: &Session, p: &Value, cmd: &str) -> Result<Vec<String>> {
+    let items = if p.get("items").is_some() { item_names(s, p, cmd, true)? } else { selected_bodies(s) };
+    if items.is_empty() {
+        return Err(bad(cmd, "select something first, or give `items`"));
+    }
+    Ok(items)
+}
+
+fn hide(s: &mut Session, p: &Value) -> Result<Value> {
+    let items = targets(s, p, "view.hide")?;
+    visibility(s, &json!({"visible": false, "items": items}))
+}
+
+fn hide_others(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.hide_others";
+    let keep = targets(s, p, cmd)?;
+    let others: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).filter(|n| !keep.contains(n)).collect();
+    visibility(s, &json!({"visible": true, "items": keep}))?;
+    if others.is_empty() {
+        return Ok(json!({"visibility": s.visibility}));
+    }
+    visibility(s, &json!({"visible": false, "items": others}))
+}
+
 fn show_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let v = &mut s.visibility;
     v.hidden_bodies.clear();
@@ -157,4 +197,31 @@ fn invert(s: &mut Session, _p: &Value) -> Result<Value> {
     v.shown_sketches.clear();
     s.revision += 1;
     Ok(json!({"visibility": s.visibility}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hide takes the selection's bodies away, Isolate leaves only them, Show All brings everything back.
+    #[test]
+    fn hide_and_isolate_work_on_the_selection_and_show_all_undoes_them() {
+        let mut s = Session::default();
+        for (name, x) in [("A", 0), ("B", 30), ("C", 60)] {
+            s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "center": [x, 0, 5], "operation": "new", "body_name": name})).unwrap();
+        }
+        assert!(s.execute("view.hide", &json!({})).is_err(), "nothing selected");
+        s.selection = vec![Sel::Body { name: "B".into() }];
+        s.execute("view.hide", &json!({})).unwrap();
+        assert_eq!(s.visibility.hidden_bodies, vec!["B".to_string()]);
+        s.execute("view.show_all", &json!({})).unwrap();
+        s.selection = vec![Sel::Body { name: "A".into() }];
+        s.execute("view.hide_others", &json!({})).unwrap();
+        let mut hidden = s.visibility.hidden_bodies.clone();
+        hidden.sort();
+        assert_eq!(hidden, vec!["B".to_string(), "C".to_string()]);
+        s.execute("view.show_all", &json!({})).unwrap();
+        assert!(s.visibility.hidden_bodies.is_empty());
+        assert!(s.execute("view.hide", &json!({"items": ["Nope"]})).is_err(), "an unknown name is an error");
+    }
 }

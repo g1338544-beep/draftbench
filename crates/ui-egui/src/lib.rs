@@ -918,6 +918,11 @@ impl SolveApp {
             }
             return;
         }
+        // Hide: the same as Ctrl+B (it also takes the browser's picks: components, sketches, joints…).
+        if id == "view.hide" {
+            context_menu::toggle_visibility(self);
+            return;
+        }
         if id.starts_with("drawing.ribbon.") {
             drawing_workspace::ribbon(self, id);
             return;
