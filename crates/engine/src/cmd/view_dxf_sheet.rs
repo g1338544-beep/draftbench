@@ -942,6 +942,10 @@ fn manual_once(
             add_dimension(&mut entities, d, &boxes, dim_th, arrow, decimals);
         }
     }
+    // Ordinate dimensions: numbers measured from one datum point, on short leaders (no arrows).
+    if let Some(o) = p.get("ordinate") {
+        add_ordinates(&mut entities, o, &boxes, dim_th, decimals);
+    }
     let entities = projection::connect(entities);
     finish(p, sheet, entities, title, "as shown".into(), first_angle, any_dashed, any_centre || centre_used, names, path, boxes)
 }
@@ -2547,6 +2551,68 @@ fn add_dimension(entities: &mut Vec<DxfEntity>, d: &Value, boxes: &[Value], th: 
     entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: centre, height: th, angle_deg: angle.rem_euclid(360.0), text: text_value } });
 }
 
+/// Ordinate dimensions: `{"o": [x, y], "items": [{"p": [x, y], "axis": "x"|"y", "at": level}]}`. An item
+/// with axis x measures the distance from the datum along the sheet's horizontal, its leader runs up
+/// to `at` (a y level); axis y measures along the vertical, its leader runs left to `at` (an x level).
+/// The datum's own 0 is written on the first level of each axis.
+fn add_ordinates(entities: &mut Vec<DxfEntity>, o: &Value, boxes: &[Value], th: f64, decimals: Option<usize>) {
+    let pt = |v: &Value| -> Option<Vec2> {
+        let a = v.as_array()?;
+        let (x, y) = (a.first()?.as_f64()?, a.get(1)?.as_f64()?);
+        (x.is_finite() && y.is_finite() && x.abs() < 1e5 && y.abs() < 1e5).then(|| Vec2::new(x, y))
+    };
+    let Some(origin) = o.get("o").and_then(pt) else { return };
+    let Some(items) = o.get("items").and_then(Value::as_array) else { return };
+    let scale_at = |q: Vec2| -> f64 {
+        boxes
+            .iter()
+            .filter_map(|bx| {
+                let g = |k: &str| bx.get(k).and_then(Value::as_f64);
+                let (x, y, w, h, k) = (g("x")?, g("y")?, g("w")?, g("h")?, g("scale")?);
+                let pad = 15.0;
+                ((q.x - x).abs() <= w / 2.0 + pad && (q.y - y).abs() <= h / 2.0 + pad && k > 0.0).then_some(k)
+            })
+            .next()
+            .unwrap_or(1.0)
+    };
+    let mut zero_done = [false, false];
+    // One leader and its number: `from` the feature, to the level, the value in model mm.
+    let one = |entities: &mut Vec<DxfEntity>, from: Vec2, horizontal_value: bool, level: f64, value: f64| {
+        let shown = if value.abs() < 0.05 { 0.0 } else { value };
+        let words = format!("{}{}", if shown < 0.0 { "-" } else { "" }, dim_value(shown.abs(), decimals));
+        let len = words.chars().count() as f64 * 0.62 * th;
+        if horizontal_value {
+            // A vertical leader up (or down) to the level; the number turned along it.
+            let dir = if level >= from.y { 1.0 } else { -1.0 };
+            line("DIM", Vec2::new(from.x, from.y + dir * 1.5), Vec2::new(from.x, level), entities);
+            let centre = Vec2::new(from.x + th * 0.35, level + dir * (len / 2.0 + 0.8));
+            let angle = if dir > 0.0 { 90.0 } else { 270.0 };
+            let centre = if dir > 0.0 { centre } else { Vec2::new(from.x - th * 0.35, centre.y) };
+            entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: centre, height: th, angle_deg: angle, text: words } });
+        } else {
+            let dir = if level >= from.x { 1.0 } else { -1.0 };
+            line("DIM", Vec2::new(from.x + dir * 1.5, from.y), Vec2::new(level, from.y), entities);
+            let centre = Vec2::new(level + dir * (len / 2.0 + 0.8), from.y - th * 0.35);
+            entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: centre, height: th, angle_deg: 0.0, text: words } });
+        }
+    };
+    for it in items.iter().take(600) {
+        let Some(q) = it.get("p").and_then(pt) else { continue };
+        let Some(level) = it.get("at").and_then(Value::as_f64).filter(|v| v.is_finite() && v.abs() < 1e5) else { continue };
+        let scale = scale_at(q);
+        let along_x = it.get("axis").and_then(Value::as_str) != Some("y");
+        let value = if along_x { (q.x - origin.x) / scale } else { (q.y - origin.y) / scale };
+        one(entities, q, along_x, level, value);
+        let slot = usize::from(!along_x);
+        if let Some(done) = zero_done.get_mut(slot)
+            && !*done
+        {
+            *done = true;
+            one(entities, origin, along_x, level, 0.0);
+        }
+    }
+}
+
 fn view_name(v: StandardView) -> &'static str {
     match v {
         StandardView::Front => "FRONT",
@@ -2591,5 +2657,27 @@ mod dimension_arrow_tests {
     fn a_narrow_dimension_puts_its_arrows_outside_and_a_wide_one_keeps_them_inside() {
         assert!(leftmost(5.0) < -4.0, "two 3 mm arrows do not fit in 5 mm: they go outside");
         assert!(leftmost(40.0) > -1e-9, "plenty of room: the arrows stay between the extension lines");
+    }
+}
+
+#[cfg(test)]
+mod ordinate_tests {
+    use super::*;
+
+    #[test]
+    fn ordinates_read_from_the_datum_and_the_datum_gets_its_zero() {
+        let mut entities = Vec::new();
+        let o = json!({"o": [10.0, 10.0], "items": [{"p": [40.0, 30.0], "axis": "x", "at": 60.0}, {"p": [40.0, 30.0], "axis": "y", "at": 0.0}]});
+        add_ordinates(&mut entities, &o, &[], 3.5, None);
+        let words: Vec<String> = entities.iter().filter_map(|e| if let DxfShape::Text { text, .. } = &e.shape { Some(text.clone()) } else { None }).collect();
+        assert_eq!(words, ["30", "0", "20", "0"], "x then its zero, y then its zero");
+    }
+
+    #[test]
+    fn a_point_left_of_the_datum_reads_negative() {
+        let mut entities = Vec::new();
+        let o = json!({"o": [10.0, 10.0], "items": [{"p": [4.0, 30.0], "axis": "x", "at": 60.0}]});
+        add_ordinates(&mut entities, &o, &[], 3.5, None);
+        assert!(entities.iter().any(|e| matches!(&e.shape, DxfShape::Text { text, .. } if text == "-6")));
     }
 }

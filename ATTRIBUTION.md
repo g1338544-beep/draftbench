@@ -317,6 +317,7 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/icons/ui/design/svg/model/offset_face.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/offset_surface.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/open.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/ordinate.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/origin.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/params.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/paste.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |

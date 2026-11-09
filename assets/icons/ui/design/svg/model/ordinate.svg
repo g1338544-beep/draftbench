@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Ordinate</title>
+  <path d="M14 10L50 10A4 4 0 0 1 54 14L54 50A4 4 0 0 1 50 54L14 54A4 4 0 0 1 10 50L10 14A4 4 0 0 1 14 10Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 44L26 14M38 44L38 22M50 44L50 18" fill="none" stroke="#ffffff" stroke-width="7.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 44L26 14M38 44L38 22M50 44L50 18" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14 50L56 50" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="16" cy="50" r="3.2" fill="#34465b" stroke="#34465b" stroke-width="1"/>
+</svg>

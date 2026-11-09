@@ -12,6 +12,8 @@ use crate::{SolveApp, theme::Tokens};
 
 #[path = "drawing_symbols_ui.rs"]
 mod symbols_ui;
+#[path = "ordinate_ui.rs"]
+mod ordinate_ui;
 
 const PAPERS: [&str; 5] = ["A0", "A1", "A2", "A3", "A4"];
 const SIZES: [(f32, f32); 5] = [(1189.0, 841.0), (841.0, 594.0), (594.0, 420.0), (420.0, 297.0), (297.0, 210.0)];
@@ -328,6 +330,8 @@ pub struct State {
     texts: Vec<FreeText>,
     /// Symbols from the Symbols window: surface finish, welding, tolerance frames, mechanical signs.
     sym: symbols_ui::SymState,
+    /// Ordinate dimensions: the datum and the points measured from it.
+    ord: ordinate_ui::OrdState,
     ft_sel: Option<usize>,
     ft_drag: Option<(usize, Pos2, f32, f32)>,
     ft_edit: Option<usize>,
@@ -542,6 +546,7 @@ impl Default for State {
             sel_grid: None,
             texts: Vec::new(),
             sym: symbols_ui::SymState::default(),
+            ord: ordinate_ui::OrdState::default(),
             ft_sel: None,
             ft_drag: None,
             ft_edit: None,
@@ -670,7 +675,7 @@ impl State {
             "dim_decimals": self.dim_decimals,
             "dim_text": self.dim_text, "dim_arrow": self.dim_arrow,
             "shaded": self.shaded.iter().map(|v| json!([v.x, v.y, v.w, v.yaw, v.pitch, v.ratio, v.bg, v.style, v.zoom])).collect::<Vec<_>>(),
-            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "flines": self.flines, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(), "symbols": self.sym.to_json(),
+            "sheet_no": self.sheet_no, "sheet_scale": self.sheet_scale, "cells": self.cells, "flines": self.flines, "texts": self.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(), "symbols": self.sym.to_json(), "ordinate": self.ord.to_json(),
             "paper": self.paper, "landscape": self.landscape,
             "block_detail": self.block_detail, "block_free": self.block_free, "block_w": self.block_w,
             "material": self.material, "qty": self.qty, "finishing": self.finishing, "heat": self.heat,
@@ -1120,6 +1125,7 @@ impl State {
             .unwrap_or_default();
         self.ft_sel = None;
         self.sym.load(d.get("symbols").and_then(serde_json::Value::as_array));
+        self.ord.load(d.get("ordinate"));
         if let Some(n) = d.get("paper").and_then(serde_json::Value::as_u64).filter(|n| *n <= 5) {
             self.paper = n as usize;
         }
@@ -1357,7 +1363,7 @@ fn add_page(app: &mut SolveApp) {
     }
     st.pages = st.all_pages();
     let n = st.pages.len() + 1;
-    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": [], "flines": [], "texts": [], "symbols": [], "paper": st.paper, "landscape": st.landscape, "block_detail": true, "block_free": false, "block_w": "190"}));
+    st.pages.push(json!({"views": [], "dims": [], "sheet_no": n.to_string(), "sheet_scale": st.sheet_scale, "cells": [], "flines": [], "texts": [], "symbols": [], "ordinate": null, "paper": st.paper, "landscape": st.landscape, "block_detail": true, "block_free": false, "block_w": "190"}));
     switch_page_with(app, n - 1, true);
 }
 
@@ -1513,6 +1519,7 @@ fn params(st: &State) -> Value {
         "centre_mode": if st.centre_mode == 1 { "marks" } else { "lines" },
         "block_cells": st.cells,
         "symbols": st.sym.to_json(),
+        "ordinate": st.ord.to_json(),
         "free_texts": st.texts.iter().map(|t| json!({"x": t.x, "y": t.y, "k": t.k, "font": t.font, "text": t.text})).collect::<Vec<_>>(),
         "marks": st.marks,
         "clines": st.clines,
@@ -2557,6 +2564,17 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             }
         }
         "drawing.ribbon.symbols" => app.drawing.sym.open = !app.drawing.sym.open,
+        "drawing.ribbon.ordinate" => {
+            app.drawing.ord.tool = !app.drawing.ord.tool;
+            app.drawing.dim_tool = None;
+            app.drawing.cline_tool = None;
+            app.drawing.mark_tool = false;
+            app.drawing.erase_tool = false;
+            if app.drawing.ord.tool {
+                let msg = if app.drawing.ord.origin.is_some() { "Ordinate: click points (Shift+click for Y); Ctrl+click moves the datum. Backspace undoes, Delete clears, Esc ends." } else { "Ordinate: click the datum point (the 0), then the points to dimension." };
+                app.set_status(msg.to_string(), false);
+            }
+        }
         "drawing.ribbon.scale" => app.drawing.scale_edit = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()),
         "drawing.ribbon.delete" => {
             if let Some(i) = app.drawing.selected.filter(|i| *i < app.drawing.placed.len()) {
@@ -4335,7 +4353,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         };
         let pointer = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
         // A view's caption: click selects it, double-click edits it, Delete hides it.
-        if app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.base.is_none() && app.drawing.text_edit.is_none() && app.drawing.cell_edit.is_none() {
+        if app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.base.is_none() && app.drawing.text_edit.is_none() && app.drawing.cell_edit.is_none() {
             if let Some(s) = pointer
                 && (response.clicked() || response.double_clicked())
             {
@@ -4382,7 +4400,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     erase_click = Some([s.x - g, s.y - g, s.x + g, s.y + g]);
                 }
             }
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none())
             && let Some(s) = pointer
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(e) = end_hit(s)
@@ -4403,7 +4421,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if response.double_clicked() {
                 app.drawing.text_edit = Some(i);
             }
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none())
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none())
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && let Some((a, b)) = app.drawing.sel_centre
@@ -4412,7 +4430,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // An end of the selected centre line: drag it to make the line longer or shorter.
             let second = (s - b).length() < (s - a).length();
             app.drawing.cl_drag = Some((a, b, a, b, second));
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool)
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && (centre_hit(s).is_some() || ui.input(|i| i.modifiers.ctrl))
@@ -4421,7 +4439,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.erase = Some((s, s));
             app.drawing.selected = None;
             app.drawing.sel_dim = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && let Some((v, k)) = letter_hit(sheet, &app.drawing.placed, s)
@@ -4430,7 +4448,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let orig = app.drawing.placed.get(v).map_or([0.0; 4], |p| p.letter_off);
             app.drawing.letter_drag = Some((v, k, s, orig));
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.sym.armed.is_none())
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.sym.armed.is_none())
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && let Some(d) = app.drawing.sym.start_drag(s)
@@ -4439,7 +4457,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.sym.drag = Some(d);
             app.drawing.selected = None;
             app.drawing.ft_sel = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && let Some(i) = free_text_hit(&app.drawing.texts, ui_text_height(&app.drawing), s)
@@ -4449,7 +4467,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.ft_drag = Some((i, s, x0, y0));
             app.drawing.ft_sel = Some(i);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && let Some(index) = moved_cell_hit(&block_geo(&app.drawing, sheet.width), &app.drawing.cells, ui_text_height(&app.drawing), s)
@@ -4458,7 +4476,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
             app.drawing.cell_drag = Some((index, s, dx, dy));
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && let Some(v) = cap_hit(s).filter(|v| app.drawing.placed.get(*v).is_some_and(|p| p.label.as_deref() != Some("")))
@@ -4468,7 +4486,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.cap_drag = Some((v, s, cx, cy));
             app.drawing.caption_sel = Some(v);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && hit(s).is_none()
@@ -4479,7 +4497,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.fl_drag = Some((i, part, s, orig));
             app.drawing.fl_sel = Some(i);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
@@ -4490,7 +4508,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.grid_drag = Some(which);
             app.drawing.sel_grid = Some(which);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
@@ -4501,7 +4519,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
             app.drawing.cell_drag = Some((index, s, dx, dy));
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
@@ -4514,7 +4532,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.selected = None;
             app.drawing.sel_dim = None;
             app.drawing.sel_centre = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none())
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && let Some(b) = hit(s)
@@ -4522,7 +4540,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.sel_dim = None;
             app.drawing.drag = Some((b.0, b.1 - s.x, b.2 - s.y));
             app.drawing.selected = Some(b.0);
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
+        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none())
             && response.clicked()
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
         {
@@ -4894,7 +4912,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Double-click a title block cell to type in it.
-    if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
+    if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none())
         && response.double_clicked()
         && let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref())
         && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
@@ -4912,6 +4930,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let size = app.drawing.sheet.as_ref().map_or((0.0, 0.0), |s| (s.width, s.height));
         let changed = symbols_ui::sheet_input(app, ui, &response, at, size);
         symbols_ui::after(app, changed);
+        let px = map.as_ref().map_or(1.0, |m| m.px_per_mm());
+        let ord_changed = ordinate_ui::tool_input(app, ui, &response, at, px);
+        symbols_ui::after(app, ord_changed);
     }
     if let Some(i) = app.drawing.cell_edit {
         let mut changed = false;
@@ -4998,7 +5019,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Double-click a view to edit its scale; right-click for the add / remove menu.
     if let (Some(m), Some(sheet)) = (&map, app.drawing.sheet.as_ref()) {
         let under = |s: Pos2| sheet.boxes.iter().rev().find(|b| (s.x - b.1).abs() <= b.3 / 2.0 && (s.y - b.2).abs() <= b.4 / 2.0).map(|b| b.0);
-        if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none())
+        if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none())
             && app.drawing.text_edit.is_none()
             && app.drawing.cell_edit.is_none()
             && response.double_clicked()
@@ -6630,6 +6651,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     symbols_ui::paint_selection(app, &painter, &map, px_per_mm);
     symbols_ui::paint_armed(app, &painter, response.hover_pos(), px_per_mm);
+    ordinate_ui::paint(app, &painter, &map, response.hover_pos().and_then(|q| m.to_sheet(q)), px_per_mm);
     if let Some(i) = app.drawing.ft_sel
         && let Some(t) = app.drawing.texts.get(i)
     {
