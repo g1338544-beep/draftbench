@@ -1830,6 +1830,19 @@ fn finish(
             }
         }
     }
+    // Circles and arcs drawn by hand: centre x, y, radius, from and to angle (degrees; 0 to 360 is a circle).
+    if let Some(list) = p.get("vcurves").and_then(Value::as_array) {
+        for m in list.iter().take(400) {
+            let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+            if let [x, y, r, a0, a1] = n[..]
+                && [x, y, r, a0, a1].iter().all(|v| v.is_finite() && v.abs() < 1e5)
+                && r > 0.05
+            {
+                let shape = if (a1 - a0).abs() >= 359.99 { DxfShape::Circle { c: Vec2::new(x, y), r } } else { DxfShape::Arc { c: Vec2::new(x, y), r, a0, a1 } };
+                entities.push(DxfEntity { layer: "VISIBLE".into(), shape });
+            }
+        }
+    }
     if let Some(list) = p.get("ccircles").and_then(Value::as_array) {
         for m in list.iter().take(200) {
             let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();

@@ -390,6 +390,10 @@ pub struct State {
     cline_tool: Option<Vec<(Pos2, Pos2)>>,
     /// The line tool is the free Line (click its two ends) rather than the Centre Line between two lines.
     cline_free: bool,
+    /// What the free tool draws: 0 a line, 1 a circle, 2 an arc through three points, 3 a rectangle.
+    free_kind: u8,
+    /// Circles and arcs drawn by hand: centre x, y, radius, from and to angle in degrees (0..360 is a circle).
+    vcurves: Vec<[f32; 5]>,
     dirty_marks: bool,
     /// Colour pictures of the model on the sheet, and the pictures drawn so far (key, RGB, texture).
     shaded: Vec<ShadedView>,
@@ -568,6 +572,8 @@ impl Default for State {
             last_state: String::new(),
             cline_tool: None,
             cline_free: false,
+            free_kind: 0,
+            vcurves: Vec::new(),
             dirty_marks: false,
             shaded: Vec::new(),
             shaded_cache: Vec::new(),
@@ -642,6 +648,7 @@ impl State {
             "marks": self.marks,
             "clines": self.clines,
             "vlines": self.vlines,
+            "vcurves": self.vcurves,
             "ccircles": self.ccircles,
             "line_cols": self.line_cols.iter().map(|(v, k, c)| json!([v, k, c])).collect::<Vec<_>>(),
             "centre_cut": self.centre_cut,
@@ -844,6 +851,7 @@ impl State {
         self.marks.clear();
         self.clines.clear();
         self.vlines.clear();
+        self.vcurves.clear();
         self.ccircles.clear();
         self.line_cols.clear();
         self.col_pick = None;
@@ -1017,6 +1025,16 @@ impl State {
                     && [a, b, c, e].iter().all(|t| t.is_finite() && t.abs() < 1e5)
                 {
                     self.vlines.push([a as f32, b as f32, c as f32, e as f32]);
+                }
+            }
+        }
+        if let Some(list) = d.get("vcurves").and_then(serde_json::Value::as_array) {
+            for m in list.iter().take(400) {
+                let n: Vec<f64> = m.as_array().map(|a| a.iter().filter_map(serde_json::Value::as_f64).collect()).unwrap_or_default();
+                if let [a, b, c, e, g] = n[..]
+                    && [a, b, c, e, g].iter().all(|t| t.is_finite() && t.abs() < 1e5)
+                {
+                    self.vcurves.push([a as f32, b as f32, c as f32, e as f32, g as f32]);
                 }
             }
         }
@@ -1445,6 +1463,7 @@ fn params(st: &State) -> Value {
         "marks": st.marks,
         "clines": st.clines,
         "vlines": st.vlines,
+        "vcurves": st.vcurves,
         "ccircles": st.ccircles,
         "centre_cut": st.centre_cut,
         "dim_decimals": st.dim_decimals,
@@ -1739,7 +1758,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
     app.drawing.placed.pop();
     let own = p.get("placements").and_then(Value::as_array).and_then(|a| a.last()).cloned()?;
     p["placements"] = json!([own]);
-    for key in ["dimension_items", "clines", "vlines", "ccircles", "marks", "centre_cut", "bom"] {
+    for key in ["dimension_items", "clines", "vlines", "vcurves", "ccircles", "marks", "centre_cut", "bom"] {
         p[key] = json!([]);
     }
     p["hole_table"] = json!(false);
@@ -2102,6 +2121,7 @@ fn erase_centre(app: &mut SolveApp, mut r: [f32; 4], any_line: bool) {
     app.drawing.clines.retain(|c| !segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r));
     if any_line {
         app.drawing.vlines.retain(|c| !segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r));
+        app.drawing.vcurves.retain(|c| !ring_in_rect(pos2(c[0], c[1]), c[2], r));
     }
     app.drawing.ccircles.retain(|c| !ring_in_rect(pos2(c[0], c[1]), c[2], r));
     if app.drawing.centre_cut.len() < 400 {
@@ -2437,8 +2457,15 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
                 }
             });
         }
-        "drawing.ribbon.line" => {
-            let on = app.drawing.cline_tool.is_some() && app.drawing.cline_free;
+        "drawing.ribbon.line" | "drawing.ribbon.circle" | "drawing.ribbon.arc" | "drawing.ribbon.rectangle" => {
+            let kind = match id {
+                "drawing.ribbon.circle" => 1,
+                "drawing.ribbon.arc" => 2,
+                "drawing.ribbon.rectangle" => 3,
+                _ => 0,
+            };
+            let on = app.drawing.cline_tool.is_some() && app.drawing.cline_free && app.drawing.free_kind == kind;
+            app.drawing.free_kind = kind;
             app.drawing.cline_free = true;
             app.drawing.cline_tool = if on { None } else { Some(Vec::new()) };
             app.drawing.mark_tool = false;
@@ -5621,38 +5648,107 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) || response.clicked_by(egui::PointerButton::Secondary) {
             app.drawing.cline_tool = None;
         } else if app.drawing.cline_free {
-            // Line: click its two ends (they snap to ends, corners and centres; Shift keeps it level or upright);
-            // each click goes on from the last, Esc or right-click ends.
+            // Line, circle, arc, rectangle: clicks snap to ends, corners, centres and crossings (Shift keeps a line
+            // level or upright). A line goes on from its last point; Esc or right-click ends.
             let tol = 12.0 / px_per_mm;
+            let kind = app.drawing.free_kind;
             let from = picked.first().map(|(a, _)| *a);
             let shift = ui.input(|i| i.modifiers.shift);
             let aim = |s: Pos2| -> Pos2 {
                 let q = snap_point(sheet, s, tol).unwrap_or(s);
                 match from {
-                    Some(f) if shift => {
+                    Some(f) if shift && kind == 0 => {
                         if (q.x - f.x).abs() >= (q.y - f.y).abs() { pos2(q.x, f.y) } else { pos2(f.x, q.y) }
                     }
                     _ => q,
                 }
             };
             let accent = Tokens::get().accent;
-            if let Some(at) = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q)).map(aim) {
-                if let Some(f) = from {
-                    painter.line_segment([map(f), map(at)], Stroke::new(2.0, accent));
+            let stroke = Stroke::new(2.0, accent);
+            let hover_raw = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
+            let pts: Vec<Pos2> = picked.iter().map(|(a, _)| *a).collect();
+            if let Some(at) = hover_raw.map(aim) {
+                match (kind, pts.first().copied()) {
+                    (0, Some(f)) => {
+                        painter.line_segment([map(f), map(at)], stroke);
+                    }
+                    (1, Some(f)) => {
+                        painter.circle_stroke(map(f), (at - f).length() * px_per_mm, stroke);
+                    }
+                    (3, Some(f)) => {
+                        let corners = [f, pos2(at.x, f.y), at, pos2(f.x, at.y), f];
+                        painter.add(egui::Shape::line(corners.iter().map(|c| map(*c)).collect(), stroke));
+                    }
+                    (2, Some(f)) => {
+                        if let (Some(mid), true) = (pts.get(1).copied(), pts.len() == 2) {
+                            if let Some((ctr, a0, a1, r)) = arc_through(f, mid, at) {
+                                painter.add(egui::Shape::line(arc_points(ctr, r, a0, a1).into_iter().map(map).collect(), stroke));
+                            }
+                        } else {
+                            painter.line_segment([map(f), map(at)], Stroke::new(1.0, accent.gamma_multiply(0.6)));
+                        }
+                    }
+                    _ => {}
                 }
                 painter.circle_stroke(map(at), 5.0, Stroke::new(1.5, accent));
+                // A crossing of two lines is marked with a cross.
+                if let Some(x) = intersection_near(sheet, hover_raw.unwrap_or(at), tol)
+                    && (x - at).length() < 1e-3
+                {
+                    let d = 7.0;
+                    let c = map(at);
+                    painter.line_segment([c + vec2(-d, -d), c + vec2(d, d)], Stroke::new(1.5, accent));
+                    painter.line_segment([c + vec2(-d, d), c + vec2(d, -d)], Stroke::new(1.5, accent));
+                }
             }
             if response.clicked_by(egui::PointerButton::Primary)
                 && let Some(q) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q)).map(aim)
             {
-                if let Some(f) = from
-                    && (q - f).length() > 0.01
-                    && app.drawing.vlines.len() < 400
-                {
-                    app.drawing.vlines.push([f.x, f.y, q.x, q.y]);
-                    app.drawing.dirty_marks = true;
+                let mut next: Vec<(Pos2, Pos2)> = vec![(q, q)];
+                match (kind, from) {
+                    (0, Some(f)) => {
+                        if (q - f).length() > 0.01 && app.drawing.vlines.len() < 400 {
+                            app.drawing.vlines.push([f.x, f.y, q.x, q.y]);
+                            app.drawing.dirty_marks = true;
+                        }
+                    }
+                    (1, Some(f)) => {
+                        let r = (q - f).length();
+                        if r > 0.05 && r < 5000.0 && app.drawing.vcurves.len() < 400 {
+                            app.drawing.vcurves.push([f.x, f.y, r, 0.0, 360.0]);
+                            app.drawing.dirty_marks = true;
+                        }
+                        next.clear();
+                    }
+                    (3, Some(f)) => {
+                        if (q.x - f.x).abs() > 0.01 && (q.y - f.y).abs() > 0.01 && app.drawing.vlines.len() + 4 <= 400 {
+                            let c = [f, pos2(q.x, f.y), q, pos2(f.x, q.y)];
+                            for i in 0..4 {
+                                let (a, b) = (c[i], c[(i + 1) % 4]);
+                                app.drawing.vlines.push([a.x, a.y, b.x, b.y]);
+                            }
+                            app.drawing.dirty_marks = true;
+                        }
+                        next.clear();
+                    }
+                    (2, Some(_)) => {
+                        if pts.len() >= 2 {
+                            if let (Some(f), Some(mid)) = (pts.first().copied(), pts.get(1).copied())
+                                && let Some((ctr, a0, a1, r)) = arc_through(f, mid, q)
+                                && r < 5000.0
+                                && app.drawing.vcurves.len() < 400
+                            {
+                                app.drawing.vcurves.push([ctr.x, ctr.y, r, a0, a1]);
+                                app.drawing.dirty_marks = true;
+                            }
+                            next.clear();
+                        } else {
+                            next = pts.iter().map(|p| (*p, *p)).chain(std::iter::once((q, q))).collect();
+                        }
+                    }
+                    _ => {}
                 }
-                app.drawing.cline_tool = Some(vec![(q, q)]);
+                app.drawing.cline_tool = Some(next);
             }
         } else {
             let tol = 10.0 / px_per_mm;
@@ -5923,7 +6019,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             if let Some(h) = hover {
-                let at = step_snap(h, last, tol, ui.input(|i| i.modifiers.alt));
+                let at = stepped_point(sheet, h, last, tol, ui.input(|i| i.modifiers.alt));
                 // Guides only: where hole centres line up with the pointer, and the level or plumb line
                 // through the previous point while the step runs square to it.
                 let (_, mut guides) = section_snap(sheet, at, None, tol);
@@ -5947,7 +6043,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && response.clicked_by(egui::PointerButton::Primary)
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             {
-                let q = step_snap(c, last, tol, ui.input(|i| i.modifiers.alt));
+                let q = stepped_point(sheet, c, last, tol, ui.input(|i| i.modifiers.alt));
                 if last.is_some_and(|l| (l - q).length() < tol * 0.5) {
                     finish = true;
                 } else if pts.len() < 12 {
@@ -6654,6 +6750,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// A point of the stepped cutting line: level or plumb with the last one, and landing exactly on a hole
+/// centre's guide or a crossing (not while `free`).
+fn stepped_point(sheet: &Sheet, c: Pos2, last: Option<Pos2>, tol: f32, free: bool) -> Pos2 {
+    let q = step_snap(c, last, tol, free);
+    if free { q } else { section_snap(sheet, q, None, tol).0 }
+}
+
 /// A point of the Stepped Section's line: where the pointer is, kept level or plumb with the previous
 /// point when it is nearly so (so each step runs square). It never jumps to holes, corners or centre
 /// lines, which pulled the line toward the circles; hold Alt for no help at all.
@@ -6737,6 +6840,9 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
     // Where lines and circles cross: the cutting line's point lands exactly on the crossing.
     if let Some(q) = intersection_near(sheet, p, tol * 0.5) {
         p = q;
+        // A guide through the crossing, both ways, so it shows where the point has landed.
+        guides.push([pos2(q.x - 400.0, q.y), pos2(q.x + 400.0, q.y)]);
+        guides.push([pos2(q.x, q.y - 400.0), pos2(q.x, q.y + 400.0)]);
     }
     (p, guides)
 }
@@ -7292,6 +7398,16 @@ fn print_sheet(app: &mut SolveApp) {
 }
 
 /// The circle through three points: its centre and radius (None when they are in a line).
+/// The arc that starts at `a`, passes through `m` and ends at `b`: its centre, from and to angle (degrees, counter-clockwise) and radius.
+fn arc_through(a: Pos2, m: Pos2, b: Pos2) -> Option<(Pos2, f32, f32, f32)> {
+    let (ctr, r) = circumcircle(a, m, b)?;
+    let ang = |p: Pos2| (p.y - ctr.y).atan2(p.x - ctr.x).to_degrees().rem_euclid(360.0);
+    let (sa, sm, se) = (ang(a), ang(m), ang(b));
+    let sweep = |from: f32, to: f32| (to - from).rem_euclid(360.0);
+    // Counter-clockwise from a to b when the middle point lies on that way round, else from b to a.
+    Some(if sweep(sa, sm) <= sweep(sa, se) { (ctr, sa, se, r) } else { (ctr, se, sa, r) })
+}
+
 fn circumcircle(a: Pos2, b: Pos2, c: Pos2) -> Option<(Pos2, f32)> {
     let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
     if !d.is_finite() || d.abs() < 1e-4 {
