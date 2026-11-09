@@ -20,7 +20,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --profile release-pc -p solidcraft
+        shell: bash
+        # The commit goes into the app (top right, next to the version), so which build is running is plain to see.
+        run: DRAFTBENCH_BUILD="${GITHUB_SHA::7}" cargo build --profile release-pc -p solidcraft
       - name: Package
         shell: pwsh
         run: |
