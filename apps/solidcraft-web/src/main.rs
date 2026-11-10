@@ -605,6 +605,7 @@ mod web {
                             })),
                             restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path))),
                             download_design: Some(Box::new(files::download)),
+                            print_pdf: Some(Box::new(files::print_pdf)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
                             install_app: Some(crate::install::service(&cc.egui_ctx)),
                             ..Default::default()

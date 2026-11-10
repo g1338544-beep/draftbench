@@ -2734,7 +2734,8 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
         }
         "drawing.ribbon.orient" => app.drawing.orient = Some(["1".into(), "-1".into(), "1".into()]),
         "drawing.ribbon.shaded" => add_shaded_view(app),
-        "drawing.ribbon.print" => print_sheet(app),
+        "drawing.ribbon.print" => print_sheet(app, false),
+        "drawing.ribbon.printer" => print_sheet(app, true),
         "drawing.ribbon.printall" => print_all_sheets(app),
         "drawing.ribbon.close" => leave(app),
         _ => {}
@@ -7891,7 +7892,7 @@ fn print_all_sheets(app: &mut SolveApp) {
 }
 
 /// Save the sheet on screen as a PDF to print.
-fn print_sheet(app: &mut SolveApp) {
+fn print_sheet(app: &mut SolveApp, to_printer: bool) {
     if app.drawing.sheet.is_none() {
         app.set_status("Add a view first, then print", true);
         return;
@@ -7899,6 +7900,13 @@ fn print_sheet(app: &mut SolveApp) {
     let images = pdf_images(app);
     let Some(sheet) = app.drawing.sheet.as_ref() else { return };
     let bytes = pdf_document(&[sheet_page(sheet, app.drawing.colours, &app.drawing.line_cols, images)]);
+    if let Some(print) = app.services.print_pdf.as_ref().filter(|_| to_printer) {
+        match print(&bytes) {
+            Ok(()) => app.set_status("Print dialog opened: pick your printer", false),
+            Err(e) => app.set_status(format!("Could not open the print dialog: {e}"), true),
+        }
+        return;
+    }
     let name = format!("{}-sheet{}.pdf", app.session.doc.name, app.drawing.page + 1);
     app.pick_save(&name, &["pdf"], move |app, path| {
         let Some(path) = path else { return };

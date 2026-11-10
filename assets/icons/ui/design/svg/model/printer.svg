@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Printer</title>
+  <path d="M21.5 6L42.5 6A2.5 2.5 0 0 1 45 8.5L45 25.5A2.5 2.5 0 0 1 42.5 28L21.5 28A2.5 2.5 0 0 1 19 25.5L19 8.5A2.5 2.5 0 0 1 21.5 6Z" fill="#e2e8ef"/>
+  <path d="M21.5 6L42.5 6A2.5 2.5 0 0 1 45 8.5L45 25.5A2.5 2.5 0 0 1 42.5 28L21.5 28A2.5 2.5 0 0 1 19 25.5L19 8.5A2.5 2.5 0 0 1 21.5 6Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12 24L52 24A5 5 0 0 1 57 29L57 42A5 5 0 0 1 52 47L12 47A5 5 0 0 1 7 42L7 29A5 5 0 0 1 12 24Z" fill="#b8c3cf"/>
+  <path d="M12 24L52 24A5 5 0 0 1 57 29L57 42A5 5 0 0 1 52 47L12 47A5 5 0 0 1 7 42L7 29A5 5 0 0 1 12 24Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M11 30L53 30" fill="none" stroke="#e2e8ef" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.5 40L44.5 40A2.5 2.5 0 0 1 47 42.5L47 55.5A2.5 2.5 0 0 1 44.5 58L19.5 58A2.5 2.5 0 0 1 17 55.5L17 42.5A2.5 2.5 0 0 1 19.5 40Z" fill="#e2e8ef"/>
+  <path d="M19.5 40L44.5 40A2.5 2.5 0 0 1 47 42.5L47 55.5A2.5 2.5 0 0 1 44.5 58L19.5 58A2.5 2.5 0 0 1 17 55.5L17 42.5A2.5 2.5 0 0 1 19.5 40Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23 47L41 47" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23 52L35 52" fill="none" stroke="#6f879c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="48.5" cy="35" r="2.6" fill="#236ead"/>
+</svg>

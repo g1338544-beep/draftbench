@@ -370,6 +370,45 @@ pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Open the browser's print dialog for a PDF: the file goes into a hidden frame, which prints when it has
+/// loaded. The dialog lists the printers connected to the computer.
+pub fn print_pdf(bytes: &[u8]) -> Result<(), String> {
+    let doc = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
+    let body = doc.body().ok_or("no page body")?;
+    let parts = Array::new();
+    parts.push(&Uint8Array::from(bytes));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type("application/pdf");
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(err)?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(err)?;
+    let frame: web_sys::HtmlElement = doc.create_element("iframe").map_err(err)?.dyn_into().map_err(|_| "no frame".to_string())?;
+    frame.set_attribute("style", "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden").map_err(err)?;
+    let target = frame.clone();
+    let cleanup_url = url.clone();
+    let loaded = Closure::once_into_js(move || {
+        let window = js_sys::Reflect::get(&target, &"contentWindow".into()).ok();
+        let printed = window.and_then(|w| {
+            let print = js_sys::Reflect::get(&w, &"print".into()).ok()?.dyn_into::<js_sys::Function>().ok()?;
+            print.call0(&w).ok()
+        });
+        if printed.is_none() {
+            log::warn!("print: the frame has no print()");
+        }
+        // The dialog is modal in most browsers; let a slow one keep the file for a minute.
+        let revoke = Closure::once_into_js(move || {
+            let _ = web_sys::Url::revoke_object_url(&cleanup_url);
+            target.remove();
+        });
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 60_000);
+        }
+    });
+    frame.set_onload(Some(loaded.unchecked_ref()));
+    frame.set_attribute("src", &url).map_err(err)?;
+    body.append_child(&frame).map_err(err)?;
+    Ok(())
+}
+
 /// Delete a stored design.
 pub fn delete(files: &Rc<Files>, name: &str) {
     let _ = vfs::remove(&format!("{OPFS}{name}"));

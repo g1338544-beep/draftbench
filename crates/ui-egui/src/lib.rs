@@ -357,6 +357,9 @@ pub struct Services {
     /// Hand a design's bytes to the user as a downloaded file (name, bytes); the browser build's
     /// File > Download design. None: the host saves real files, so there is nothing to offer.
     pub download_design: Option<Box<dyn Fn(&str, &[u8]) -> Result<(), String>>>,
+    /// Open the system's print dialog for a PDF (the browser build: the browser's own, which lists the
+    /// printers connected to the computer). None: Print saves the PDF to print from a viewer.
+    pub print_pdf: Option<Box<dyn Fn(&[u8]) -> Result<(), String>>>,
     /// Whether a recent design that is not in memory can be brought back by the host (the browser
     /// build remembers files it saved to the disk); None: it can't.
     pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
