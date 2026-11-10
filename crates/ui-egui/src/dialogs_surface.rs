@@ -203,7 +203,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             SelInput::new("Keep of the other surface", FACES, true).places(),
         ],
         Surf::Untrim { .. } => vec![SelInput::new("Face", FACES, false), SelInput::new("Holes (edges on them)", EDGES, true)],
-        Surf::SplitFace => vec![SelInput::new("Faces to split", FACES, true), SelInput::new("Splitting tool (plane, face or sketch curves)", PLANES | FACES | CURVES, false)],
+        Surf::SplitFace => vec![SelInput::new("1. Faces to divide (click the faces)", FACES, true), SelInput::new("2. What divides them: click a plane, a face of another body that cuts through, or sketch curves", PLANES | FACES | CURVES, false)],
         _ => k.simple_inputs(),
     }
 }

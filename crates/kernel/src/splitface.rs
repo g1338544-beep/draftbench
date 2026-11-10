@@ -1149,9 +1149,7 @@ pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> R
         pts.iter().all(|p| p.is_finite()).then_some(pts)
     }));
     let b = b.with_split_lines(Some(std::sync::Arc::new(lines)));
-    if let Some(missed) = faces.iter().find(|f| imp.made.get(f).copied().unwrap_or(0) == 0) {
-        return Err(KernelError::Invalid(format!("the tool does not cross face {missed}")));
-    }
+    // A picked face the tool does not cross stays whole; only a tool that crosses none is an error.
     Ok((b, imp.origin))
 }
 
@@ -1167,7 +1165,7 @@ pub(crate) fn split_any(body: &Body, faces: &[usize], tool: &SplitTool) -> Resul
     guard("split face", || {
         let mut imp = imprint(body, faces, &fields, size)?;
         if imp.made.values().all(|m| *m == 0) {
-            return Err(KernelError::Invalid("the tool does not cross the selected faces".into()));
+            return Err(KernelError::Invalid("the splitting tool does not pass through the selected faces: pick a plane or face that cuts through them (a plane through the middle of the part, say), or sketch curves above them".into()));
         }
         let shells = std::mem::take(&mut imp.shells);
         let solid = mt::Solid::new_unchecked(shells.into_iter().map(mt::Shell::from).collect());

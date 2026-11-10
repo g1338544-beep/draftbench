@@ -126,3 +126,13 @@ fn split_line_without_faces_splits_every_face_the_plane_crosses() {
     assert_eq!(f, 6 + 4, "four faces cross x = 20");
     assert!((v - 24000.0).abs() < 1e-6 * 24000.0, "{v}");
 }
+
+/// A tool that crosses some of the picked faces divides those and leaves the others whole.
+#[test]
+fn split_face_leaves_picked_faces_the_tool_does_not_cross() {
+    let mut s = boxed();
+    // x = 20 crosses the top but not the end face at x = 0.
+    run(&mut s, "solid.split_face", json!({"faces": [[10, 15, 20], [0, 15, 10]], "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    let (f, _) = faces_volume(&mut s, "B");
+    assert_eq!(f, 7);
+}
