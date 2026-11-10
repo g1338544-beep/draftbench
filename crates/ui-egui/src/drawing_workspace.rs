@@ -4704,12 +4704,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Dragging an ordinate leader's end: the number goes where the pointer goes.
-    if app.drawing.ord.drag.is_some() {
+    if app.drawing.ord.dragging() {
         if let Some(s) = response.interact_pointer_pos().and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q))) {
-            app.drawing.ord.drag_to(s);
+            if app.drawing.ord.drag_origin {
+                // The datum snaps to the drawing like a click does.
+                let tol = 6.0 / map.as_ref().map_or(1.0, |m| m.px_per_mm()).max(1e-3);
+                let s = app.drawing.sheet.as_ref().and_then(|sh| snap_point(sh, s, tol * 2.0)).unwrap_or(s);
+                app.drawing.ord.drag_origin_to(s);
+            } else {
+                app.drawing.ord.drag_to(s);
+            }
         }
         if response.drag_stopped() || !response.dragged() {
             app.drawing.ord.drag = None;
+            app.drawing.ord.drag_origin = false;
             refresh(app);
         }
     }
@@ -5655,7 +5663,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.letter_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() && app.drawing.sym.drag.is_none() && app.drawing.ord.drag.is_none() {
+    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.letter_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() && app.drawing.sym.drag.is_none() && !app.drawing.ord.dragging() {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 

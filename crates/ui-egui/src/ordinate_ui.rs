@@ -24,11 +24,35 @@ pub(super) struct OrdState {
     pub sel: Option<usize>,
     /// The leader whose end the pointer is dragging.
     pub drag: Option<usize>,
+    /// The pointer is dragging the datum (0).
+    pub drag_origin: bool,
 }
 
 impl OrdState {
-    /// A press at `s` on a leader's free end (the selected one first): take it to drag.
+    /// Whether something of the ordinates is being dragged.
+    pub fn dragging(&self) -> bool {
+        self.drag.is_some() || self.drag_origin
+    }
+
+    /// The datum is shown, and can be taken, while the tool is on or a leader is selected for editing.
+    fn origin_live(&self) -> bool {
+        self.origin.is_some() && (self.tool || self.sel.is_some())
+    }
+
+    /// The pointer is at `s` while dragging the datum: it follows, and every leader keeps its point.
+    pub fn drag_origin_to(&mut self, s: Pos2) {
+        if self.drag_origin && s.x.is_finite() && s.y.is_finite() {
+            self.origin = Some(s);
+        }
+    }
+
+    /// A press at `s` on the datum, or on a leader's free end (the selected one first): take it to drag.
     pub fn start_drag(&mut self, s: Pos2, tol: f32) -> bool {
+        if self.origin_live() && self.origin.is_some_and(|o| (o - s).length() <= tol * 1.5) {
+            self.drag_origin = true;
+            self.drag = None;
+            return true;
+        }
         let at_end = |i: usize| self.items.get(i).is_some_and(|(p, axis, level, ang)| (end_of(*p, *axis, *level, *ang) - s).length() <= tol);
         let pick = self.sel.filter(|i| at_end(*i)).or_else(|| (0..self.items.len()).rev().find(|i| at_end(*i)));
         self.drag = pick;
@@ -116,7 +140,7 @@ pub(super) fn window(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         });
-        ui.small("First click sets the datum (0), then click points. Click a leader and press Delete to remove it. Esc ends.");
+        ui.small("First click sets the datum (0); drag its circle to move it later. Then click points. Click a leader and press Delete to remove it. Esc ends.");
     });
     app.drawing.ord.axis = axis.min(1);
     if closed {
@@ -263,7 +287,7 @@ pub(super) fn tool_input(app: &mut SolveApp, ui: &egui::Ui, response: &egui::Res
 pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, to_screen: &dyn Fn(Pos2) -> Pos2, hover: Option<Pos2>, px_per_mm: f32) {
     let accent = Tokens::get().accent;
     let st = &app.drawing.ord;
-    if let Some(o) = st.origin.filter(|_| st.tool) {
+    if let Some(o) = st.origin.filter(|_| st.origin_live()) {
         let c = to_screen(o);
         painter.circle(c, 5.0, Color32::WHITE, Stroke::new(2.0, accent));
         painter.line_segment([c - vec2(9.0, 0.0), c + vec2(9.0, 0.0)], Stroke::new(1.5, accent));
@@ -287,10 +311,26 @@ mod tests {
 
     #[test]
     fn a_click_on_a_leader_or_its_number_finds_that_one() {
-        let st = OrdState { items: vec![(pos2(10.0, 10.0), 0, 40.0), (pos2(50.0, 20.0), 1, 5.0)], ..Default::default() };
+        let st = OrdState { items: vec![(pos2(10.0, 10.0), 0, 40.0, 0.0), (pos2(50.0, 20.0), 1, 5.0, 0.0)], ..Default::default() };
         assert_eq!(hit(&st, pos2(10.0, 25.0), 1.0), Some(0), "along the vertical leader");
         assert_eq!(hit(&st, pos2(10.0, 44.0), 1.0), Some(0), "on its number");
         assert_eq!(hit(&st, pos2(20.0, 20.0), 1.0), Some(1), "along the horizontal leader");
         assert_eq!(hit(&st, pos2(100.0, 100.0), 1.0), None);
+    }
+
+    #[test]
+    fn the_datum_can_be_taken_and_moved_while_editing() {
+        let mut st = OrdState { origin: Some(pos2(10.0, 10.0)), items: vec![(pos2(30.0, 30.0), 0, 50.0, 0.0)], ..Default::default() };
+        assert!(!st.start_drag(pos2(10.0, 10.0), 2.0), "not while nothing is being edited");
+        st.tool = true;
+        assert!(!st.start_drag(pos2(60.0, 60.0), 2.0), "far from the datum and every leader end");
+        assert!(st.start_drag(pos2(11.0, 10.0), 2.0) && st.dragging());
+        st.drag_origin_to(pos2(5.0, 7.0));
+        assert_eq!(st.origin, Some(pos2(5.0, 7.0)));
+        assert_eq!(st.items.len(), 1, "the points stay");
+        st.drag_origin = false;
+        st.tool = false;
+        st.sel = Some(0);
+        assert!(st.start_drag(pos2(5.0, 7.0), 2.0), "also with a leader selected");
     }
 }
