@@ -937,7 +937,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     steps.push(("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"})));
                     steps.push((
                         "sketch.project_to_surface".to_string(),
-                        json!({"curves": [{"sketch": source}], "body": body, "all_faces": true, "direction": direction, "associative": associative}),
+                        json!({"curves": [{"sketch": source}], "body": body, "all_faces": true, "direction": "sketch", "associative": associative}),
                     ));
                     steps.push(("sketch.finish".to_string(), json!({})));
                     return Ok(steps);
@@ -1023,7 +1023,6 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 }
                 let n = state.sketches.len() + 1;
                 let source = format!("Projection source {n}");
-                let direction = if *dir == 0 { "normal" } else { "sketch" };
                 return Ok(finish_first(vec![
                     ("sketch.create".to_string(), json!({"plane": plane.clone(), "name": source, "role": "helper"})),
                     ("sketch.project".to_string(), json!({"refs": refs})),
@@ -1034,7 +1033,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 .chain(face_points.iter().map(|q| {
                     (
                         "sketch.project_to_surface".to_string(),
-                        json!({"curves": [{"sketch": source}], "face": [q.x, q.y, q.z], "body": body, "direction": direction}),
+                        json!({"curves": [{"sketch": source}], "face": [q.x, q.y, q.z], "body": body, "direction": "sketch"}),
                     )
                 }))
                 .chain([("sketch.finish".to_string(), json!({}))])
