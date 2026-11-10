@@ -1217,6 +1217,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let normal_count = sizes.len().saturating_sub(usize::from(finish_plan.is_some()));
         let mut plans = fit(sizes.get(..normal_count).unwrap_or_default(), right - 4.0 - px - finish_width);
         let finish_right = plans.iter().any(|p| p.fit == Fit::More);
+        // Room left over once every panel has its buttons is shared out between the panels, so
+        // the ribbon spans the window instead of crowding to the left.
+        let spread = {
+            let shown = plans.iter().filter(|p| p.fit != Fit::More).count();
+            let used: f32 = plans.iter().filter(|p| p.fit != Fit::More).map(|p| p.width() + PANEL_GAP).sum();
+            let spare = right - 4.0 - px - finish_width - used;
+            if shown > 1 && spare.is_finite() && spare > 0.0 { (spare / shown as f32).min(240.0).floor() } else { 0.0 }
+        };
         plans.extend(finish_plan);
         crate::scenario::publish_count("toolbar_collapsed", plans.iter().filter(|p| p.fit == Fit::Collapsed).count() as f64);
         crate::scenario::publish_count("toolbar_more", plans.iter().filter(|p| p.fit == Fit::More).count() as f64);
@@ -1587,7 +1595,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             px += width;
             painter.line_segment([pos2(px, top + 4.0), pos2(px, top + group_height - 3.0)], Stroke::new(1.0, t.border));
-            px += PANEL_GAP;
+            px += PANEL_GAP + if finish { 0.0 } else { spread };
         }
         if !overflow.is_empty() {
             let at = Rect::from_min_size(pos2(px.min(right - finish_width - 40.0), top + 4.0), vec2(38.0, button_height));
