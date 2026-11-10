@@ -1837,6 +1837,13 @@ struct ToolbarDrag {
     from_menu: bool,
 }
 
+/// A row of the Customize Toolbar window drags like a drop-down row: released on a panel it pins there.
+pub(crate) fn drag_command_from_list(resp: &egui::Response, id: &'static str) {
+    if resp.drag_started() {
+        resp.dnd_set_drag_payload(ToolbarDrag { id, from_menu: true });
+    }
+}
+
 /// The dragged command's icon under the pointer, crossed out when releasing removes it.
 fn drag_ghost(ctx: &egui::Context, id: &str, at: egui::Pos2, removing: bool) {
     let t = Tokens::get();

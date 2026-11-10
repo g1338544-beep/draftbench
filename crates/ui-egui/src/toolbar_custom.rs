@@ -308,6 +308,9 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                                 let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
                                 let r = ui_kit::checkbox(ui, app.tr_label(c.label), &mut on);
                                 crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
+                                // Drag the row onto a panel of the toolbar to place the command there.
+                                let grip = ui.interact(r.rect, ui.id().with(("customize_drag", c.id)), egui::Sense::drag());
+                                crate::toolbar::drag_command_from_list(&grip, c.id);
                                 if r.changed() {
                                     changes.push((c.id, on));
                                 }

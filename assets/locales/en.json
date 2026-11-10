@@ -1125,7 +1125,7 @@
   "timeline.ungroup": "Remove Feature Folders",
   "to the face": "to the face",
   "to the next face": "to the next face",
-  "toolbar.customize_note": "{tab} tab. Tick a command to give it a toolbar button. You can also drag a row of a panel's drop-down onto the toolbar, drag a button off the toolbar to remove it, or use the pin on a drop-down row.",
+  "toolbar.customize_note": "{tab} tab. Tick a command to give it a toolbar button, or drag its row here onto a panel of the toolbar. You can also drag a row of a panel's drop-down onto the toolbar, drag a button off the toolbar to remove it, or use the pin on a drop-down row.",
   "toolbar.image": "IMAGE",
   "toolbar.render": "RENDER",
   "toolbar.render_scene": "SCENE",
