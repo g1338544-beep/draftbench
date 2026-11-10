@@ -2506,23 +2506,23 @@ mod tests {
     }
 
     #[test]
-    fn free_orbit_defaults_off_and_follows_preferences_transactions() {
+    fn free_orbit_defaults_on_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
-        assert!(!old.free_orbit);
+        assert!(old.free_orbit);
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Navigation"}));
         h.step(&json!({"click":{"handle":"prefs:free_orbit"}})).unwrap();
-        assert!(h.app.preferences.free_orbit);
+        assert!(!h.app.preferences.free_orbit);
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
-        assert!(restored.preferences.free_orbit);
-        h.call("ui.prefs", json!({"button":"cancel"}));
-        assert!(!h.app.preferences.free_orbit);
-        h.call("ui.prefs", json!({"open":"Navigation","free_orbit":true,"button":"apply"}));
-        h.call("ui.prefs", json!({"button":"defaults"}));
-        assert!(!h.app.preferences.free_orbit);
+        assert!(!restored.preferences.free_orbit);
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(h.app.preferences.free_orbit);
+        h.call("ui.prefs", json!({"open":"Navigation","free_orbit":false,"button":"apply"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.free_orbit);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.free_orbit);
     }
 
     #[test]
