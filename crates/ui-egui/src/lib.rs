@@ -924,12 +924,14 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() {
             return;
         }
+        // Mass Properties measures what was picked: bodies already selected are measured at
+        // once; otherwise the tool waits for a click on a body (sketch_tools).
         if id == "inspect.mass_properties" {
-            match self.session.execute(id, &json!({})) {
-                Ok(v) => self.menu.props = Some(("Mass properties".into(), v)),
-                Err(e) => self.set_status(e.to_string(), true),
+            let bodies = context_menu::sel_bodies(self);
+            if !bodies.is_empty() {
+                sketch_tools::mass_properties(self, bodies);
+                return;
             }
-            return;
         }
         // Hide: the same as Ctrl+B (it also takes the browser's picks: components, sketches, joints…).
         if id == "view.hide" {

@@ -177,6 +177,20 @@ fn body_menu_isolates_renames_locks_and_deletes() {
 }
 
 #[test]
+fn mass_properties_waits_for_a_picked_body() {
+    let mut app = sample_app();
+    app.session.selection.clear();
+    app.start("inspect.mass_properties");
+    assert!(app.menu.props.is_none(), "nothing is measured before a body is picked");
+    assert!(app.tool.is_some(), "the tool waits for a click");
+    let mut app = sample_app();
+    let b = body(&app);
+    app.session.selection = vec![solidcraft_engine::Sel::Body { name: b }];
+    app.start("inspect.mass_properties");
+    assert!(app.menu.props.is_some(), "a selected body is measured at once");
+}
+
+#[test]
 fn properties_measure_the_body() {
     let mut app = sample_app();
     let b = body(&app);

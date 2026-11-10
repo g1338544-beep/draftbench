@@ -257,7 +257,7 @@ const RY: f32 = crate::ui_kit::RADIAL_RADIUS;
 // What the menus offer
 // ---------------------------------------------------------------------------------------------
 
-fn sel_bodies(app: &SolveApp) -> Vec<String> {
+pub(crate) fn sel_bodies(app: &SolveApp) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     for s in &app.session.selection {
         if let Sel::Body { name } = s

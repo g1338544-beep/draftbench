@@ -163,6 +163,14 @@ pub fn trim_drag_end(app: &mut SolveApp) -> bool {
     true
 }
 
+/// Measure the given bodies and show the Mass properties card.
+pub fn mass_properties(app: &mut SolveApp, bodies: Vec<String>) {
+    match app.session.execute("inspect.mass_properties", &json!({"bodies": bodies})) {
+        Ok(v) => app.menu.props = Some(("Mass properties".into(), v)),
+        Err(e) => app.set_status(e.to_string(), true),
+    }
+}
+
 /// Run an analysis and keep its result as a marker.
 fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     let Ok(v) = app.run(cmd, p) else { return };
@@ -575,7 +583,7 @@ fn mode(id: &str) -> Option<Mode> {
     Some(match id {
         "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.convert_entities" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
         "inspect.curvature_comb" | "canvas.insert" | "canvas.decal" => Mode::ModelRef,
-        "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.isocurve" | "inspect.continuity" => Mode::ModelRef,
+        "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.isocurve" | "inspect.continuity" | "inspect.mass_properties" => Mode::ModelRef,
         "sketch.trim" | "sketch.extend" | "sketch.break" => Mode::CurveAt,
         "sketch.line.midpoint" => Mode::Points(2),
         "sketch.arc.tangent" => Mode::Points(2),
@@ -627,6 +635,7 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.curvature_comb" => "Curvature comb: click sketch curves or model edges",
             "inspect.minimum_radius" => "Minimum radius: click sketch curves, edges or faces",
             "inspect.center_of_mass" => "Center of mass of all bodies; click a body for its own",
+            "inspect.mass_properties" => "Mass properties: click a body (or select bodies first)",
             "inspect.isocurve" => "Isocurves: click faces",
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
             "canvas.insert" => "Canvas: click a plane or a planar face where the image's centre goes",
@@ -836,6 +845,14 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             {
                 let label = continuity_label(app, seam);
                 MARKS.with(|m| m.borrow_mut().push((mid, label)));
+            }
+        }
+        Mode::ModelRef if cmd == "inspect.mass_properties" => {
+            if let Some(body) = hits.iter().find_map(|h| match h {
+                Hit::Face { body, .. } => Some(body.clone()),
+                _ => None,
+            }) {
+                mass_properties(app, vec![body]);
             }
         }
         Mode::ModelRef if matches!(cmd, "inspect.minimum_radius" | "inspect.center_of_mass") => {
