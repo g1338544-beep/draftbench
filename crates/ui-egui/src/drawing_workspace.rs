@@ -1158,6 +1158,20 @@ fn shaded_picture(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
     picture
 }
 
+/// Do these points lie on both sides of the plane through `o` with normal `n` (so a body made of
+/// them is cut by it)? Points that are not finite count as not cut.
+fn cuts_plane(points: &[Vec3], o: Vec3, n: Vec3) -> bool {
+    let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in points {
+        let d = n.dot(*p - o);
+        if d.is_finite() {
+            low = low.min(d);
+            high = high.max(d);
+        }
+    }
+    low <= 1e-6 && high >= -1e-6
+}
+
 fn shaded_picture_now(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
     let key = shaded_key(app, v);
     if let Some(hit) = app.drawing.shaded_cache.iter().find(|c| c.0 == key) {
@@ -1190,6 +1204,12 @@ fn shaded_picture_now(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
         (Vec3::new(o[0], o[1], o[2]), toward_eye)
     });
     let mut scene = solidcraft_engine::view::scene_with_guides(&app.session, &cam, section, solidcraft_engine::view::Guides { grid: false, axes: false });
+    // A section's colour shows what the lines show: only the bodies the cut plane goes through. A body
+    // wholly behind the plane (another part further back) is no part of the section and would show
+    // as colour outside the cut outline.
+    if let Some((o, n)) = section {
+        scene.meshes.retain(|m| cuts_plane(&m.mesh.positions, o, n));
+    }
     match v.style {
         1 => scene.lines.clear(),
         2 => scene.meshes.clear(),
@@ -8214,5 +8234,21 @@ mod picture_size_tests {
         let bytes = pdf_document(&[page]);
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("q 2.83465 0 0 2.83465 0 0 cm 50.000 0 0 40.000 10.000 20.000 cm /Im0 Do Q"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod section_colour_tests {
+    use super::*;
+
+    #[test]
+    fn a_body_wholly_behind_the_cut_plane_is_not_part_of_the_colour_section() {
+        let n = Vec3::new(0.0, 1.0, 0.0);
+        let o = Vec3::new(0.0, 5.0, 0.0);
+        let through = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)];
+        let behind = [Vec3::new(0.0, 6.0, 0.0), Vec3::new(0.0, 12.0, 0.0)];
+        assert!(cuts_plane(&through, o, n));
+        assert!(!cuts_plane(&behind, o, n));
+        assert!(!cuts_plane(&[], o, n));
     }
 }
