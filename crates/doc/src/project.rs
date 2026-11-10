@@ -190,10 +190,22 @@ fn resolve_uncached(
                 _ => project_sketch_curve(&ss.sketch, &ss.plane, ci, plane),
             }
         }
-        LinkSource::OnSurface { sketch, curve, body, at, normal, all_faces } => {
-            let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
-            let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
-            let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
+        LinkSource::OnSurface { sketch, curve, body, at, normal, all_faces, edge_at, edge_body } => {
+            let mut new_edge_at = *edge_at;
+            let pts: Vec<Vec3> = if let Some(ea) = edge_at {
+                // A model edge, in its true 3D shape.
+                let (_, em) = body_mesh(st, edge_body, *ea)?;
+                let (e, q, d) = nearest_edge(&em, *ea).ok_or_else(|| lost("the edge"))?;
+                if d > em.bounds().diagonal().max(1e-9) * 0.25 {
+                    return Err(lost("the edge"));
+                }
+                new_edge_at = Some(q);
+                em.edges.get(e).cloned().unwrap_or_default()
+            } else {
+                let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
+                let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
+                ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect()
+            };
             let (bi, mesh) = body_mesh(st, body, *at)?;
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             // One face (the one through `at`), or all of the body's faces.
@@ -206,7 +218,7 @@ fn resolve_uncached(
                 }
                 (Some(f), q)
             };
-            source = LinkSource::OnSurface { sketch: *sketch, curve: curve.clone(), body: name, at: q, normal: *normal, all_faces: *all_faces };
+            source = LinkSource::OnSurface { sketch: *sketch, curve: curve.clone(), body: name, at: q, normal: *normal, all_faces: *all_faces, edge_at: new_edge_at, edge_body: edge_body.clone() };
             wires = if *normal { crate::project3d::onto_face_nearest(&mesh, face, &pts) } else { crate::project3d::onto_face(&mesh, face, &pts, plane.normal()) };
             Vec::new()
         }

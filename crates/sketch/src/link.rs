@@ -74,6 +74,12 @@ pub enum LinkSource {
         /// Onto every face of the body, not just the one through `at`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         all_faces: bool,
+        /// Project the model edge of `edge_body` through `edge_at` (its true 3D shape) instead of a
+        /// sketch curve; `sketch` and `curve` are then unused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        edge_at: Option<Vec3>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        edge_body: String,
     },
     /// Where two bodies or faces (`Body` / `Face` sources) meet: 3D curves.
     Intersection { a: Box<LinkSource>, b: Box<LinkSource> },

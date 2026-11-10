@@ -761,3 +761,22 @@ fn project_curve_onto_several_faces_skips_the_ones_it_misses() {
     let r = run(&mut s, "sketch.project_to_surface", json!({"curves": curves, "faces": [[20, 15, 20], [0, 15, 10]], "body": "B", "direction": "sketch"}));
     assert_eq!(r["links"].as_array().map(Vec::len), Some(1), "{r}");
 }
+
+#[test]
+fn project_edge_follows_a_curved_face_in_3d() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 30, "center": [0, 0, -20], "operation": "new", "body_name": "Dome"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 5, "base": [0, 0, 0], "operation": "new", "body_name": "Flange"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "role": "curve"}));
+    let r = run(
+        &mut s,
+        "sketch.project_to_surface",
+        json!({"edges": [{"edge": [10, 0, 5], "body": "Flange"}], "body": "Dome", "all_faces": true, "direction": "normal"}),
+    );
+    assert!(r["links"].as_array().is_some_and(|l| !l.is_empty()), "{r}");
+    // An edge that is not there is an error, not a panic.
+    assert!(
+        s.execute("sketch.project_to_surface", &json!({"edges": [{"edge": [900, 900, 900], "body": "Flange"}], "body": "Dome", "all_faces": true, "direction": "normal"}))
+            .is_err()
+    );
+}

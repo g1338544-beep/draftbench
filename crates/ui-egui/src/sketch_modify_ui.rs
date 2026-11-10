@@ -915,7 +915,18 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                         "x_dir": [right.x, right.y, right.z],
                         "y_dir": [up.x, up.y, up.z],
                     });
-                    let mut refs: Vec<Value> = edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})).collect();
+                    let refs: Vec<Value> = edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})).collect();
+                    let mut steps = Vec::new();
+                    if app.session.active_sketch.is_some() {
+                        steps.push(("sketch.finish".to_string(), json!({})));
+                    }
+                    let n = state.sketches.len() + 1;
+                    steps.push(("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"})));
+                    // The model edges keep their true 3D shape and land on the faces in the chosen direction.
+                    steps.push((
+                        "sketch.project_to_surface".to_string(),
+                        json!({"edges": refs, "body": body, "all_faces": true, "direction": direction, "associative": associative}),
+                    ));
                     if !curves.is_empty() {
                         let picked = extra.get("tool_sketch").and_then(Value::as_u64);
                         let sketch = match picked {
@@ -923,22 +934,12 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                             _ if holding.len() == 1 => holding.first().copied().ok_or("pick the curves in the viewport")?,
                             _ => return Err("Pick sketch curves from one sketch".into()),
                         };
-                        refs.extend(curves.iter().map(|c| json!({"sketch": sketch, "curve": c})));
+                        let list: Vec<Value> = curves.iter().map(|c| json!({"sketch": sketch, "curve": c})).collect();
+                        steps.push((
+                            "sketch.project_to_surface".to_string(),
+                            json!({"curves": list, "body": body, "all_faces": true, "direction": direction, "associative": associative, "skip_missing": true}),
+                        ));
                     }
-                    let n = state.sketches.len() + 1;
-                    let source = format!("Projection source {n}");
-                    let mut steps = Vec::new();
-                    if app.session.active_sketch.is_some() {
-                        steps.push(("sketch.finish".to_string(), json!({})));
-                    }
-                    steps.push(("sketch.create".to_string(), json!({"plane": plane.clone(), "name": source, "role": "helper"})));
-                    steps.push(("sketch.project".to_string(), json!({"refs": refs})));
-                    steps.push(("sketch.finish".to_string(), json!({})));
-                    steps.push(("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"})));
-                    steps.push((
-                        "sketch.project_to_surface".to_string(),
-                        json!({"curves": [{"sketch": source}], "body": body, "all_faces": true, "direction": "sketch", "associative": associative, "skip_missing": true}),
-                    ));
                     steps.push(("sketch.finish".to_string(), json!({})));
                     return Ok(steps);
                 }
@@ -1000,8 +1001,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     ("sketch.finish".to_string(), json!({})),
                 ]));
             }
-            // Edges onto a curved face: copy them flat into a sketch facing the view, then project
-            // that sketch's curves onto the face, as seen from the viewer.
+            // Edges onto the selected faces: the true 3D edges land on the faces in the chosen direction.
             if !edges.is_empty() {
                 let state = app.session.world_state();
                 let (right, up, _) = app.cam.basis();
@@ -1010,7 +1010,15 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     "x_dir": [right.x, right.y, right.z],
                     "y_dir": [up.x, up.y, up.z],
                 });
-                let mut refs: Vec<Value> = edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})).collect();
+                let refs: Vec<Value> = edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})).collect();
+                let direction = if *dir == 0 { "normal" } else { "sketch" };
+                let n = state.sketches.len() + 1;
+                let faces: Vec<Value> = face_points.iter().map(|q| json!([q.x, q.y, q.z])).collect();
+                let mut steps = vec![("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"}))];
+                steps.push((
+                    "sketch.project_to_surface".to_string(),
+                    json!({"edges": refs, "faces": faces, "body": body, "direction": direction, "associative": associative}),
+                ));
                 if !curves.is_empty() {
                     let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
                     let picked = extra.get("tool_sketch").and_then(Value::as_u64);
@@ -1019,25 +1027,14 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                         _ if holding.len() == 1 => holding.first().copied().ok_or("pick the curves in the viewport")?,
                         _ => return Err("Pick sketch curves from one sketch".into()),
                     };
-                    refs.extend(curves.iter().map(|c| json!({"sketch": sketch, "curve": c})));
-                }
-                let n = state.sketches.len() + 1;
-                let source = format!("Projection source {n}");
-                return Ok(finish_first(vec![
-                    ("sketch.create".to_string(), json!({"plane": plane.clone(), "name": source, "role": "helper"})),
-                    ("sketch.project".to_string(), json!({"refs": refs})),
-                    ("sketch.finish".to_string(), json!({})),
-                    ("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"})),
-                ])
-                .into_iter()
-                .chain([
-                    (
+                    let list: Vec<Value> = curves.iter().map(|c| json!({"sketch": sketch, "curve": c})).collect();
+                    steps.push((
                         "sketch.project_to_surface".to_string(),
-                        json!({"curves": [{"sketch": source}], "faces": face_points.iter().map(|q| json!([q.x, q.y, q.z])).collect::<Vec<_>>(), "body": body, "direction": "sketch", "skip_missing": true}),
-                    ),
-                    ("sketch.finish".to_string(), json!({})),
-                ])
-                .collect());
+                        json!({"curves": list, "faces": faces, "body": body, "direction": direction, "associative": associative, "skip_missing": true}),
+                    ));
+                }
+                steps.push(("sketch.finish".to_string(), json!({})));
+                return Ok(finish_first(steps));
             }
             // The sketch the curves belong to: the one a pick came from, else the only one holding them.
             let state = app.session.world_state();

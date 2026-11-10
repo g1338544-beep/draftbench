@@ -32,7 +32,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.project_to_surface", "Project Curve", project_to_surface)
         .at("SKETCH", "CREATE")
         .icon("project_curve")
-        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face (or faces: [[x,y,z]…], one point on each of several faces: a curve that misses one of them is skipped), skip_missing?: bool (skip a curve that lands on nothing), body?, all_faces?: bool (with body, no face point: project onto every face of the body), associative?: bool (default true; false cuts the links so the curves stay put), direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
+        .params(concat!("edges?: [{edge:[x,y,z], body}…] (model edges, projected in their true 3D shape; used instead of curves), curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face (or faces: [[x,y,z]…], one point on each of several faces: a curve that misses one of them is skipped), skip_missing?: bool (skip a curve that lands on nothing), body?, all_faces?: bool (with body, no face point: project onto every face of the body), associative?: bool (default true; false cuts the links so the curves stay put), direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.intersection_curve", "Intersection Curve", intersection_curve)
         .at("SKETCH", "CREATE")
         .icon("intersection_curve")
@@ -316,6 +316,41 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
         "normal" | "surface" => true,
         _ => return Err(bad(cmd, "`direction` must be `sketch` or `normal`")),
     };
+    // `edges`: model edges [{edge:[x,y,z], body}] projected in their true 3D shape.
+    let edge_refs: Vec<(String, Vec3)> = p
+        .get("edges")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().take(500).filter_map(|e| Some((str_(e, "body")?.to_string(), vec3(e.get("edge")?)?))).collect())
+        .unwrap_or_default();
+    if !edge_refs.is_empty() {
+        let ats: Vec<Vec3> = if several.is_empty() { vec![at] } else { several };
+        let lenient = true;
+        let mut out = Vec::new();
+        let mut missed: Option<EngineError> = None;
+        for (eb, ea) in &edge_refs {
+            for at in &ats {
+                let src = LinkSource::OnSurface { sketch: 0, curve: String::new(), body: body.clone(), at: *at, normal, all_faces, edge_at: Some(*ea), edge_body: eb.clone() };
+                match one_link(s, cmd, LinkKind::Project, src) {
+                    Ok(link) => out.push(link),
+                    Err(e) if lenient => missed = Some(e),
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        if out.is_empty() {
+            return Err(missed.unwrap_or_else(|| bad(cmd, "the edges land on none of the faces")));
+        }
+        if p.get("associative").and_then(Value::as_bool) == Some(false) {
+            let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+            let mut doc = (*s.doc).clone();
+            let sk = doc.sketch_mut(id)?;
+            for l in out.iter().filter_map(|o| o.get("link").and_then(Value::as_str)) {
+                sk.break_link(l)?;
+            }
+            *s.doc_mut() = doc;
+        }
+        return Ok(json!({"links": out}));
+    }
     let list = p.get("curves").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`curves` must list {sketch, curve}"))?;
     if list.is_empty() || list.len() > 500 {
         return Err(bad(cmd, "`curves` must list 1…500 curves"));
@@ -353,7 +388,7 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "each entry must be {sketch, curve}"));
         };
         for at in &ats {
-            match one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve: curve.clone(), body: body.clone(), at: *at, normal, all_faces }) {
+            match one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve: curve.clone(), body: body.clone(), at: *at, normal, all_faces, edge_at: None, edge_body: String::new() }) {
                 Ok(link) => out.push(link),
                 Err(e) if lenient => missed = Some(e),
                 Err(e) => return Err(e),
