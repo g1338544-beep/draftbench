@@ -463,6 +463,9 @@ preference_settings! {
     layout: crate::shell::LayoutMode = Default::default(), 0;
     /// Show command names beneath ribbon icons, independently of workspace layout.
     ribbon_labels: bool = true, 0 => check_tr("ui.ribbon_labels");
+    /// Which look the saved preferences were made for: below 1 they get the compact look (an icon
+    /// grid, 85 % scale) once, so a browser that saved the old defaults sees the new ones.
+    layout_version: u8 = 0, 0;
     /// Rows of small icons per ribbon panel (1 = the usual single row). From 2 up the ribbon is icon-only,
     /// each panel a grid of that many rows, so a tab with many commands fits without trimming.
     ribbon_icon_rows: u8 = 4, 0 => number("ui.ribbon_icon_rows", 1..=4);
@@ -2063,6 +2066,11 @@ fn current_theme_file(app: &SolveApp) -> serde_json::Value {
 /// calibration that can't be used as it is (a hand edit) is dropped, so the device is read as it
 /// reports rather than spinning the view.
 pub fn migrate(mut p: Prefs) -> Prefs {
+    if p.layout_version < 1 {
+        p.ribbon_icon_rows = 4;
+        p.ui_scale = 0.85;
+        p.layout_version = 1;
+    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;

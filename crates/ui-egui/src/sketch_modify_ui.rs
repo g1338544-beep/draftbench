@@ -899,7 +899,6 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             // A body, or several faces: onto every face of that body.
             let whole = match targets.first() {
                 Some(Sel::Body { name }) => Some(name.clone()),
-                Some(Sel::Face { body, .. }) if targets.len() > 1 => Some(body.clone()),
                 _ => None,
             };
             if let Some(body) = whole {
@@ -965,6 +964,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 ]);
             }
             let Some(Sel::Face { body, point, index }) = targets.first() else { return Err("Select the face to project onto".into()) };
+            // Every picked face gets the curves, and only those faces (a point on each).
+            let face_points: Vec<Vec3> = targets.iter().filter_map(|x| if let Sel::Face { point, .. } = x { Some(*point) } else { None }).collect();
             // A sketch still open is finished first (the projection makes its own sketches), so the command works from
             // inside a sketch too.
             let open = app.session.active_sketch.is_some();
@@ -976,6 +977,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             };
             // Onto a flat face the picked curves and edges are copied into a new sketch on that face.
             if let Some((_, normal)) = crate::dialogs::planar_face(&app.session, body, *index)
+                && face_points.len() == 1
                 && normal.len() > 0.5
             {
                 let state = app.session.world_state();
@@ -1027,12 +1029,16 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     ("sketch.project".to_string(), json!({"refs": refs})),
                     ("sketch.finish".to_string(), json!({})),
                     ("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"})),
+                ])
+                .into_iter()
+                .chain(face_points.iter().map(|q| {
                     (
                         "sketch.project_to_surface".to_string(),
-                        json!({"curves": [{"sketch": source}], "face": [point.x, point.y, point.z], "body": body, "direction": direction}),
-                    ),
-                    ("sketch.finish".to_string(), json!({})),
-                ]));
+                        json!({"curves": [{"sketch": source}], "face": [q.x, q.y, q.z], "body": body, "direction": direction}),
+                    )
+                }))
+                .chain([("sketch.finish".to_string(), json!({}))])
+                .collect());
             }
             // The sketch the curves belong to: the one a pick came from, else the only one holding them.
             let state = app.session.world_state();
