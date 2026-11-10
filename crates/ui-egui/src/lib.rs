@@ -167,6 +167,7 @@ pub(crate) mod open_meshing;
 pub mod params_dialog;
 pub(crate) mod pick_buffer;
 pub(crate) mod pick_index;
+pub(crate) mod path_plane;
 pub(crate) mod plugins;
 pub mod prefs;
 pub mod prefs_notice;

@@ -2041,13 +2041,20 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         return;
     }
     let Some(mut d) = app.dialog.take() else { return };
+    let was_active = d.active;
     d.pick(&app.session, sel);
     if let crate::dialogs::Kind::PathPlane { sketch, .. } = &mut d.kind {
-        *sketch = match hit {
-            Hit::SketchCurve { sketch, .. } => Some(*sketch),
-            _ => None,
-        };
-        d.extra.remove("path");
+        if was_active == 0 {
+            *sketch = match hit {
+                Hit::SketchCurve { sketch, .. } => Some(*sketch),
+                _ => None,
+            };
+            d.extra.remove("path");
+        }
+    }
+    // A point picked on the path: the plane moves to where the path comes nearest to it.
+    if was_active == 1 && matches!(d.kind, crate::dialogs::Kind::PathPlane { .. }) {
+        crate::path_plane::follow_point(app, &mut d);
     }
     // Split Body's sketch line keeps the sketch it was picked in (curve ids repeat across sketches).
     if matches!(d.kind, crate::dialogs::Kind::Split | crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::ProjectCurve { .. })) {

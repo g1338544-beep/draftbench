@@ -674,7 +674,13 @@ impl Dialog {
                 Dialog::new(Kind::Construct { command, title, keys, t }, inputs)
             }
             "construct.plane.along_path" => {
-                Dialog::new(Kind::PathPlane { t: "0.5".into(), sketch: None }, vec![SelInput::new("Path", CURVES | EDGES, false)])
+                Dialog::new(
+                    Kind::PathPlane { t: "0.5".into(), sketch: None },
+                    vec![
+                        SelInput::new("Path", CURVES | EDGES, false),
+                        SelInput::new("Point on the path (optional)", selection::VERTICES | selection::POINTS | selection::SKETCH_POINTS, false),
+                    ],
+                )
             }
             "solid.split_body" => Dialog::new(
                 Kind::Split,
@@ -1205,7 +1211,9 @@ impl Dialog {
         if let Some(key) = feature_pattern_reference_key(self, self.active) {
             self.extra.remove(key);
         }
-        if let Kind::PathPlane { sketch, .. } = &mut self.kind {
+        if let Kind::PathPlane { sketch, .. } = &mut self.kind
+            && self.active == 0
+        {
             *sketch = None;
             self.extra.remove("path");
         }

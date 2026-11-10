@@ -107,7 +107,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Kind) -> bool {
 
 /// The point a pick stands for: a vertex, the centre of a circle edge or of a round or flat
 /// face, the middle of another edge.
-fn sel_point(app: &SolveApp, s: Option<&Sel>) -> Option<Vec3> {
+pub(crate) fn sel_point(app: &SolveApp, s: Option<&Sel>) -> Option<Vec3> {
     let s = s?;
     if let Some(snap) = crate::dialogs_assembly::snap_of(&app.session, s) {
         return Some(snap.at);
