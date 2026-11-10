@@ -4754,6 +4754,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if response.drag_stopped() || !response.dragged() {
             app.drawing.ord.drag = None;
+            app.drawing.ord.drag_bend = false;
             app.drawing.ord.drag_origin = 0;
             refresh(app);
         }

@@ -30,6 +30,8 @@ pub(super) struct OrdState {
     pub sel: Option<usize>,
     /// The leader whose end the pointer is dragging.
     pub drag: Option<usize>,
+    /// The drag holds the leader's bend (the elbow), not its end: it slides along the square part and the end stays put.
+    pub drag_bend: bool,
     /// The pointer is dragging a datum: bit 0 = the X one (0x), bit 1 = the Y one (0y).
     pub drag_origin: u8,
     /// While a leader is dragged, it is square (straight) at the moment: a guide shows it.
@@ -95,6 +97,16 @@ impl OrdState {
                 return true;
             }
         }
+        // The elbow of the selected leader: take it to slide the bend, with no number to type.
+        if let Some(i) = self.sel
+            && let Some(&(p, axis, level, ang, jog)) = self.items.get(i)
+            && (ang.abs() > 1e-4 || jog > 0.0)
+            && (bend_of(p, axis, level, jog) - s).length() <= tol * 1.5
+        {
+            self.drag = Some(i);
+            self.drag_bend = true;
+            return true;
+        }
         let at_end = |i: usize| self.items.get(i).is_some_and(|(p, axis, level, ang, jog)| (end_of(*p, *axis, *level, *ang, *jog) - s).length() <= tol);
         let pick = self.sel.filter(|i| at_end(*i)).or_else(|| (0..self.items.len()).rev().find(|i| at_end(*i)));
         // Or anywhere along the leader (while the tool is on or it is selected): the end then follows the
@@ -110,7 +122,25 @@ impl OrdState {
     /// The pointer is at `s` while dragging: the end follows it, so the leader's level and lean both change.
     /// Near square it snaps to square (`straight`), and a guide shows that.
     pub fn drag_to(&mut self, s: Pos2) {
+        let bend_drag = self.drag_bend;
         let Some(it) = self.drag.and_then(|i| self.items.get_mut(i)) else { return };
+        if bend_drag {
+            // Slide the bend along the square part; the end of the leader stays where it is.
+            let (p, axis, level, ang, jog) = (it.0, it.1, it.2, it.3, it.4);
+            let end = end_of(p, axis, level, ang, jog);
+            let full = if axis == 1 { level - p.x } else { level - p.y };
+            let sign = if full < 0.0 { -1.0 } else { 1.0 };
+            let pointer = if axis == 1 { s.x - p.x } else { s.y - p.y } * sign;
+            let new_jog = ((pointer.clamp(0.0, (full.abs() - 1.0).max(0.0))) * 10.0).round() / 10.0;
+            let rest = full - sign * new_jog;
+            let across = if axis == 1 { end.y - p.y } else { end.x - p.x };
+            if rest.abs() >= 1.0 && across.is_finite() {
+                it.4 = new_jog;
+                let a = (across / rest).atan().to_degrees().clamp(-75.0, 75.0);
+                it.3 = if a.abs() < SQUARE_SNAP_DEG { 0.0 } else { a };
+            }
+            return;
+        }
         let (p, axis, jog) = (it.0, it.1, it.4);
         let toward = if axis == 1 { s.x - p.x } else { s.y - p.y };
         // The bend, if any, stays where it is, as far as the leader is long enough.
@@ -394,6 +424,10 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, to_screen: &dyn Fn(
         let hot = Stroke::new(3.0, Color32::from_rgb(230, 80, 60));
         painter.line_segment([to_screen(*p), to_screen(bend)], hot);
         painter.line_segment([to_screen(bend), to_screen(end)], hot);
+        // The elbow is a handle: drag it along the leader to move the bend.
+        if *ang != 0.0 || *jog > 0.0 {
+            painter.circle(to_screen(bend), 5.0, Color32::WHITE, Stroke::new(2.0, accent));
+        }
         // Square at the moment of a drag: a guide runs on past the end, and says so.
         if st.drag.is_some() && st.straight {
             let dir = (end - bend).normalized();
@@ -413,6 +447,18 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, to_screen: &dyn Fn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bend_of_a_leader_can_be_pulled_with_the_mouse_and_the_end_stays() {
+        let mut st = OrdState { origin: Some(pos2(0.0, 0.0)), set: [true, true], items: vec![(pos2(30.0, 30.0), 0, 80.0, 30.0, 20.0)], sel: Some(0), ..Default::default() };
+        let end = end_of(pos2(30.0, 30.0), 0, 80.0, 30.0, 20.0);
+        assert!(st.start_drag(pos2(30.0, 50.0), 2.0) && st.drag_bend, "the elbow is taken");
+        st.drag_to(pos2(30.0, 60.0));
+        let it = st.items[0];
+        assert_eq!(it.4, 30.0, "the bend slid to the pointer");
+        let now = end_of(it.0, it.1, it.2, it.3, it.4);
+        assert!((now - end).length() < 0.05, "{now:?} vs {end:?}");
+    }
 
     #[test]
     fn a_click_on_a_leader_or_its_number_finds_that_one() {
