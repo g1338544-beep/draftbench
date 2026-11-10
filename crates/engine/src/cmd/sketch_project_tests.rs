@@ -716,7 +716,7 @@ fn a_projected_curve_sketch_has_a_role_that_is_saved_and_listed_apart() {
     let expect = [("Source".to_string(), "helper".to_string()), ("Projected curves".to_string(), "curve".to_string()), ("Plain".to_string(), String::new())];
     assert_eq!(roles(&s), expect);
     // The role survives saving and reopening.
-    let text = s.doc.to_json().unwrap();
+    let text = s.doc.to_json();
     let again = Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
     assert_eq!(roles(&again), expect);
 }
