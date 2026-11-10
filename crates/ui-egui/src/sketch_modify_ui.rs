@@ -32,7 +32,7 @@ use solidcraft_engine::sketch::PatternAlignment;
 
 use crate::SolveApp;
 use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind};
-use crate::selection::{AXES, BODIES, CURVES, EDGES, FACES, SKETCH_POINTS, SelInput};
+use crate::selection::{AXES, BODIES, CURVES, EDGES, FACES, PLANES, SKETCH_POINTS, SelInput};
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::ui_kit;
 use crate::viewport::{Hit, Proj};
@@ -165,7 +165,7 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         Mod::Offset { .. } => vec![SelInput::new("Curves", CURVES, true)],
         Mod::ProjectCurve { .. } => {
             // Sketch curves (2D) and edges of the model (3D) both project.
-            vec![SelInput::new("Curves to project", CURVES | EDGES, true), SelInput::new("Objects to project to (faces or a body)", FACES | BODIES, true)]
+            vec![SelInput::new("Curves to project", CURVES | EDGES, true), SelInput::new("Objects to project to (faces, a body or a plane)", FACES | BODIES | PLANES, true)]
         }
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Mirror line", AXES, false)],
@@ -871,8 +871,32 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             if curves.is_empty() && edges.is_empty() {
                 return Err("Select the curves or edges to project first".into());
             }
-            // A body, or several faces: onto every face of that body.
             let targets = items(inputs, 1);
+            // A plane: the curves and edges are copied into a new sketch on it (square onto the plane).
+            if let Some(Sel::Plane { name }) = targets.first() {
+                let state = app.session.world_state();
+                let mut refs: Vec<Value> = Vec::new();
+                if !curves.is_empty() {
+                    let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
+                    let picked = extra.get("tool_sketch").and_then(Value::as_u64);
+                    let sketch = match picked {
+                        Some(k) if holding.contains(&k) => k,
+                        _ if holding.len() == 1 => holding.first().copied().ok_or("pick the curves in the viewport")?,
+                        _ => return Err("Pick sketch curves from one sketch".into()),
+                    };
+                    refs.extend(curves.iter().map(|c| json!({"sketch": sketch, "curve": c})));
+                }
+                refs.extend(edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})));
+                let mut steps = Vec::new();
+                if app.session.active_sketch.is_some() {
+                    steps.push(("sketch.finish".to_string(), json!({})));
+                }
+                steps.push(("sketch.create".to_string(), json!({"plane": name, "name": "Projected curves"})));
+                steps.push(("sketch.project".to_string(), json!({"refs": refs})));
+                steps.push(("sketch.finish".to_string(), json!({})));
+                return Ok(steps);
+            }
+            // A body, or several faces: onto every face of that body.
             let whole = match targets.first() {
                 Some(Sel::Body { name }) => Some(name.clone()),
                 Some(Sel::Face { body, .. }) if targets.len() > 1 => Some(body.clone()),
