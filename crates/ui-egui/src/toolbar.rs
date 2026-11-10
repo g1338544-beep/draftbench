@@ -1593,9 +1593,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
                 }
             }
-            px += width;
+            // The divider sits in the middle of the room shared out between the panels.
+            let half = if finish { 0.0 } else { spread * 0.5 };
+            px += width + half;
             painter.line_segment([pos2(px, top + 4.0), pos2(px, top + group_height - 3.0)], Stroke::new(1.0, t.border));
-            px += PANEL_GAP + if finish { 0.0 } else { spread };
+            px += PANEL_GAP + half;
         }
         if !overflow.is_empty() {
             let at = Rect::from_min_size(pos2(px.min(right - finish_width - 40.0), top + 4.0), vec2(38.0, button_height));
