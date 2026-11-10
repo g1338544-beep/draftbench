@@ -28,6 +28,15 @@ fn design(units: &str) -> Harness {
     h
 }
 
+/// A coil is built on a picked plane: the XY plane stands in for the click.
+fn pick_the_plane(h: &mut Harness, cmd: &str) {
+    if cmd == "solid.coil"
+        && let Some(input) = h.app.dialog.as_mut().and_then(|d| d.inputs.first_mut())
+    {
+        input.items = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
+    }
+}
+
 /// The open dialog's fields.
 fn fields(h: &Harness) -> Vec<(&'static str, String)> {
     match h.app.dialog.as_ref().map(|d| &d.kind) {
@@ -93,6 +102,7 @@ fn primitive_dialogs_show_millimetres_and_make_the_same_sizes() {
         let mut h = design("mm");
         h.app.start(cmd);
         h.frames(3);
+        pick_the_plane(&mut h, cmd);
         let shown = fields(&h);
         let want: Vec<(&str, String)> =
             sizes.iter().map(|(k, v)| (*k, if *k == "revolutions" { (*v).to_string() } else { format!("{v} mm") })).collect();
@@ -122,6 +132,7 @@ fn in_an_inch_design_primitive_dialogs_show_inches_and_read_bare_numbers_as_inch
         let mut h = design("in");
         h.app.start(cmd);
         h.frames(3);
+        pick_the_plane(&mut h, cmd);
         let shown = fields(&h);
         let want: Vec<(&str, String)> =
             sizes.iter().map(|(k, v)| (*k, if *k == "revolutions" { (*v).to_string() } else { format!("{v} in") })).collect();
@@ -231,4 +242,23 @@ fn editing_in_a_millimetre_design_keeps_the_sizes_as_they_are_kept() {
     assert_eq!(stored(&h, id), ["40", "30", "20"]);
     assert!(h.app.session.doc.configuration_matches(), "an edit without a change keeps the configuration matched");
     assert_size(&mut h.app.session, [40.0, 30.0, 20.0]);
+}
+
+#[test]
+fn a_coil_needs_its_plane_and_stands_where_the_center_point_is() {
+    let mut h = design("mm");
+    h.app.start("solid.coil");
+    h.frames(3);
+    // Nothing picked: no coil yet.
+    assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+    pick_the_plane(&mut h, "solid.coil");
+    let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    let near = |v: &Value, want: [f64; 3]| (0..3).all(|i| (v[i].as_f64().unwrap_or(f64::NAN) - want[i]).abs() < 1e-9);
+    assert!(near(&params["axis"], [0.0, 0.0, 1.0]), "{}", params["axis"]);
+    // A center point moves the reference position.
+    if let Some(input) = h.app.dialog.as_mut().and_then(|d| d.inputs.get_mut(1)) {
+        input.items = vec![solidcraft_engine::Sel::Vertex { body: "B".into(), point: solidcraft_engine::geom::Vec3::new(5.0, 6.0, 0.0) }];
+    }
+    let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert!(near(&params["base"], [5.0, 6.0, 0.0]), "{}", params["base"]);
 }

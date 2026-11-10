@@ -787,7 +787,11 @@ impl Dialog {
                     operation: 0,
                     at: None,
                 },
-                vec![],
+                // The plane first, then (optionally) the point the coil stands on, which moves its reference.
+                vec![
+                    SelInput::new("Plane or flat face to build on", PLANES | PLANAR_FACES, false),
+                    SelInput::new("Center point (moves the reference position)", selection::VERTICES | EDGES | FACES | selection::ORIGIN, false),
+                ],
             ),
             "solid.combine" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
@@ -4137,6 +4141,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         p.insert("center".into(), pt(point));
                     }
                 }
+            }
+            // A coil is built on a picked plane or flat face, standing at its centre point when one is picked.
+            if *cmd == "solid.coil" && !d.inputs.is_empty() && d.editing.is_none() {
+                need(0, "the plane or flat face to build the coil on")?;
+                let (origin, normal) = plane_frame(&app.session, sels(d, 0).first()).ok_or("pick an origin plane or a flat face")?;
+                let base = crate::dialogs_move::sel_point(app, sels(d, 1).first()).unwrap_or(origin);
+                p.insert("base".into(), pt(base));
+                p.insert("axis".into(), pt(normal));
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
