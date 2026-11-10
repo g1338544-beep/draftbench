@@ -3262,7 +3262,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Box selection: a primary drag on the model when no navigation mode is on.
-    if app.tool.is_none()
+    // Mass Properties waits for bodies: a box around them is as good as a click.
+    if (app.tool.is_none() || app.tool.as_ref().is_some_and(|t| t.cmd == "inspect.mass_properties"))
         && !crate::copy_drag::active()
         && !held
         && primary_nav.is_none()
@@ -3292,6 +3293,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && let Some(bx) = app.viewport.boxsel.take()
         {
             box_select(app, &proj, bx, add);
+            if app.tool.as_ref().is_some_and(|t| t.cmd == "inspect.mass_properties") {
+                let bodies = crate::context_menu::sel_bodies(app);
+                if !bodies.is_empty() {
+                    crate::sketch_tools::mass_properties(app, bodies);
+                }
+            }
         }
     } else {
         app.viewport.boxsel = None;

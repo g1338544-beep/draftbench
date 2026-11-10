@@ -163,6 +163,20 @@ pub fn trim_drag_end(app: &mut SolveApp) -> bool {
     true
 }
 
+/// While Mass Properties waits for a body, a small "kg" badge follows the pointer so it is plain
+/// the tool is on (click a body, or drag a box around several).
+fn mass_cursor(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    if !app.tool.as_ref().is_some_and(|t| t.cmd == "inspect.mass_properties") {
+        return;
+    }
+    let Some(at) = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)) else { return };
+    let t = crate::theme::Tokens::get();
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    let centre = at + egui::vec2(16.0, 16.0);
+    painter.circle(centre, 10.0, t.accent, egui::Stroke::new(1.0, t.overlay));
+    painter.text(centre, egui::Align2::CENTER_CENTER, "kg", egui::FontId::proportional(9.0), t.overlay);
+}
+
 /// Measure the given bodies and show the Mass properties card.
 pub fn mass_properties(app: &mut SolveApp, bodies: Vec<String>) {
     match app.session.execute("inspect.mass_properties", &json!({"bodies": bodies})) {
@@ -1484,6 +1498,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     if DEFERRED.with(|d| d.replace(false)) {
         analysis(app, "inspect.center_of_mass", json!({}));
     }
+    mass_cursor(app, ui, painter, proj);
     marks(app, painter, proj);
     iso_lines(app, painter, proj);
     continuity_legend(app, painter, proj);
