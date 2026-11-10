@@ -463,9 +463,10 @@ preference_settings! {
     layout: crate::shell::LayoutMode = Default::default(), 0;
     /// Show command names beneath ribbon icons, independently of workspace layout.
     ribbon_labels: bool = true, 0 => check_tr("ui.ribbon_labels");
-    /// Which look the saved preferences were made for: below 1 they get the compact look (an icon
-    /// grid, 85 % scale) once, so a browser that saved the old defaults sees the new ones.
-    layout_version: u8 = 0, 0;
+    /// Which look the saved preferences were made for: preferences saved without it get the compact
+    /// look (an icon grid, 85 % scale, free orbit) once, so a browser that saved the old defaults
+    /// sees the new ones ([`lenient`]).
+    layout_version: u8 = 1, 0;
     /// Rows of small icons per ribbon panel (1 = the usual single row). From 2 up the ribbon is icon-only,
     /// each panel a grid of that many rows, so a tab with many commands fits without trimming.
     ribbon_icon_rows: u8 = 4, 0 => number("ui.ribbon_icon_rows", 1..=4);
@@ -2066,11 +2067,6 @@ fn current_theme_file(app: &SolveApp) -> serde_json::Value {
 /// calibration that can't be used as it is (a hand edit) is dropped, so the device is read as it
 /// reports rather than spinning the view.
 pub fn migrate(mut p: Prefs) -> Prefs {
-    if p.layout_version < 1 {
-        p.ribbon_icon_rows = 4;
-        p.ui_scale = 0.85;
-        p.layout_version = 1;
-    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
@@ -2104,6 +2100,19 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
 /// understand (a setting a newer or older release saved differently, a hand edit) falls back to
 /// its default on its own instead of discarding all of them.
 pub fn lenient(saved: &serde_json::Value) -> Prefs {
+    let mut p = lenient_keys(saved);
+    // Saved before the compact look existed (no `layout_version`): move to it once.
+    if saved.as_object().is_some_and(|o| !o.is_empty() && !o.contains_key("layout_version")) {
+        p.ribbon_icon_rows = 4;
+        p.ui_scale = 0.85;
+        // Rotation through the poles with roll (older saved presets have it off).
+        p.free_orbit = true;
+    }
+    p.layout_version = 1;
+    p
+}
+
+fn lenient_keys(saved: &serde_json::Value) -> Prefs {
     if let Ok(p) = serde_json::from_value::<Prefs>(saved.clone()) {
         return limit_disabled_plugins(migrate(p));
     }
