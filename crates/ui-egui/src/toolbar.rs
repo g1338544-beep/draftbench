@@ -724,9 +724,15 @@ fn export(app: &mut SolveApp, ext: &str) {
 fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     let name = format!("{}.{ext}", app.session.doc.name);
     let format = format.map(str::to_string);
+    // Bodies picked in the viewport or the browser (click, or a box around several) are all that is
+    // exported; with nothing picked the whole design goes. JSON and URDF always hold the whole design.
+    let bodies = if matches!(ext, "json" | "urdf") { Vec::new() } else { crate::context_menu::sel_bodies(app) };
     app.pick_save(&name, &[ext], move |app, path| {
         let Some(path) = path else { return };
         let mut params = json!({"path": path});
+        if !bodies.is_empty() {
+            params["bodies"] = json!(bodies);
+        }
         if let Some(format) = format {
             params["format"] = json!(format);
         }
