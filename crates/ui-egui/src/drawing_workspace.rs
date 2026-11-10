@@ -2546,6 +2546,7 @@ fn remove_view(app: &mut SolveApp, i: usize) {
         ord.sel = None;
         if ord.items.is_empty() {
             ord.origin = None;
+            ord.set = [false; 2];
         }
         let gone = dims - app.drawing.dims.len() + marks - app.drawing.marks.len() + ords - app.drawing.ord.items.len();
         app.drawing.sel_hand = None;
@@ -2627,7 +2628,7 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             app.drawing.mark_tool = false;
             app.drawing.erase_tool = false;
             if app.drawing.ord.tool {
-                let msg = if app.drawing.ord.origin.is_some() { "Ordinate: click points (Shift+click for Y); Ctrl+click moves the datum. Backspace undoes, Delete clears, Esc ends." } else { "Ordinate: click the datum point (the 0), then the points to dimension." };
+                let msg = if app.drawing.ord.set != [false; 2] { "Ordinate: pick X or Y in the window, click points; the first click of each axis sets its 0 (0x / 0y). Drag a 0 to move it; Ctrl+click sets it again. Backspace undoes, Delete clears, Esc ends." } else { "Ordinate: pick X or Y in the window; the first click sets that axis's 0 (0x or 0y), then click the points to dimension." };
                 app.set_status(msg.to_string(), false);
             }
         }
@@ -4706,7 +4707,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging an ordinate leader's end: the number goes where the pointer goes.
     if app.drawing.ord.dragging() {
         if let Some(s) = response.interact_pointer_pos().and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q))) {
-            if app.drawing.ord.drag_origin {
+            if app.drawing.ord.drag_origin != 0 {
                 // The datum snaps to the drawing like a click does.
                 let tol = 6.0 / map.as_ref().map_or(1.0, |m| m.px_per_mm()).max(1e-3);
                 let s = app.drawing.sheet.as_ref().and_then(|sh| snap_point(sh, s, tol * 2.0)).unwrap_or(s);
@@ -4717,7 +4718,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if response.drag_stopped() || !response.dragged() {
             app.drawing.ord.drag = None;
-            app.drawing.ord.drag_origin = false;
+            app.drawing.ord.drag_origin = 0;
             refresh(app);
         }
     }
