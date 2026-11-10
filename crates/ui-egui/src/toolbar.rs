@@ -103,7 +103,7 @@ const BUTTON_HEIGHT: f32 = 60.0;
 const ICON_BUTTON_HEIGHT: f32 = 36.0;
 const ICON_GROUP_HEIGHT: f32 = 62.0;
 /// One row of the multi-row icon grid (`ribbon_icon_rows` > 1).
-const ICON_ROW_HEIGHT: f32 = 30.0;
+const ICON_ROW_HEIGHT: f32 = 28.0;
 
 /// How many icon rows the ribbon uses: 1 is the usual row; 2 to 4 make an icon-only grid.
 pub(crate) fn icon_rows(rows: u8) -> usize {
@@ -1082,8 +1082,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         } else {
                             // A grid column is as wide as its icon plus a little; the usual single row keeps wider buttons.
                             let width = match (icon_rows > 1, family.is_some()) {
-                                (true, true) => 42.0,
-                                (true, false) => 32.0,
+                                (true, true) => 40.0,
+                                (true, false) => 30.0,
                                 (false, true) => 50.0,
                                 (false, false) => 40.0,
                             };
@@ -1237,7 +1237,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.rect_filled(whole, t.radius_sm, t.hover);
                 }
                 let icon = if selected.id == "sketch.finish" { "finish" } else { selected.icon };
-                let side = if icon_rows > 1 { 24.0 } else if finish { 30.0 } else { 26.0 };
+                let side = if icon_rows > 1 { 22.0 } else if finish { 30.0 } else { 26.0 };
                 let icon_rect =
                     Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
                 icons::paint_icon(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });

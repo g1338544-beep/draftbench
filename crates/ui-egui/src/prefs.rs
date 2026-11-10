@@ -467,7 +467,7 @@ preference_settings! {
     /// each panel a grid of that many rows, so a tab with many commands fits without trimming.
     ribbon_icon_rows: u8 = 4, 0 => number("ui.ribbon_icon_rows", 1..=4);
     /// Interface scale (1 = 100 %).
-    ui_scale: f32 = 1.0, 0, accept(0.5..=2.5) => slider("ui.ui_scale", 0.5..=2.5, 0.05, |v| format!("{:.0} %", v * 100.0), "prefs:scale");
+    ui_scale: f32 = 0.85, 0, accept(0.5..=2.5) => slider("ui.ui_scale", 0.5..=2.5, 0.05, |v| format!("{:.0} %", v * 100.0), "prefs:scale");
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
     /// (#1290). Menus, dialogs and labels use it; glyphs it lacks fall back as before.
     ui_font: String = String::new(), 0;
@@ -847,7 +847,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     if ctx.options(|o| o.zoom_with_keyboard) && !crate::keymap::capturing(app) {
         use egui::gui_zoom::kb_shortcuts::{ZOOM_IN, ZOOM_IN_SECONDARY, ZOOM_OUT, ZOOM_RESET};
         if ctx.input_mut(|i| i.consume_shortcut(&ZOOM_RESET)) {
-            app.preferences.ui_scale = 1.0;
+            app.preferences.ui_scale = Prefs::default().ui_scale;
         } else {
             let zoom_in = ctx.input_mut(|i| i.consume_shortcut(&ZOOM_IN) || i.consume_shortcut(&ZOOM_IN_SECONDARY));
             let zoom_out = ctx.input_mut(|i| i.consume_shortcut(&ZOOM_OUT));
@@ -2725,7 +2725,7 @@ mod tests {
         app.keymap.custom.insert("solid.extrude".into(), "Shift+E".into());
         let v = control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(v["dialog"], serde_json::Value::Null);
-        assert!(app.ui.dark && app.preferences.theme == "dark" && app.preferences.ui_scale == 1.0 && app.preferences.zoom_to_cursor);
+        assert!(app.ui.dark && app.preferences.theme == "dark" && app.preferences.ui_scale == Prefs::default().ui_scale && app.preferences.zoom_to_cursor);
         assert!(app.keymap.custom.is_empty(), "a rebinding made while the dialog was open is undone too");
 
         control(&mut app, &json!({"open": "Navigation", "nav": "alias", "look_at_anim": false})).unwrap();
