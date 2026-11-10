@@ -1756,6 +1756,7 @@
   "ui.reverse_zoom_direction": "Reverse zoom direction",
   "ui.revolve": "Revolve",
   "ui.ribbon_exit": "Exit",
+  "ui.ribbon_icon_rows": "Icon rows (more than 1 shows icons only)",
   "ui.ribbon_labels": "Show text under ribbon icons",
   "ui.ribbon_pin_footer": "Pinned commands show on the ribbon. Hover a row to pin or unpin it.",
   "ui.ribbon_workspace": "Workspace",

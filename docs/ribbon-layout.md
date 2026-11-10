@@ -2,7 +2,7 @@
 
 The UI layout in `crates/ui-egui/src/workspace.rs` maps the original engine registry placements into ribbon sections. `docs/features.md` continues to document registry placements; command registrations and ids are unchanged.
 
-Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL. SKETCH appears during sketch editing. SHEET METAL is reachable in every document, so a sheet-metal part can start from a sketch or a solid; it takes the contextual style and selects itself when the selected body (or the last body of the active component) has evaluated sheet-metal data. Entering a context selects its tab; the other tabs remain available. RENDER belongs to the Render workspace.
+Always shown, in order: MODEL, SURFACE, ASSEMBLE, MANAGE, VIEW, SHEET METAL. The former INSPECT and INSERT tabs are gone: their panels (PROPERTIES, SECTION, WCS, CHECK, SURFACE QUALITY, HISTORY; FILES, IMAGES, 2D, LIBRARY, LINKS) now sit at the end of MODEL, and `tab:INSPECT` / `tab:INSERT` are handle aliases of MODEL. SKETCH appears during sketch editing. SHEET METAL is reachable in every document, so a sheet-metal part can start from a sketch or a solid; it takes the contextual style and selects itself when the selected body (or the last body of the active component) has evaluated sheet-metal data. Entering a context selects its tab; the other tabs remain available. RENDER belongs to the Render workspace.
 
 **Bold command ids are default promoted buttons.** Every listed command remains in the section menu. Saved user pins can add buttons, as before.
 
@@ -23,16 +23,16 @@ Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW,
 | ASSEMBLE | POSITION | **`occurrence.ground`**, **`component.capture_position`**, **`component.revert_position`** |
 | ASSEMBLE | MOTION | **`joint.drive`**, **`joint.motion_link`**, **`motion.study`**, **`motion.trace`**, `explode.create` |
 | ASSEMBLE | CONTACT | **`contact.enable_sets`**, **`contact.check`**, `contact.enable_all`, `contact.disable_all`, `contact.create`, `contact.edit`, `contact.list` |
-| INSERT | FILES | **`file.insert_step`**, **`file.insert_mesh`**, **`component.insert_design`**, `file.save_mesh` |
-| INSERT | IMAGES | **`canvas.insert`**, **`canvas.decal`**, **`canvas.edit`** |
-| INSERT | 2D | **`sketch.insert_dxf`**, **`sketch.insert_svg`** |
-| INSERT | LIBRARY | **`parts.fastener`**, **`parts.library`**, **`parts.resize`**, `parts.insert` |
-| INSERT | LINKS | **`component.update_links`**, **`component.break_link`** |
-| INSPECT | MEASURE | **`inspect.measure`**, **`inspect.center_of_mass`**, **`component.properties`** |
-| INSPECT | SECTION | **`inspect.section`** |
-| INSPECT | CHECK | **`inspect.interference`**, **`inspect.draft`**, **`inspect.accessibility`**, **`contact.check`**, `inspect.compare` |
-| INSPECT | SURFACE QUALITY | **`inspect.zebra`**, **`inspect.curvature_map`**, **`inspect.curvature_comb`**, **`inspect.isocurve`**, `inspect.minimum_radius`, `inspect.environment_map`, `inspect.continuity` |
-| INSPECT | HISTORY | **`timeline.dependents`**, **`document.inspect`** |
+| MODEL | FILES | **`file.insert_step`**, **`file.insert_mesh`**, **`component.insert_design`**, `file.save_mesh` |
+| MODEL | IMAGES | **`canvas.insert`**, **`canvas.decal`**, **`canvas.edit`** |
+| MODEL | 2D | **`sketch.insert_dxf`**, **`sketch.insert_svg`** |
+| MODEL | LIBRARY | **`parts.fastener`**, **`parts.library`**, **`parts.resize`**, `parts.insert` |
+| MODEL | LINKS | **`component.update_links`**, **`component.break_link`** |
+| MODEL | PROPERTIES | **`inspect.measure`**, **`inspect.center_of_mass`**, **`component.properties`** |
+| MODEL | SECTION | **`inspect.section`** |
+| MODEL | CHECK | **`inspect.interference`**, **`inspect.draft`**, **`inspect.accessibility`**, **`contact.check`**, `inspect.compare` |
+| MODEL | SURFACE QUALITY | **`inspect.zebra`**, **`inspect.curvature_map`**, **`inspect.curvature_comb`**, **`inspect.isocurve`**, `inspect.minimum_radius`, `inspect.environment_map`, `inspect.continuity` |
+| MODEL | HISTORY | **`timeline.dependents`**, **`document.inspect`** |
 | MANAGE | PARAMETERS | **`parameters.change`**, **`parameters.graph`**, `parameters.move`, `parameters.import`, `parameters.export` |
 | MANAGE | CONFIGURATIONS | **`config.table`**, **`config.configure`**, `config.rules`, `config.preview` |
 | MANAGE | MATERIALS | **`material.assign`**, **`appearance.assign`**, `material.properties.validate`, `library.inspect`, `library.export`, `library.apply` |
@@ -62,7 +62,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 
 | Original tab / panel | New tab / section | Command ids |
 |---|---|---|
-| MESH / MODIFY | INSERT / FILES | `file.save_mesh` |
+| MESH / MODIFY | MODEL / FILES | `file.save_mesh` |
 | PLASTIC / CREATE | MODEL / CREATE | `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest` |
 | PLASTIC / SETUP | MANAGE / RULES | `plastic.manage_rules`, `plastic.assign_rule` |
 | RENDER / IMAGE | RENDER / IMAGE | `render.start` |
@@ -78,11 +78,11 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SKETCH / CREATE | SKETCH / CREATE | `sketch.line`, `sketch.rectangle.two_point`, `sketch.rectangle.three_point`, `sketch.rectangle.rounded`, `sketch.rectangle.center`, `sketch.circle.center`, `sketch.circle.two_point`, `sketch.circle.three_point`, `sketch.arc.three_point`, `sketch.arc.center_point`, `sketch.polygon.inscribed`, `sketch.polygon.circumscribed`, `sketch.polygon.edge`, `sketch.slot.center_to_center`, `sketch.slot.overall`, `sketch.point`, `sketch.line.midpoint`, `sketch.arc.tangent`, `sketch.circle.two_tangent`, `sketch.circle.three_tangent`, `sketch.slot.center_point`, `sketch.slot.arc_three_point`, `sketch.slot.arc_center`, `sketch.ellipse`, `sketch.spline.fit_point`, `sketch.spline.control_point`, `sketch.spline.control_point_5`, `sketch.conic`, `sketch.centerline`, `sketch.text` |
 | SKETCH / CREATE | SKETCH / REFERENCE | `sketch.project`, `sketch.intersect`, `sketch.include_3d`, `sketch.project_to_surface`, `sketch.intersection_curve`, `sketch.spun_profile`, `sketch.isoparametric_curve`, `sketch.fit_curves_to_section` |
 | SKETCH / FINISH SKETCH | SKETCH / FINISH SKETCH | `sketch.finish`, `sketch.finish_auto_constrain` |
-| SKETCH / INSERT | INSERT / 2D | `sketch.insert_dxf`, `sketch.insert_svg` |
-| SKETCH / INSERT | INSERT / IMAGES | `canvas.insert`, `canvas.decal`, `canvas.edit` |
-| SKETCH / INSPECT | INSPECT / CHECK | `inspect.draft`, `inspect.accessibility` |
-| SKETCH / INSPECT | INSPECT / MEASURE | `inspect.center_of_mass` |
-| SKETCH / INSPECT | INSPECT / SURFACE QUALITY | `inspect.curvature_comb`, `inspect.minimum_radius`, `inspect.isocurve`, `inspect.zebra`, `inspect.environment_map`, `inspect.curvature_map` |
+| SKETCH / INSERT | MODEL / 2D | `sketch.insert_dxf`, `sketch.insert_svg` |
+| SKETCH / INSERT | MODEL / IMAGES | `canvas.insert`, `canvas.decal`, `canvas.edit` |
+| SKETCH / INSPECT | MODEL / CHECK | `inspect.draft`, `inspect.accessibility` |
+| SKETCH / INSPECT | MODEL / PROPERTIES | `inspect.center_of_mass` |
+| SKETCH / INSPECT | MODEL / SURFACE QUALITY | `inspect.curvature_comb`, `inspect.minimum_radius`, `inspect.isocurve`, `inspect.zebra`, `inspect.environment_map`, `inspect.curvature_map` |
 | SKETCH / MODIFY | SKETCH / MODIFY | `sketch.blend_curve`, `sketch.fillet`, `sketch.chamfer.equal_distance`, `sketch.chamfer.distance_angle`, `sketch.chamfer.two_distance`, `sketch.offset`, `sketch.trim`, `sketch.extend`, `sketch.break`, `sketch.scale`, `sketch.move` |
 | SKETCH / PATTERN | SKETCH / PATTERN | `sketch.mirror`, `sketch.pattern.circular`, `sketch.pattern.rectangular` |
 | SOLID / ASSEMBLE | ASSEMBLE / COMPONENTS | `component.create`, `component.insert_design` |
@@ -95,11 +95,11 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SOLID / CREATE | MODEL / ARRANGE | `solid.pattern.rectangular`, `solid.pattern.circular`, `solid.pattern.path`, `solid.mirror` |
 | SOLID / CREATE | MODEL / CREATE | `solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.hole`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss` |
 | SOLID / CREATE | MODEL / SKETCH | `sketch.create` |
-| SOLID / INSERT | INSERT / FILES | `file.insert_step`, `file.insert_mesh` |
-| SOLID / INSERT | INSERT / LIBRARY | `parts.fastener` |
-| SOLID / INSPECT | INSPECT / CHECK | `inspect.interference` |
-| SOLID / INSPECT | INSPECT / MEASURE | `inspect.measure` |
-| SOLID / INSPECT | INSPECT / SECTION | `inspect.section` |
+| SOLID / INSERT | MODEL / FILES | `file.insert_step`, `file.insert_mesh` |
+| SOLID / INSERT | MODEL / LIBRARY | `parts.fastener` |
+| SOLID / INSPECT | MODEL / CHECK | `inspect.interference` |
+| SOLID / INSPECT | MODEL / PROPERTIES | `inspect.measure` |
+| SOLID / INSPECT | MODEL / SECTION | `inspect.section` |
 | SOLID / MODIFY | MANAGE / DESIGN | `timeline.compute_all` |
 | SOLID / MODIFY | MANAGE / MATERIALS | `appearance.assign`, `material.assign` |
 | SOLID / MODIFY | MANAGE / PARAMETERS | `parameters.change` |
@@ -108,12 +108,12 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SOLID / POSITION | ASSEMBLE / POSITION | `component.capture_position`, `component.revert_position` |
 | SURFACE / CREATE | SURFACE / CONVERT | `surface.thicken` |
 | SURFACE / CREATE | SURFACE / CREATE | `surface.boundary`, `surface.patch`, `surface.extrude`, `surface.revolve`, `surface.sweep`, `surface.loft`, `surface.offset`, `surface.ruled`, `surface.blend` |
-| SURFACE / INSPECT | INSPECT / SURFACE QUALITY | `inspect.continuity` |
+| SURFACE / INSPECT | MODEL / SURFACE QUALITY | `inspect.continuity` |
 | SURFACE / MODIFY | SURFACE / EDIT | `surface.stitch`, `surface.extend`, `surface.trim`, `surface.untrim`, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
 
 ## Placement decisions and missing commands
 
-- Save As Mesh (`file.save_mesh`), previously MESH / MODIFY, is in INSERT / FILES. The existing File menu continues to offer it.
+- Save As Mesh (`file.save_mesh`), previously MESH / MODIFY, is in MODEL / FILES. The existing File menu continues to offer it.
 - The selection filter, previously in SELECT on multiple tabs including UTILITIES, is in VIEW / SELECT. This is a populated control group, although it has no command ids.
 - MODEL’s Pattern button uses the existing `solid.pattern.rectangular` command; Circular and Path stay in its menu. No generic pattern command is registered.
 - There is no separate New 3D Sketch command. MODEL / SKETCH lists the existing 3D line, spline, point and move-point commands. Infinite Line (`sketch.infinite`) is in SKETCH / CREATE.
@@ -128,11 +128,11 @@ Legacy toolbar preferences are plain maps keyed by `DESIGN/<tab>/<panel>`. On lo
 
 Preferences and shortcut exports now wrap the map as `{"version":2,"panels":{...}}`. The version prevents repeated migration of unchanged SKETCH, SURFACE and SHEET METAL keys. Legacy imports still migrate. Reset restores the new defaults.
 
-Additional old panels used for shared layouts migrate as follows: SELECT on any old tab → VIEW / SELECT; ASSEMBLE → ASSEMBLE / JOINTS; CONSTRUCT → MODEL / CONSTRUCT; INSPECT → INSPECT / CHECK; INSERT → INSERT / FILES; PLASTIC / MODIFY → MODEL / MODIFY; MESH / CREATE or PREPARE → SURFACE / CONVERT; UTILITIES / MAKE, ADD-INS or UTILITY → MANAGE / DESIGN. Command-id destinations override these panel defaults.
+Additional old panels used for shared layouts migrate as follows: SELECT on any old tab → VIEW / SELECT; ASSEMBLE → ASSEMBLE / JOINTS; CONSTRUCT → MODEL / CONSTRUCT; INSPECT → MODEL / CHECK; INSERT → MODEL / FILES; PLASTIC / MODIFY → MODEL / MODIFY; MESH / CREATE or PREPARE → SURFACE / CONVERT; UTILITIES / MAKE, ADD-INS or UTILITY → MANAGE / DESIGN. Command-id destinations override these panel defaults.
 
 ## Automation handles
 
-The tab handle form stays `tab:<UPPERCASE NAME>`. Added: `tab:MODEL`, `tab:ASSEMBLE`, `tab:INSERT`, `tab:INSPECT`, `tab:MANAGE`, `tab:VIEW`. SURFACE and RENDER retain their names; SKETCH is available only in context; SHEET METAL is always available. Legacy aliases remain: `tab:SOLID` and `tab:PLASTIC` → MODEL; `tab:MESH` → SURFACE; `tab:UTILITIES` → MANAGE. The Home and document-tab handles are unchanged.
+The tab handle form stays `tab:<UPPERCASE NAME>`. Added: `tab:MODEL`, `tab:ASSEMBLE`, `tab:MANAGE`, `tab:VIEW`. SURFACE and RENDER retain their names; SKETCH is available only in context; SHEET METAL is always available. Legacy aliases remain: `tab:SOLID` and `tab:PLASTIC` → MODEL; `tab:MESH` → SURFACE; `tab:UTILITIES` → MANAGE. The Home and document-tab handles are unchanged.
 
 Section labels retain `panel:<tab>:<section>` and collapsed sections retain `collapsed:<tab>:<section>`, with destinations from the tables above. In particular, `panel:SOLID:CREATE` becomes `panel:MODEL:CREATE`, selection-filter panels become `panel:VIEW:SELECT`, and `panel:SKETCH:CONSTRAINTS` becomes `panel:SKETCH:CONSTRAIN`. Command button and menu handles keep their command ids.
 
@@ -162,3 +162,7 @@ it keeps the card and enables the translucent overlay surface. With the left his
 the browser stays below that history unless the overlay preference is enabled, in which case
 only the history keeps its column. The bottom History card leaves a gap beneath the browser;
 the full viewport remains available through the gaps and below a short browser.
+
+## Icon rows
+
+Settings → General → "Icon rows" (`ribbon_icon_rows`, 1 to 4, default 1). From 2 up the ribbon is icon-only and each panel is a grid of that many rows of small icons, filled top to bottom and then left to right, so a tab with many commands (MODEL holds the former INSPECT and INSERT panels) fits without trimming. The panel width unit becomes a column, so a narrow toolbar drops whole columns into the panel drop-down.

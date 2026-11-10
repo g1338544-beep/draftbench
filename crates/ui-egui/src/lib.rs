@@ -1060,7 +1060,7 @@ impl SolveApp {
         if let Some(rest) = id.strip_prefix("inspect.measure.") {
             // The simple measures open Measure; its rows list distance, angle, length, radius and diameter.
             if matches!(rest, "distance" | "angle" | "length" | "radius" | "diameter") {
-                // Stay on the tab the click came from: Measure's own tab is INSPECT.
+                // Stay on the tab the click came from: Measure's own tab is MODEL.
                 let tab = self.ui.tab.clone();
                 self.start("inspect.measure");
                 self.ui.tab = tab;
@@ -1806,7 +1806,7 @@ impl SolveApp {
         }
         let full = ui.available_rect_before_wrap();
         if floating {
-            let cards = shell::Cards::new(full, self.ui.layout, toolbar::ribbon_height(self.preferences.ribbon_labels));
+            let cards = shell::Cards::new(full, self.ui.layout, toolbar::ribbon_height_rows(self.preferences.ribbon_labels, self.preferences.ribbon_icon_rows));
             self.shell.cards = vec![cards.workspace, cards.ribbon];
             self.shell.history = if left_timeline {
                 let below_ribbon = egui::Rect::from_min_max(egui::pos2(full.left(), cards.bottom), full.max);

@@ -463,6 +463,9 @@ preference_settings! {
     layout: crate::shell::LayoutMode = Default::default(), 0;
     /// Show command names beneath ribbon icons, independently of workspace layout.
     ribbon_labels: bool = true, 0 => check_tr("ui.ribbon_labels");
+    /// Rows of small icons per ribbon panel (1 = the usual single row). From 2 up the ribbon is icon-only,
+    /// each panel a grid of that many rows, so a tab with many commands fits without trimming.
+    ribbon_icon_rows: u8 = 1, 0 => number("ui.ribbon_icon_rows", 1..=4);
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 1.0, 0, accept(0.5..=2.5) => slider("ui.ui_scale", 0.5..=2.5, 0.05, |v| format!("{:.0} %", v * 100.0), "prefs:scale");
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
@@ -1179,6 +1182,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 }
             });
             setting::ribbon_labels(app, ui);
+            setting::ribbon_icon_rows(app, ui);
             setting::ui_scale(app, ui);
             if !cfg!(target_arch = "wasm32") {
                 ui_kit::row(ui, app.tr_label("Interface font"), |ui| ui_font_row(app, ui));

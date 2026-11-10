@@ -1755,6 +1755,7 @@
   "ui.reverse_zoom_direction": "反转缩放方向",
   "ui.revolve": "旋转",
   "ui.ribbon_exit": "退出",
+  "ui.ribbon_icon_rows": "图标行数（超过1行仅显示图标）",
   "ui.ribbon_labels": "显示功能区图标下的文字",
   "ui.ribbon_pin_footer": "固定的命令显示在功能区中。将指针悬停在行上可固定或取消固定。",
   "ui.ribbon_workspace": "工作区",

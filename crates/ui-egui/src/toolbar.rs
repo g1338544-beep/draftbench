@@ -102,11 +102,24 @@ pub(crate) const WORKSPACE_WIDTH: f32 = 88.0;
 const BUTTON_HEIGHT: f32 = 60.0;
 const ICON_BUTTON_HEIGHT: f32 = 36.0;
 const ICON_GROUP_HEIGHT: f32 = 62.0;
+/// One row of the multi-row icon grid (`ribbon_icon_rows` > 1).
+const ICON_ROW_HEIGHT: f32 = 30.0;
 
-/// The same height drives shell reservations and ribbon painting in either layout.
-pub(crate) fn ribbon_height(labels: bool) -> f32 {
-    if labels { RIBBON_HEIGHT } else { TAB_ROW_HEIGHT + ICON_GROUP_HEIGHT + 1.0 }
+/// How many icon rows the ribbon uses: 1 is the usual row; 2 to 4 make an icon-only grid.
+pub(crate) fn icon_rows(rows: u8) -> usize {
+    usize::from(rows.clamp(1, 4))
 }
+
+fn icon_group_height(rows: usize) -> f32 {
+    if rows <= 1 { ICON_GROUP_HEIGHT } else { 2.0 + rows as f32 * (ICON_ROW_HEIGHT + 1.0) + 24.0 }
+}
+
+/// The ribbon's height for these settings (more than one icon row turns the text labels off).
+pub(crate) fn ribbon_height_rows(labels: bool, rows: u8) -> f32 {
+    let rows = icon_rows(rows);
+    if labels && rows == 1 { RIBBON_HEIGHT } else { TAB_ROW_HEIGHT + icon_group_height(rows) + 1.0 }
+}
+
 const BUTTON_GAP: f32 = 3.0;
 const BUTTON_MIN_WIDTH: f32 = 54.0;
 const BUTTON_MAX_WIDTH: f32 = 76.0;
@@ -890,7 +903,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                         crate::scenario::publish_target(&format!("tab:{tab}"), tr);
                         crate::scenario::publish_rect(&format!("toolbar_tab:{tab}"), tr);
                         let aliases: &[&str] = match tab {
-                            "MODEL" => &["SOLID", "PLASTIC"],
+                            "MODEL" => &["SOLID", "PLASTIC", "INSPECT", "INSERT"],
                             "SURFACE" => &["MESH"],
                             "MANAGE" => &["UTILITIES"],
                             _ => &[],
@@ -928,10 +941,19 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     crate::workspace::sync_context(app);
     let floating = Container::for_layout(app.ui.layout, Surface::Panel).floating();
-    let labels = app.preferences.ribbon_labels;
-    let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
-    let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
-    let ribbon_height = ribbon_height(labels);
+    let icon_rows = icon_rows(app.preferences.ribbon_icon_rows);
+    let labels = app.preferences.ribbon_labels && icon_rows == 1;
+    let button_height = if labels {
+        BUTTON_HEIGHT
+    } else if icon_rows > 1 {
+        ICON_ROW_HEIGHT
+    } else {
+        ICON_BUTTON_HEIGHT
+    };
+    // The room of one panel's buttons: a single row, or the whole grid.
+    let grid_height = icon_rows as f32 * (button_height + 1.0) - 1.0;
+    let group_height = if labels { GROUP_HEIGHT } else { icon_group_height(icon_rows) };
+    let ribbon_height = ribbon_height_rows(labels, icon_rows as u8);
     let gallery_width = if labels { CONSTRAINT_GRID_WIDTH } else { 6.0 * 27.0 };
     let cards = crate::shell::Cards::new(ui.available_rect_before_wrap(), app.ui.layout, ribbon_height);
     let height = if floating { cards.bottom - ui.available_rect_before_wrap().top() } else { ribbon_height };
@@ -1057,6 +1079,16 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     })
                     .collect();
+                // A grid of several rows: the panel's units are columns, as wide as their widest icon.
+                if icon_rows > 1 {
+                    widths = widths
+                        .chunks(icon_rows)
+                        .map(|column| {
+                            let width = column.iter().map(|b| b.width).fold(0.0, f32::max);
+                            ButtonSize { width, min_width: width }
+                        })
+                        .collect();
+                }
                 if tab == "SKETCH" && *panel == "CONSTRAIN" && shown.iter().any(|c| crate::workspace::CONSTRAINT_GALLERY.contains(&c.id)) {
                     widths.push(ButtonSize { width: gallery_width, min_width: gallery_width });
                 }
@@ -1106,19 +1138,22 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .filter(|c| tab == "SKETCH" && *panel == "CONSTRAIN" && crate::workspace::CONSTRAINT_GALLERY.contains(&c.id))
                 .collect();
             let large: Vec<_> = shown.iter().copied().filter(|c| !gallery.iter().any(|g| g.id == c.id)).collect();
-            let drawn = if collapsed { 0 } else { plan.shown.min(button_widths.len()) };
+            // The panel's units are columns (one button each in a single row).
+            let large_cols = large.len().div_ceil(icon_rows);
+            let drawn_cols = if collapsed { 0 } else { plan.shown.min(button_widths.len()) };
+            let drawn = (drawn_cols.min(large_cols) * icon_rows).min(large.len());
             // Buttons narrower than the panel's minimum width (a one-button panel) are centred.
-            let buttons_width = button_widths.iter().take(drawn).sum::<f32>() + drawn.saturating_sub(1) as f32 * BUTTON_GAP;
-            let inset = if drawn == 0 { 0.0 } else { ((width - 8.0 - buttons_width) / 2.0).max(0.0).floor() };
+            let buttons_width = button_widths.iter().take(drawn_cols).sum::<f32>() + drawn_cols.saturating_sub(1) as f32 * BUTTON_GAP;
+            let inset = if drawn_cols == 0 { 0.0 } else { ((width - 8.0 - buttons_width) / 2.0).max(0.0).floor() };
             let bx = px + 4.0 + inset;
             let free_x = bx + buttons_width + BUTTON_GAP;
-            let free = Rect::from_min_size(pos2(free_x, top + 2.0), vec2((px + width - 4.0 - free_x).max(0.0), button_height));
+            let free = Rect::from_min_size(pos2(free_x, top + 2.0), vec2((px + width - 4.0 - free_x).max(0.0), grid_height));
             let fresp = ui.interact(free, ui.id().with(("panel_free", panel)), if collapsed { Sense::click() } else { Sense::hover() });
             let mut opened = false;
             if collapsed {
                 // One button: the panel's first command's icon over a caret; it opens the
                 // drop-down, which lists every command of the panel.
-                let br = Rect::from_center_size(free.center(), vec2((width - 8.0).max(0.0), button_height));
+                let br = Rect::from_center_size(free.center(), vec2((width - 8.0).max(0.0), grid_height));
                 crate::scenario::publish_handle(&format!("collapsed:{tab}:{panel}"), br.center());
                 if fresp.hovered() && enabled_panel {
                     painter.rect_filled(br, t.radius_sm, t.hover);
@@ -1138,14 +1173,16 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     opened = true;
                 }
             }
-            let mut button_x = bx;
-            for (c, button_width) in large.iter().zip(button_widths.iter().copied()).take(drawn) {
+            let mut button_x: f32;
+            for (index, c) in large.iter().enumerate().take(drawn) {
+                let (column, row) = (index / icon_rows, index % icon_rows);
+                let button_width = button_widths.get(column).copied().unwrap_or(40.0);
+                button_x = bx + button_widths.iter().take(column).sum::<f32>() + column as f32 * BUTTON_GAP;
                 // Only the family's default pin follows the part's choice. Explicitly pinned
                 // variants remain exact commands, including in customised toolbars.
                 let family = crate::sketch_families::family(c.id).filter(|f| sketch_create && f.commands.first().copied() == Some(c.id));
                 let selected = family.and_then(|f| app.preferences.sketch_variants.selected(f)).unwrap_or(c);
-                let whole = Rect::from_min_size(pos2(button_x, top + 2.0), vec2(button_width, button_height));
-                button_x += button_width + BUTTON_GAP;
+                let whole = Rect::from_min_size(pos2(button_x, top + 2.0 + row as f32 * (button_height + 1.0)), vec2(button_width, button_height));
                 let mut br = whole;
                 if family.is_some() {
                     if labels {
@@ -1188,7 +1225,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.rect_filled(whole, t.radius_sm, t.hover);
                 }
                 let icon = if selected.id == "sketch.finish" { "finish" } else { selected.icon };
-                let side = if finish { 30.0 } else { 26.0 };
+                let side = if icon_rows > 1 { 22.0 } else if finish { 30.0 } else { 26.0 };
                 let icon_rect =
                     Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
                 icons::paint_icon(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });
@@ -1231,7 +1268,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.galley(pos2(whole.center().x, whole.top() + 32.0), galley, t.text);
                 }
             }
-            if !collapsed && drawn > large.len() {
+            // The next free x, after the last drawn column of large buttons.
+            let last_cols = drawn_cols.min(large_cols);
+            button_x = bx + button_widths.iter().take(last_cols).sum::<f32>() + last_cols as f32 * BUTTON_GAP;
+            if !collapsed && drawn_cols > large_cols {
                 if !gallery.is_empty() {
                     // A quiet rule sets the grid apart from the large button before it.
                     painter.line_segment(
@@ -1337,14 +1377,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_rect(&format!("panel:{tab}:{panel}"), panel_rect);
             let over_button = ui.input(|input| input.pointer.hover_pos()).is_some_and(|p| {
                 let mut x = bx;
-                button_widths.iter().take(drawn).any(|width| {
-                    let rect = Rect::from_min_size(pos2(x, top + 2.0), vec2(*width, button_height));
+                button_widths.iter().take(drawn_cols).any(|width| {
+                    let rect = Rect::from_min_size(pos2(x, top + 2.0), vec2(*width, grid_height));
                     x += width + BUTTON_GAP;
                     rect.contains(p)
                 })
             });
             if !over_button && ui.rect_contains_pointer(panel_rect) && egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()).is_some() {
-                painter.line_segment([pos2(px + width - 4.0, top + 4.0), pos2(px + width - 4.0, top + 38.0)], Stroke::new(2.0, t.accent));
+                painter.line_segment([pos2(px + width - 4.0, top + 4.0), pos2(px + width - 4.0, top + 2.0 + grid_height.max(36.0))], Stroke::new(2.0, t.accent));
                 if ui.input(|input| input.pointer.any_released())
                     && let Some(d) = egui::DragAndDrop::take_payload::<ToolbarDrag>(ui.ctx())
                 {

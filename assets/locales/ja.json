@@ -1755,6 +1755,7 @@
   "ui.reverse_zoom_direction": "ズーム方向を反転",
   "ui.revolve": "回転",
   "ui.ribbon_exit": "終了",
+  "ui.ribbon_icon_rows": "アイコンの行数（2行以上はアイコンのみ）",
   "ui.ribbon_labels": "リボンのアイコンの下にテキストを表示",
   "ui.ribbon_pin_footer": "ピン留めしたコマンドはリボンに表示されます。行にポインターを合わせて、ピン留めや解除ができます。",
   "ui.ribbon_workspace": "ワークスペース",

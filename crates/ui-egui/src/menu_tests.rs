@@ -276,7 +276,7 @@ fn move_shortcut_uses_the_selected_nested_instance_and_pending_position() {
     crate::keymap::bind(&mut app, "solid.move", "Shift+M", false).unwrap();
     crate::keymap::press(&mut app, "M");
     assert!(app.tree.occurrence_move.is_none(), "the old shortcut was cleared");
-    app.ui.tab = "INSPECT".into();
+    app.ui.tab = "MANAGE".into();
     crate::keymap::press(&mut app, "Shift+M");
     assert_eq!(app.ui.tab, "MODEL", "starting component Move still selects the command's workspace tab");
     let movement = app.tree.occurrence_move.as_ref().expect("component Move opens from its rebound shortcut");

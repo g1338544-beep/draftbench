@@ -692,7 +692,7 @@ mod tests {
         assert_eq!(search(&app, name).first().map(|r| r.0), Some("sketch.rectangle.center"), "the exact name comes first");
         // Search shows and matches the redesigned destination, including translated panels.
         for (id, tab, panel) in
-            [("solid.extrude", "MODEL", "CREATE"), ("inspect.draft", "INSPECT", "CHECK"), ("sketch.constraint.parallel", "SKETCH", "CONSTRAIN")]
+            [("solid.extrude", "MODEL", "CREATE"), ("inspect.draft", "MODEL", "CHECK"), ("sketch.constraint.parallel", "SKETCH", "CONSTRAIN")]
         {
             let c = solidcraft_engine::find_command(id).unwrap();
             let label = ja.label(c.label);

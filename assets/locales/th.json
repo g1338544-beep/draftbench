@@ -845,6 +845,7 @@
   "ui.reverse_zoom_direction": "กลับทิศการซูม",
   "ui.revolve": "หมุนขึ้นรูป",
   "ui.ribbon_exit": "ออก",
+  "ui.ribbon_icon_rows": "จำนวนแถวไอคอน (มากกว่า 1 แถวจะแสดงเฉพาะไอคอน)",
   "ui.ribbon_labels": "แสดงข้อความใต้ไอคอนริบบอน",
   "ui.ribbon_workspace": "พื้นที่ทำงาน",
   "ui.right": "ด้านขวา",

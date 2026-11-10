@@ -4,7 +4,7 @@
 use solidcraft_engine::CommandSpec;
 use solidcraft_engine::doc::FeatureKind;
 
-pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
+pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "MANAGE", "VIEW"];
 
 /// Reading order of the compact, three-column constraint gallery. Icons come from each spec.
 pub const CONSTRAINT_GALLERY: &[&str] = &[
@@ -172,26 +172,26 @@ pub const SECTIONS: &[Section] = &[
         ids: &["contact.enable_sets", "contact.check", "contact.enable_all", "contact.disable_all", "contact.create", "contact.edit", "contact.list"],
     },
     Section {
-        tab: "INSERT",
+        tab: "MODEL",
         panel: "FILES",
         promoted: 3,
         ids: &["file.insert_step", "file.insert_mesh", "component.insert_design", "file.save_mesh"],
     },
-    Section { tab: "INSERT", panel: "IMAGES", promoted: 3, ids: &["canvas.insert", "canvas.decal", "canvas.edit"] },
-    Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg"] },
-    Section { tab: "INSERT", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
-    Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
-    Section { tab: "INSPECT", panel: "MEASURE", promoted: 4, ids: &["inspect.mass_properties", "inspect.measure", "inspect.center_of_mass", "component.properties"] },
-    Section { tab: "INSPECT", panel: "SECTION", promoted: 1, ids: &["inspect.section"] },
-    Section { tab: "INSPECT", panel: "WCS", promoted: 4, ids: &["wcs.origin", "wcs.rotate_z", "wcs.rotate_x", "wcs.rotate_y", "wcs.reset"] },
+    Section { tab: "MODEL", panel: "IMAGES", promoted: 3, ids: &["canvas.insert", "canvas.decal", "canvas.edit"] },
+    Section { tab: "MODEL", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg"] },
+    Section { tab: "MODEL", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
+    Section { tab: "MODEL", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
+    Section { tab: "MODEL", panel: "PROPERTIES", promoted: 4, ids: &["inspect.mass_properties", "inspect.measure", "inspect.center_of_mass", "component.properties"] },
+    Section { tab: "MODEL", panel: "SECTION", promoted: 1, ids: &["inspect.section"] },
+    Section { tab: "MODEL", panel: "WCS", promoted: 4, ids: &["wcs.origin", "wcs.rotate_z", "wcs.rotate_x", "wcs.rotate_y", "wcs.reset"] },
     Section {
-        tab: "INSPECT",
+        tab: "MODEL",
         panel: "CHECK",
         promoted: 4,
         ids: &["inspect.interference", "inspect.draft", "inspect.accessibility", "contact.check", "inspect.compare"],
     },
     Section {
-        tab: "INSPECT",
+        tab: "MODEL",
         panel: "SURFACE QUALITY",
         promoted: 4,
         ids: &[
@@ -204,7 +204,7 @@ pub const SECTIONS: &[Section] = &[
             "inspect.continuity",
         ],
     },
-    Section { tab: "INSPECT", panel: "HISTORY", promoted: 2, ids: &["timeline.dependents", "document.inspect"] },
+    Section { tab: "MODEL", panel: "HISTORY", promoted: 2, ids: &["timeline.dependents", "document.inspect"] },
     Section {
         tab: "MANAGE",
         panel: "PARAMETERS",
@@ -378,23 +378,23 @@ pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("SOLID", "ASSEMBLE", "ASSEMBLE", "JOINTS"),
     ("SOLID", "POSITION", "ASSEMBLE", "POSITION"),
     ("SOLID", "CONFIGURE", "MANAGE", "CONFIGURATIONS"),
-    ("SOLID", "INSPECT", "INSPECT", "CHECK"),
-    ("SOLID", "INSERT", "INSERT", "FILES"),
+    ("SOLID", "INSPECT", "MODEL", "CHECK"),
+    ("SOLID", "INSERT", "MODEL", "FILES"),
     ("SURFACE", "CREATE", "SURFACE", "CREATE"),
     ("SURFACE", "MODIFY", "SURFACE", "EDIT"),
-    ("SURFACE", "INSPECT", "INSPECT", "SURFACE QUALITY"),
+    ("SURFACE", "INSPECT", "MODEL", "SURFACE QUALITY"),
     ("SKETCH", "CREATE", "SKETCH", "CREATE"),
     ("SKETCH", "MODIFY", "SKETCH", "MODIFY"),
     ("SKETCH", "PATTERN", "SKETCH", "PATTERN"),
     ("SKETCH", "CONSTRAINTS", "SKETCH", "CONSTRAIN"),
-    ("SKETCH", "INSERT", "INSERT", "IMAGES"),
-    ("SKETCH", "INSPECT", "INSPECT", "SURFACE QUALITY"),
+    ("SKETCH", "INSERT", "MODEL", "IMAGES"),
+    ("SKETCH", "INSPECT", "MODEL", "SURFACE QUALITY"),
     ("SKETCH", "FINISH SKETCH", "SKETCH", "FINISH SKETCH"),
     ("SHEET METAL", "CREATE", "SHEET METAL", "CREATE"),
     ("SHEET METAL", "MODIFY", "SHEET METAL", "FLAT"),
     ("PLASTIC", "CREATE", "MODEL", "CREATE"),
     ("PLASTIC", "SETUP", "MANAGE", "RULES"),
-    ("MESH", "MODIFY", "INSERT", "FILES"),
+    ("MESH", "MODIFY", "MODEL", "FILES"),
     ("RENDER", "SCENE", "RENDER", "SCENE"),
     ("RENDER", "IMAGE", "RENDER", "IMAGE"),
 ];
@@ -445,11 +445,11 @@ pub fn legacy_panel(tab: &str, panel: &str) -> Option<(&'static str, &'static st
         ("PLASTIC" | "SHEET METAL", "MODIFY") => Some(("MODEL", "MODIFY")),
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "ASSEMBLE") => Some(("ASSEMBLE", "JOINTS")),
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "CONSTRUCT") => Some(("MODEL", "CONSTRUCT")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSPECT") => Some(("INSPECT", "CHECK")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSERT") => Some(("INSERT", "FILES")),
+        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSPECT") => Some(("MODEL", "CHECK")),
+        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSERT") => Some(("MODEL", "FILES")),
         ("MESH", "CREATE" | "PREPARE") => Some(("SURFACE", "CONVERT")),
         ("UTILITIES", "MAKE" | "ADD-INS" | "UTILITY") => Some(("MANAGE", "DESIGN")),
-        ("UTILITIES", "INSPECT") => Some(("INSPECT", "CHECK")),
+        ("UTILITIES", "INSPECT") => Some(("MODEL", "CHECK")),
         _ => None,
     })
 }
@@ -682,7 +682,7 @@ mod tests {
         }
         for (tab, panel, id) in [
             ("MODEL", "CREATE", "plastic.boss"),
-            ("INSERT", "FILES", "component.insert_design"),
+            ("MODEL", "FILES", "component.insert_design"),
             ("ASSEMBLE", "COMPONENTS", "component.insert_design"),
             ("SHEET METAL", "CREATE", "sheet.convert"),
             ("SHEET METAL", "SKETCH", "sketch.create"),
@@ -708,13 +708,17 @@ mod tests {
         assert!(visible_tabs(&h.app).contains(&"SHEET METAL"));
         let path = h.dir.join("sheet.solidcraft");
         h.app.run("file.save", json!({"path":path})).unwrap();
-        h.app.ui.tab = "INSPECT".into();
+        h.app.ui.tab = "MANAGE".into();
         h.app.run("doc.open", json!({"path":path})).unwrap();
         assert_eq!(h.app.ui.tab, "SHEET METAL", "opening a document re-enters its sheet context");
 
+        h.app.ui.tab = "MANAGE".into();
+        sync_context(&mut h.app);
+        assert_eq!(h.app.ui.tab, "MANAGE");
+        // A tab that no longer exists (the old INSPECT / INSERT) falls back to MODEL.
         h.app.ui.tab = "INSPECT".into();
         sync_context(&mut h.app);
-        assert_eq!(h.app.ui.tab, "INSPECT");
+        assert_eq!(h.app.ui.tab, "MODEL");
         h.app.run("solid.box", json!({"body_name":"Solid", "operation":"new", "length":10, "width":10, "height":10})).unwrap();
         h.app.run("select.set", json!({"items":[{"type":"body","name":"Solid"}]})).unwrap();
         sync_context(&mut h.app);
@@ -852,10 +856,10 @@ mod tests {
         assert!(create.contains(&"plastic.boss") && create.contains(&"solid.rib") && create.contains(&"plastic.lip"));
         assert!(ids("MODEL", "MODIFY").contains(&"solid.shell"));
         assert_eq!(panels("MANAGE"), ["PARAMETERS", "CONFIGURATIONS", "MATERIALS", "RULES", "DESIGN"]);
-        // The former sketch/solid INSPECT panels now share a global INSPECT tab.
+        // The former sketch/solid INSPECT panels now sit in the MODEL tab (INSPECT and INSERT are gone).
         for (panel, commands) in [
             ("CHECK", vec!["inspect.interference", "inspect.draft", "inspect.accessibility"]),
-            ("MEASURE", vec!["inspect.center_of_mass"]),
+            ("PROPERTIES", vec!["inspect.center_of_mass"]),
             (
                 "SURFACE QUALITY",
                 vec![
@@ -868,7 +872,7 @@ mod tests {
                 ],
             ),
         ] {
-            let actual = ids("INSPECT", panel);
+            let actual = ids("MODEL", panel);
             for id in commands {
                 assert!(actual.contains(&id), "{panel}: {id}");
             }
