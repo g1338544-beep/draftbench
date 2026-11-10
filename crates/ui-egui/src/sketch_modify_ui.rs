@@ -908,8 +908,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 // Model edges (alone or with curves): copied flat into a sketch facing the view, then that sketch's
                 // curves are projected onto every face of the body.
                 if !edges.is_empty() {
-                    let (right, up, _) = app.cam.basis();
-                    let origin = edges.first().map(|(_, p)| *p).unwrap_or(Vec3::ZERO);
+                    // Along the face normal the sketch plane does not matter, so it must not follow the camera
+                    // (a changing plane would restart the preview on every turn of the view).
+                    let (right, up, _) = if *dir == 0 { (Vec3::X, Vec3::Y, Vec3::Z) } else { app.cam.basis() };
+                    let origin = if *dir == 0 { Vec3::ZERO } else { edges.first().map(|(_, p)| *p).unwrap_or(Vec3::ZERO) };
                     let plane = json!({
                         "origin": [origin.x, origin.y, origin.z],
                         "x_dir": [right.x, right.y, right.z],
@@ -1004,9 +1006,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             // Edges onto the selected faces: the true 3D edges land on the faces in the chosen direction.
             if !edges.is_empty() {
                 let state = app.session.world_state();
-                let (right, up, _) = app.cam.basis();
+                let (right, up, _) = if *dir == 0 { (Vec3::X, Vec3::Y, Vec3::Z) } else { app.cam.basis() };
+                let origin = if *dir == 0 { Vec3::ZERO } else { *point };
                 let plane = json!({
-                    "origin": [point.x, point.y, point.z],
+                    "origin": [origin.x, origin.y, origin.z],
                     "x_dir": [right.x, right.y, right.z],
                     "y_dir": [up.x, up.y, up.z],
                 });

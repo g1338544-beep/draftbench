@@ -125,9 +125,24 @@ pub(crate) fn onto_face_nearest(m: &Mesh, f: Option<u32>, pts: &[Vec3]) -> Vec<V
     }
     let mut out: Vec<Vec<Vec3>> = Vec::new();
     let mut cur: Vec<Vec3> = Vec::new();
+    // Each triangle's box: a triangle whose box is already farther than the best hit cannot win.
+    let boxes: Vec<(Vec3, Vec3)> = ts
+        .iter()
+        .map(|t| {
+            let lo = Vec3::new(t[0].x.min(t[1].x).min(t[2].x), t[0].y.min(t[1].y).min(t[2].y), t[0].z.min(t[1].z).min(t[2].z));
+            let hi = Vec3::new(t[0].x.max(t[1].x).max(t[2].x), t[0].y.max(t[1].y).max(t[2].y), t[0].z.max(t[1].z).max(t[2].z));
+            (lo, hi)
+        })
+        .collect();
     for p in dense {
         let mut best: Option<(f64, Vec3)> = None;
-        for t in &ts {
+        for (t, (lo, hi)) in ts.iter().zip(&boxes) {
+            if let Some((bd, _)) = best {
+                let d = Vec3::new((lo.x - p.x).max(p.x - hi.x).max(0.0), (lo.y - p.y).max(p.y - hi.y).max(0.0), (lo.z - p.z).max(p.z - hi.z).max(0.0));
+                if d.x * d.x + d.y * d.y + d.z * d.z >= bd * bd {
+                    continue;
+                }
+            }
             let q = crate::project::closest_on_triangle(p, t[0], t[1], t[2]);
             let d = q.dist(p);
             if best.is_none_or(|(bd, _)| d < bd) {
