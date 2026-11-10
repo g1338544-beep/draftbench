@@ -156,7 +156,21 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                                 Some(Sel::Face { point, .. }) => Some(*point),
                                 _ => None,
                             };
-                            let key = (body.clone(), *index, *mode + if *chain { 10 } else { 0 }, angle.clone(), *flip, face_pt.map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]), m.triangles.len() as u64);
+                            // Every other edge picked on this body: the kernel chooses the face the strip takes its
+                            // direction from by how many of the picked edges it borders, so the probe needs them all.
+                            let others: Vec<usize> = d
+                                .inputs
+                                .first()
+                                .into_iter()
+                                .flat_map(|i| i.items.iter())
+                                .filter_map(|x| match x {
+                                    Sel::Edge { body: other, index: i2, .. } if other == body && i2 != index => Some(*i2),
+                                    _ => None,
+                                })
+                                .take(200)
+                                .collect();
+                            let others_key = others.iter().fold(0u64, |h, i| h.wrapping_mul(1_000_003).wrapping_add(*i as u64 + 1));
+                            let key = (body.clone(), *index, *mode + if *chain { 10 } else { 0 }, angle.clone(), *flip, face_pt.map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]), (m.triangles.len() as u64) ^ others_key.rotate_left(17));
                             if let Some(cached) = PROBE.with(|c| c.borrow().get(&key).copied()) {
                                 if let Some(v) = cached {
                                     return Some(v);
@@ -164,6 +178,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                             } else {
                                 // The same edges the dialog hands the command: the picked one and its tangent chain.
                                 let mut picks = vec![at];
+                                picks.extend(others.iter().filter_map(|i| m.edges.get(*i).map(|e| crate::selection::polyline_mid(e))));
                                 if *chain {
                                     picks.extend(m.tangent_chain(*index, 2f64.to_radians()).into_iter().filter(|i| *i != *index).filter_map(|i| m.edges.get(i).map(|e| crate::selection::polyline_mid(e))));
                                 }
