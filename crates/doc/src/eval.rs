@@ -5431,37 +5431,39 @@ pub fn ruled_probe_dir(b: &ModelBody, at: Vec3, picks: &[Vec3], mode: usize, ang
     let r = kernel::Ruled { distance: d, mode, flip, corners: kernel::RuledCorners::Mitre, face };
     let strip = kernel::ruled_surface(&b.body, if picks.is_empty() { std::slice::from_ref(&at) } else { picks }, &r).ok()?;
     let m = strip.tessellate(d * 0.05).ok()?;
+    // The strip runs away from the body's edge: its point farthest from the edges near `at` shows the way,
+    // measured from that point's foot on the nearest edge, so nothing along the edge enters the direction.
     let mesh = b.mesh();
-    // The strip's points near `at`, and among them the ones lying on an edge of the body (the picked edge
-    // itself). Both sets cover the same stretch of the edge, so the way a curved edge bends away from `at`
-    // (or an end of the edge cutting the stretch short) cancels in the difference of their means.
-    let on_edge = |q: Vec3| mesh.edges.iter().flat_map(|e| e.windows(2)).any(|w| match (w.first(), w.get(1)) {
-        (Some(a), Some(c)) => q.dist_to_segment(*a, *c) <= size * 1e-6 + 1e-7,
-        _ => false,
-    });
-    let (mut sum, mut n) = (Vec3::ZERO, 0usize);
-    let (mut edge_sum, mut edge_n) = (Vec3::ZERO, 0usize);
-    for q in m.positions.iter().filter(|q| q.dist(at) <= d * 1.5).take(4000) {
-        sum = sum + *q;
-        n += 1;
-        if on_edge(*q) {
-            edge_sum = edge_sum + *q;
-            edge_n += 1;
-        }
-    }
-    if n == 0 {
-        return None;
-    }
-    let mut v = if edge_n > 0 && edge_n < n { (sum * (1.0 / n as f64)) - (edge_sum * (1.0 / edge_n as f64)) } else { (sum * (1.0 / n as f64)) - at };
-    // Square to the edge: points picked near an end of an edge pull the mean along the edge as well.
-    let nearest = mesh
+    let near: Vec<(Vec3, Vec3)> = mesh
         .edges
         .iter()
         .flat_map(|e| e.windows(2))
-        .filter_map(|w| Some((at.dist_to_segment(*w.first()?, *w.get(1)?), (*w.get(1)? - *w.first()?).normalized()?)))
-        .min_by(|a, b| a.0.total_cmp(&b.0));
-    if let Some((_, t)) = nearest {
-        v = v - t * v.dot(t);
+        .filter_map(|w| Some((*w.first()?, *w.get(1)?)))
+        .filter(|(a, c)| at.dist_to_segment(*a, *c) <= d * 3.0)
+        .take(2000)
+        .collect();
+    let foot = |q: Vec3| -> Option<(f64, Vec3)> {
+        near.iter()
+            .map(|(a, c)| {
+                let ab = *c - *a;
+                let l2 = ab.dot(ab);
+                let s = if l2 > 1e-18 { ((q - *a).dot(ab) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                let f = *a + ab * s;
+                (q.dist(f), f)
+            })
+            .min_by(|x, y| x.0.total_cmp(&y.0))
+    };
+    let mut best: Option<(f64, Vec3)> = None;
+    for q in m.positions.iter().filter(|q| q.dist(at) <= d * 1.5).take(600) {
+        if let Some((dist, f)) = foot(*q)
+            && best.is_none_or(|(bd, _)| dist > bd)
+        {
+            best = Some((dist, *q - f));
+        }
+    }
+    let (reach, v) = best?;
+    if reach <= size * 1e-6 + 1e-7 {
+        return None;
     }
     v.normalized()
 }
