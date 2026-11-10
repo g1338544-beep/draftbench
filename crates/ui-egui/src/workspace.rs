@@ -235,8 +235,8 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "SKETCH",
         panel: "CREATE",
-        promoted: 4,
-        ids: &["sketch.line", "sketch.rectangle.two_point", "sketch.circle.center", "sketch.arc.three_point", "sketch.infinite"],
+        promoted: 5,
+        ids: &["sketch.line", "sketch.rectangle.two_point", "sketch.circle.center", "sketch.arc.three_point", "sketch.spline.fit_point", "sketch.infinite"],
     },
     Section {
         tab: "SKETCH",
