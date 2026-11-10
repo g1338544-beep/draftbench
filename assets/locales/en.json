@@ -692,6 +692,7 @@
   "cmd.sketch_circle_three_tangent": "3-Tangent Circle",
   "cmd.sketch_circle_two_point": "2-Point Circle",
   "cmd.sketch_circle_two_tangent": "2-Tangent Circle",
+  "cmd.sketch_color": "Sketch Line Color",
   "cmd.sketch_constrainer": "Sketch Constrainer",
   "cmd.sketch_constraint_fix": "Fix/UnFix",
   "cmd.sketch_constraint_midpoint": "MidPoint",

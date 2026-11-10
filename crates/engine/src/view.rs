@@ -248,11 +248,15 @@ fn sketch_lines_in(
     p: &Palette,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
+    // A colour chosen for the sketch's lines replaces the usual ones (not construction geometry).
+    let custom = parse_hex_color(&sk.view.color);
     for (i, c) in sk.curves.iter().enumerate() {
         if !sketch_curve_visible(sk, i) {
             continue;
         }
-        let col = if c.link.is_some() && !sk.is_text_curve(i) {
+        let col = if let Some(own) = custom.filter(|_| !c.construction && !c.centerline && !sk.is_lost_curve(i)) {
+            own
+        } else if c.link.is_some() && !sk.is_text_curve(i) {
             if sk.is_lost_curve(i) { p.sketch_lost } else { p.sketch_projected }
         } else if c.fixed {
             p.sketch_locked
@@ -281,7 +285,9 @@ fn sketch_lines_in(
     // 3D curves are in world coordinates already.
     for w in sk.wires.iter().filter(|w| !w.fit.is_empty() || !sk.view.hide_projected) {
         // Curves drawn in a 3D sketch look like the sketch's own; included ones are references.
-        let col = if w.fit.is_empty() {
+        let col = if let Some(own) = custom {
+            own
+        } else if w.fit.is_empty() {
             p.sketch_projected
         } else if active {
             p.sketch
@@ -291,6 +297,16 @@ fn sketch_lines_in(
         out.push((w.pts.clone(), col, false));
     }
     out
+}
+
+/// `#rrggbb` as a colour.
+pub fn parse_hex_color(text: &str) -> Option<Rgb> {
+    let hex = text.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.is_ascii() {
+        return None;
+    }
+    let part = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+    Some(Rgb(part(0)?, part(2)?, part(4)?))
 }
 
 /// Should sketch curve `i` be drawn and picked? The Sketch Palette's two geometry toggles each

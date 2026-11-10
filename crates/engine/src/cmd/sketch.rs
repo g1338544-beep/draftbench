@@ -30,6 +30,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("sketch")
         .params("plane: XY|XZ|YZ | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), project_edges?: bool, name?, role?: curve|helper (a Project Curve result, listed under Curves; or its working sketch, not listed)"),
+    CommandSpec::new("sketch.color", "Sketch Line Color", sketch_line_color)
+        .icon("sketch")
+        .params("sketch?: id or name (default: the open sketch); color: \"#rrggbb\", or \"\" for the usual colours: the colour the sketch's lines are drawn in"),
     CommandSpec::new("sketch.edit", "Edit Sketch", edit_sketch).noundo().icon("sketch").params("sketch: id or name"),
     CommandSpec::new("sketch.finish", "Finish Sketch", finish_sketch).at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo(),
     CommandSpec::new("sketch.line", "Line", draw_line)
@@ -731,6 +734,8 @@ fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneRef, interna
             return Err(bad("sketch.create", "`role` must be `curve` or `helper`"));
         }
         fresh.view.role = role.to_string();
+        // A projected curve is only a line: no filled profile in its middle.
+        fresh.view.hide_profile = role == "curve";
     }
     let mut kind = FeatureKind::Sketch { plane, sketch: fresh };
     if !face::is_face(p) {
@@ -2784,6 +2789,19 @@ pub(super) fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(options_json(v))
     })?;
     Ok(json!({"options": v, "sketch": info}))
+}
+
+fn sketch_line_color(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.color";
+    let color = str_(p, "color").unwrap_or("").trim().to_ascii_lowercase();
+    if !color.is_empty() && crate::view::parse_hex_color(&color).is_none() {
+        return Err(bad(cmd, "`color` must be \"#rrggbb\" or empty"));
+    }
+    let (value, info) = edit(s, p, cmd, false, |sk, _| {
+        sk.view.color = color.clone();
+        Ok(color.clone())
+    })?;
+    Ok(json!({"color": value, "sketch": info}))
 }
 
 fn chain_cmd(s: &mut Session, p: &Value) -> Result<Value> {

@@ -720,3 +720,27 @@ fn a_projected_curve_sketch_has_a_role_that_is_saved_and_listed_apart() {
     let again = Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
     assert_eq!(roles(&again), expect);
 }
+
+#[test]
+fn a_sketch_can_draw_its_lines_in_a_chosen_colour_and_a_curve_sketch_has_no_filled_profile() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Line"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let id = s.doc.features.last().unwrap().id;
+    let colors = |s: &Session| {
+        let st = s.model.state();
+        let ss = st.sketch(id).unwrap();
+        crate::view::sketch_lines(&ss.sketch, &ss.plane, false, &[]).into_iter().map(|(_, c, _)| (c.0, c.1, c.2)).collect::<Vec<_>>()
+    };
+    let before = colors(&s);
+    run(&mut s, "sketch.color", json!({"sketch": id, "color": "#ff8000"}));
+    assert!(colors(&s).iter().all(|c| *c == (255, 128, 0)), "{:?}", colors(&s));
+    assert!(s.execute("sketch.color", &json!({"sketch": id, "color": "orange"})).is_err());
+    run(&mut s, "sketch.color", json!({"sketch": id, "color": ""}));
+    assert_eq!(colors(&s), before);
+    // A curve sketch hides its profile fill.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C", "role": "curve"}));
+    let cid = s.doc.features.last().unwrap().id;
+    assert!(s.model.state().sketch(cid).is_none_or(|x| x.sketch.view.hide_profile));
+}

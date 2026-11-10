@@ -683,11 +683,36 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::sep(),
         act("ui.lookAt", "Look At", "lookat").with(json!({ "sketch": id })),
         act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "sketch").with(json!({ "sketch": id })),
+        sketch_color_menu(app, id),
         act("ui.sketchDims", if dims { "Hide Dimension" } else { "Show Dimension" }, "dimension").with(json!({ "sketch": id })),
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
     ]
+}
+
+/// Line Color: a few colours for the sketch's lines, and the usual ones back.
+fn sketch_color_menu(app: &SolveApp, id: u64) -> Item {
+    let mut menu = act("ui.sketchColorMenu", "Line Color", "sketch");
+    for (label, hex) in [
+        ("White", "#f2f2f2"),
+        ("Red", "#e5484d"),
+        ("Orange", "#f5803e"),
+        ("Yellow", "#f2c94c"),
+        ("Green", "#3fb950"),
+        ("Cyan", "#2fc4d8"),
+        ("Blue", "#4c8dff"),
+        ("Purple", "#a371f7"),
+        ("Magenta", "#e05fb8"),
+        ("Black", "#111111"),
+    ] {
+        let mut child = cmd(app, "sketch.color", label).with(json!({ "sketch": id, "color": hex }));
+        child.swatch = crate::viewport::parse_hex_colour(hex);
+        menu.children.push(child);
+    }
+    menu.children.push(Item::sep());
+    menu.children.push(cmd(app, "sketch.color", "Usual colours").with(json!({ "sketch": id, "color": "" })));
+    menu
 }
 
 /// A construction plane's row in the browser: sketch on it, edit, delete, rename, show or hide.

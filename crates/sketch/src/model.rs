@@ -597,6 +597,9 @@ pub struct SketchView {
     /// such a projection reads from (not listed at all).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub role: String,
+    /// The colour the sketch's lines are drawn in, `#rrggbb`; empty: the usual colours.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub color: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hide_profile: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
