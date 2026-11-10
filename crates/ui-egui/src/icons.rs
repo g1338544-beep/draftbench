@@ -29,7 +29,7 @@ enum Finish {
 
 /// Textures already rasterised: one per (master, look, pixel size, finish).
 #[derive(Clone, Default)]
-struct Cache(Arc<Mutex<HashMap<(&'static str, Look, u32, Finish), TextureHandle>>>);
+struct Cache(Arc<Mutex<HashMap<(&'static str, Look, u32, Finish, u32), TextureHandle>>>);
 
 /// Draw palette-owned icon artwork with an explicit opacity (0 to 1).
 pub fn paint_icon(p: &Painter, r: Rect, name: &str, opacity: f32) {
@@ -93,7 +93,7 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look
     let px = (side * ppp).round().clamp(8.0, 512.0) as u32;
     let cache = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("sc_icon_cache"), Cache::default).clone());
     let Ok(mut map) = cache.0.lock() else { return };
-    let key = (resolved.master, look, px, finish);
+    let key = (resolved.master, look, px, finish, icon_svg::base_tint());
     if let std::collections::hash_map::Entry::Vacant(slot) = map.entry(key) {
         let Some(doc) = icon_svg::doc_for(resolved.master, px) else { return };
         let pm = if finish == Finish::Danger { icon_svg::render_tinted(doc, look, px) } else { icon_svg::render(doc, look, px) };

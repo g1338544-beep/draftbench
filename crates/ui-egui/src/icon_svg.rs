@@ -440,9 +440,55 @@ pub struct Look {
     pub vision: crate::theme::ColorVision,
 }
 
+/// The colour the person picked for the base accent (`0` = none: the palette's own green), as `0xFF_RR_GG_BB`.
+static BASE_TINT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Use `rgb` (or, with `None`, the palette's colour) for the base accent of every icon.
+pub fn set_base_tint(rgb: Option<[u8; 3]>) {
+    let v = rgb.map_or(0, |[r, g, b]| 0xFF00_0000 | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b));
+    BASE_TINT.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The tint in force (part of the icon texture cache key).
+pub fn base_tint() -> u32 {
+    BASE_TINT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `#rrggbb` (or `rrggbb`) as a colour; anything else is no colour.
+pub fn parse_tint(text: &str) -> Option<[u8; 3]> {
+    let t = text.trim().trim_start_matches('#');
+    if t.len() != 6 || !t.is_ascii() {
+        return None;
+    }
+    let v = u32::from_str_radix(t, 16).ok()?;
+    Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
+}
+
+/// The three `active-*` tones of the picked colour: the strong stroke, the medium face, the pale face.
+fn tint_ramp(c: [u8; 3], role: usize, dark: bool) -> Option<[u8; 3]> {
+    let (to_white, away) = match ROLE_NAMES.get(role).copied()? {
+        "active-3" => (0.0, 0.0),
+        "active-2" => (if dark { 0.12 } else { 0.30 }, 0.0),
+        "active-1" => (if dark { 0.45 } else { 0.75 }, if dark { 0.25 } else { 0.0 }),
+        _ => return None,
+    };
+    let mix = |v: u8| {
+        let lit = f32::from(v) + (255.0 - f32::from(v)) * to_white;
+        (lit * (1.0 - away)).round().clamp(0.0, 255.0) as u8
+    };
+    Some([mix(c[0]), mix(c[1]), mix(c[2])])
+}
+
 impl Look {
     fn rgb(self, role: usize) -> [u8; 3] {
         let theme = usize::from(self.dark);
+        let tint = BASE_TINT.load(std::sync::atomic::Ordering::Relaxed);
+        if tint != 0 && self.accent.is_none() {
+            let c = [(tint >> 16) as u8, (tint >> 8) as u8, tint as u8];
+            if let Some(v) = tint_ramp(c, role, self.dark) {
+                return v;
+            }
+        }
         if ROLE_NAMES.get(role) == Some(&"guide") {
             return PALETTE.get(theme).and_then(|p| p.get(role)).copied().unwrap_or([255, 0, 255]);
         }
@@ -685,6 +731,24 @@ pub fn master_ids() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_picked_icon_colour_replaces_the_base_accent_only() {
+        assert_eq!(parse_tint("#336699"), Some([0x33, 0x66, 0x99]));
+        assert_eq!(parse_tint("zz"), None);
+        assert_eq!(parse_tint("#12345"), None);
+        let base = Look { dark: false, accent: None, vision: crate::theme::ColorVision::Off };
+        let surface = Look { accent: accent_index("surface"), ..base };
+        let strong = ROLE_NAMES.iter().position(|r| *r == "active-3").unwrap_or(0);
+        let (before, surface_before) = (base.rgb(strong), surface.rgb(strong));
+        set_base_tint(Some([10, 20, 30]));
+        let (tinted, surface_after) = (base.rgb(strong), surface.rgb(strong));
+        set_base_tint(None);
+        assert_eq!(tinted, [10, 20, 30]);
+        assert_ne!(tinted, before);
+        assert_eq!(surface_before, surface_after, "other accents keep their own colours");
+        assert_eq!(base.rgb(strong), before);
+    }
 
     #[test]
     fn every_master_parses() {

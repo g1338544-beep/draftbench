@@ -472,6 +472,9 @@ preference_settings! {
     ribbon_icon_rows: u8 = 4, 0 => number("ui.ribbon_icon_rows", 1..=4);
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 0.85, 0, accept(0.5..=2.5) => slider("ui.ui_scale", 0.5..=2.5, 0.05, |v| format!("{:.0} %", v * 100.0), "prefs:scale");
+    /// Colour of the icons (`#rrggbb`); empty keeps the built-in green. Surface, Sketch and the other
+    /// semantic accents keep their own colours.
+    icon_color: String = String::new(), 0;
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
     /// (#1290). Menus, dialogs and labels use it; glyphs it lacks fall back as before.
     ui_font: String = String::new(), 0;
@@ -758,6 +761,18 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// The interface font (#1290): the built-in font first, then the installed families, with a
 /// search box. The choice applies at once, like the other preferences.
+/// A colour button for the icons' main colour, and a way back to the built-in green.
+fn icon_colour_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let current = crate::icon_svg::parse_tint(&app.preferences.icon_color).unwrap_or([5, 127, 69]);
+    let mut rgb = current;
+    if ui.color_edit_button_srgb(&mut rgb).changed() {
+        app.preferences.icon_color = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+    }
+    if !app.preferences.icon_color.is_empty() && ui.button(app.tr_label("Reset")).clicked() {
+        app.preferences.icon_color.clear();
+    }
+}
+
 fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     let builtin = app.tr_label("Built-in").to_string();
     let current = if app.preferences.ui_font.trim().is_empty() { builtin.clone() } else { app.preferences.ui_font.clone() };
@@ -824,6 +839,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
 /// Settings that follow the preferences every frame: the theme when it follows the system, and
 /// the interface scale.
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
+    crate::icon_svg::set_base_tint(crate::icon_svg::parse_tint(&app.preferences.icon_color));
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
@@ -1188,6 +1204,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             setting::ribbon_labels(app, ui);
             setting::ribbon_icon_rows(app, ui);
             setting::ui_scale(app, ui);
+            ui_kit::row(ui, app.tr_label("Icon colour"), |ui| icon_colour_row(app, ui));
             if !cfg!(target_arch = "wasm32") {
                 ui_kit::row(ui, app.tr_label("Interface font"), |ui| ui_font_row(app, ui));
             }
