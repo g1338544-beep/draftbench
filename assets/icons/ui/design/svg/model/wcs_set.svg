@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Set WCS</title>
+  <path d="M32 10.36L70.11 32.36L32 54.36L-6.11 32.36Z" fill="#e2e8ef"/>
+  <path d="M32 10.36L70.11 32.36L32 54.36L-6.11 32.36Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32.36L48.45 41.86" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M52.78 44.36L44.23 44.18L48.35 37.04Z" fill="#236ead"/>
+  <path d="M32 32.36L15.55 41.86" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M11.22 44.36L15.65 37.04L19.77 44.18Z" fill="#236ead"/>
+  <path d="M32 32.36L32 13.36" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 8.36L36.12 15.86L27.88 15.86Z" fill="#236ead"/>
+  <circle cx="32" cy="32.36" r="3.2" fill="#34465b"/>
+</svg>

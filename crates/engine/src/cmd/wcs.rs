@@ -30,15 +30,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("origin")
         .noundo()
         .params("point?: [x,y,z]; rim?: [x,y,z] (a point on an edge: a round edge gives its centre). Default: the picked vertex, edge or face point; with nothing picked it shows the WCS on screen to drag. Moves the WCS origin there, keeping its orientation"),
-    CommandSpec::new("wcs.rotate_x", "Rotate WCS about XC", rotate_x).at("SOLID", "INSPECT").icon("axis").noundo().params("angle?: degrees (default 90)"),
-    CommandSpec::new("wcs.rotate_y", "Rotate WCS about YC", rotate_y).at("SOLID", "INSPECT").icon("joint_origin").noundo().params("angle?: degrees (default 90)"),
-    CommandSpec::new("wcs.rotate_z", "Rotate WCS about ZC", rotate_z).at("SOLID", "INSPECT").icon("pattern_circ").noundo().params("angle?: degrees (default 90)"),
+    CommandSpec::new("wcs.rotate_x", "Rotate WCS about XC", rotate_x).at("SOLID", "INSPECT").icon("wcs_rotate_x").noundo().params("angle?: degrees (default 90)"),
+    CommandSpec::new("wcs.rotate_y", "Rotate WCS about YC", rotate_y).at("SOLID", "INSPECT").icon("wcs_rotate_y").noundo().params("angle?: degrees (default 90)"),
+    CommandSpec::new("wcs.rotate_z", "Rotate WCS about ZC", rotate_z).at("SOLID", "INSPECT").icon("wcs_rotate_z").noundo().params("angle?: degrees (default 90)"),
     CommandSpec::new("wcs.set", "Set WCS", set)
         .at("SOLID", "INSPECT")
-        .icon("move")
+        .icon("wcs_set")
         .noundo()
         .params("origin?: [x,y,z]; x_dir?: [x,y,z]; z_dir?: [x,y,z] (turns the WCS so ZC points this way, XC kept as close as it can); align?: {axis: \"x\"|\"y\"|\"z\", dir: [x,y,z]} (turns the whole WCS by the smallest turn that makes that axis point along dir; the origin stays); reset?: bool"),
-    CommandSpec::new("wcs.reset", "Reset WCS", reset).at("SOLID", "INSPECT").icon("revert").noundo().params("No parameters. Puts the WCS back on the world axes"),
+    CommandSpec::new("wcs.reset", "Reset WCS", reset).at("SOLID", "INSPECT").icon("wcs_reset").noundo().params("No parameters. Puts the WCS back on the world axes"),
 ];
 
 fn current(s: &Session) -> Wcs {

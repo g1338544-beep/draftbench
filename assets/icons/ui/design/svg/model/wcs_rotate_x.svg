@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Rotate WCS about XC</title>
+  <path d="M32 34.4L46.72 42.9" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M51.05 45.4L42.49 45.22L46.62 38.08Z" fill="#236ead"/>
+  <path d="M32 34.4L17.28 42.9" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.95 45.4L16.79 39.05L20.36 45.25Z" fill="#6f879c"/>
+  <path d="M32 34.4L32 17.4" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 12.4L35.58 18.9L28.43 18.9Z" fill="#6f879c"/>
+  <path d="M18.66 34.92L19.35 33.01L20.17 31.12L21.1 29.26L22.15 27.45L23.29 25.72L24.53 24.07L25.84 22.52L27.21 21.09L28.63 19.8L30.08 18.65L31.55 17.67L33.03 16.85L34.49 16.21L35.93 15.75L37.34 15.48L38.68 15.39L39.96 15.5L41.16 15.8L42.27 16.29L43.28 16.96L44.17 17.81L44.94 18.82L45.58 19.99L46.08 21.3L46.44 22.75L46.65 24.31L46.72 25.97L46.64 27.72L46.41 29.54L46.04 31.41L45.53 33.3L44.88 35.21L44.1 37.11L43.2 38.98L42.18 40.8L41.06 42.55L39.86 44.24L38.57 45.82L37.22 47.29L35.81 48.62" fill="none" stroke="#ffffff" stroke-width="7.75" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.66 34.92L19.35 33.01L20.17 31.12L21.1 29.26L22.15 27.45L23.29 25.72L24.53 24.07L25.84 22.52L27.21 21.09L28.63 19.8L30.08 18.65L31.55 17.67L33.03 16.85L34.49 16.21L35.93 15.75L37.34 15.48L38.68 15.39L39.96 15.5L41.16 15.8L42.27 16.29L43.28 16.96L44.17 17.81L44.94 18.82L45.58 19.99L46.08 21.3L46.44 22.75L46.65 24.31L46.72 25.97L46.64 27.72L46.41 29.54L46.04 31.41L45.53 33.3L44.88 35.21L44.1 37.11L43.2 38.98L42.18 40.8L41.06 42.55L39.86 44.24" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.42 52.29L34.61 43.43L41.08 49.4Z" fill="#236ead"/>
+  <circle cx="32" cy="34.4" r="3.2" fill="#34465b"/>
+</svg>

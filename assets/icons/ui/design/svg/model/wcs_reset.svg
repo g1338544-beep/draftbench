@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Reset WCS</title>
+  <path d="M31.2 34L40.73 39.5" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M45.06 42L37.64 41.85L41.21 35.65Z" fill="#6f879c"/>
+  <path d="M31.2 34L21.67 39.5" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17.34 42L21.19 35.65L24.76 41.85Z" fill="#6f879c"/>
+  <path d="M31.2 34L31.2 23" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M31.2 18L34.78 24.5L27.63 24.5Z" fill="#6f879c"/>
+  <circle cx="31.2" cy="34" r="3" fill="#34465b"/>
+  <path d="M43.7 10.35L40.77 8.9L37.67 7.85L34.46 7.21L31.2 7L27.94 7.21L24.73 7.85L21.63 8.9L18.7 10.35L15.98 12.17L13.52 14.32L11.37 16.78L9.55 19.5L8.1 22.43L7.05 25.53L6.41 28.74L6.2 32L6.41 35.26L7.05 38.47L8.1 41.57L9.55 44.5L11.37 47.22L13.52 49.68L15.98 51.83L18.7 53.65L21.63 55.1L24.73 56.15L27.94 56.79L31.2 57L34.46 56.79L37.67 56.15L40.77 55.1L43.7 53.65L46.42 51.83L48.88 49.68L51.03 47.22L52.85 44.5L54.3 41.57" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M57.18 27.1L59.93 35.8L51.3 34.08Z" fill="#236ead"/>
+</svg>
