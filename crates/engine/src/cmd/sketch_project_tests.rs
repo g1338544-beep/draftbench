@@ -699,3 +699,24 @@ fn project_curve_onto_every_face_of_a_body() {
     // Without a body there is nothing to project onto.
     assert!(s.execute("sketch.project_to_surface", &json!({"curves": [{"sketch": src, "curve": l}], "all_faces": true})).is_err());
 }
+
+#[test]
+fn a_projected_curve_sketch_has_a_role_that_is_saved_and_listed_apart() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Source", "role": "helper"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Projected curves", "role": "curve"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plain"}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.execute("sketch.create", &json!({"plane": "XY", "role": "bogus"})).is_err());
+    let roles = |s: &Session| {
+        s.model.state().sketches.iter().map(|x| (x.name.clone(), x.sketch.view.role.clone())).collect::<Vec<_>>()
+    };
+    let expect = [("Source".to_string(), "helper".to_string()), ("Projected curves".to_string(), "curve".to_string()), ("Plain".to_string(), String::new())];
+    assert_eq!(roles(&s), expect);
+    // The role survives saving and reopening.
+    let text = s.doc.to_json().unwrap();
+    let again = Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
+    assert_eq!(roles(&again), expect);
+}

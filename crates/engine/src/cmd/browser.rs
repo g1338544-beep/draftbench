@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
 ];
 
-const FOLDERS: [&str; 4] = ["bodies", "surfaces", "sketches", "construction"];
+const FOLDERS: [&str; 5] = ["bodies", "surfaces", "sketches", "curves", "construction"];
 
 fn folder_of(p: &Value, cmd: &str) -> Result<String> {
     match str_(p, "folder") {
@@ -314,7 +314,8 @@ pub(super) fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `items` or `folder`, not both")),
         (Some("bodies"), None) => s.world_state().bodies.iter().filter(|b| !b.body.is_surface()).map(|b| Shown::Body(b.name.clone())).collect(),
         (Some("surfaces"), None) => s.world_state().bodies.iter().filter(|b| b.body.is_surface()).map(|b| Shown::Body(b.name.clone())).collect(),
-        (Some("sketches"), None) => s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)).collect(),
+        (Some("sketches"), None) => s.model.state().sketches.iter().filter(|x| x.sketch.view.role.is_empty()).map(|x| Shown::Sketch(x.feature)).collect(),
+        (Some("curves"), None) => s.model.state().sketches.iter().filter(|x| x.sketch.view.role == "curve").map(|x| Shown::Sketch(x.feature)).collect(),
         (Some("construction"), None) => s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())).collect(),
         (Some("origin"), None) => ORIGIN.iter().map(|o| Shown::Origin(o.to_string())).collect(),
         (Some("joints"), None) => s.doc.assembly.joints.iter().map(|j| Shown::Joint(j.id)).collect(),

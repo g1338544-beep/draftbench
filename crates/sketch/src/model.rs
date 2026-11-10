@@ -592,6 +592,11 @@ pub struct Constraint {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SketchView {
+    /// What the sketch is for: empty for an ordinary sketch, `curve` for the result of Project
+    /// Curve (the browser lists it under Curves, not Sketches), `helper` for the working sketch
+    /// such a projection reads from (not listed at all).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub role: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hide_profile: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]

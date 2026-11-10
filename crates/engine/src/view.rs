@@ -656,10 +656,15 @@ pub fn sketch_drawn(s: &Session, id: u64, folder: bool) -> bool {
     if s.active_sketch == Some(id) {
         return true;
     }
-    if !folder || v.hidden_sketches.contains(&id) || !sketch_component_visible(s, id) || s.feature_folder_hidden(id, "sketches") {
+    if !folder || v.hidden_sketches.contains(&id) || !sketch_component_visible(s, id) || s.feature_folder_hidden(id, if sketch_is_curve(s, id) { "curves" } else { "sketches" }) {
         return false;
     }
     v.shown_sketches.contains(&id) || !sketch_consumed(s, id)
+}
+
+/// Is the sketch the result of Project Curve (listed under Curves)?
+pub fn sketch_is_curve(s: &Session, id: u64) -> bool {
+    s.model.state().sketch(id).is_some_and(|x| x.sketch.view.role == "curve")
 }
 
 /// Is the placement a sketch is drawn at shown (the active one while its component is being

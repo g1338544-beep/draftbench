@@ -201,7 +201,7 @@ pub fn folder_items(app: &SolveApp, component: u64, folder: &str, scope: &str) -
         v.push(Item::action("component.from_bodies", "Create Components from Bodies", "component").with(json!({ "bodies": bodies })));
     }
     v.push(
-        Item::action("ui.newGroup", if folder == "sketches" { "New Sketch Group" } else { "New Group" }, "folder")
+        Item::action("ui.newGroup", if matches!(folder, "sketches" | "curves") { "New Sketch Group" } else { "New Group" }, "folder")
             .with(json!({ "component": component, "folder": folder })),
     );
     if sel.len() > 1 {
@@ -241,7 +241,7 @@ pub fn selection_group(app: &SolveApp, target: &Target) -> Option<Value> {
             let b = st.body(name)?;
             (b.component, "bodies")
         }
-        Target::Sketch { id } => (app.session.doc.feature(*id)?.component, "sketches"),
+        Target::Sketch { id } => (app.session.doc.feature(*id)?.component, if solidcraft_engine::view::sketch_is_curve(&app.session, *id) { "curves" } else { "sketches" }),
         Target::Plane { id } => (app.session.doc.feature(*id)?.component, "construction"),
         _ => return None,
     };
@@ -633,7 +633,7 @@ impl Lit {
     fn entry_things(folder: &str, e: &Entry) -> Vec<Thing> {
         match folder {
             "bodies" | "surfaces" => e.bodies.iter().cloned().map(Thing::Body).collect(),
-            "sketches" => e.key.parse().ok().map(Thing::Sketch).into_iter().collect(),
+            "sketches" | "curves" => e.key.parse().ok().map(Thing::Sketch).into_iter().collect(),
             _ => vec![Thing::Plane(e.label.clone())],
         }
     }
@@ -1051,7 +1051,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         layer_rows(app, ui, d);
     }
     let _ = t;
-    for folder in ["bodies", "surfaces", "sketches", "construction"] {
+    for folder in ["bodies", "surfaces", "sketches", "curves", "construction"] {
         folder_rows(app, ui, id, folder, d, acts);
     }
     features::rows(app, ui, id, &[], d, acts);
@@ -1157,7 +1157,7 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
     if !open {
         return;
     }
-    for folder in ["bodies", "surfaces", "sketches", "construction"] {
+    for folder in ["bodies", "surfaces", "sketches", "curves", "construction"] {
         occurrence_folder_rows(app, ui, placement.component, &path, folder, depth + 1, acts);
     }
     features::rows(app, ui, placement.component, &path, depth + 1, acts);
@@ -1686,9 +1686,10 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
                 bodies: vec![b.name.clone()],
             })
             .collect(),
-        "sketches" => model_feature_indices(app, comp, true)
+        "sketches" | "curves" => model_feature_indices(app, comp, true)
             .into_iter()
             .filter_map(|i| doc.features.get(i))
+            .filter(|f| matches!(&f.kind, FeatureKind::Sketch { sketch, .. } if sketch.view.role == (if folder == "curves" { "curve" } else { "" })))
             .map(|f| {
                 let active = app.session.active_sketch == Some(f.id);
                 let lost = app.session.model.result(f.id).is_some_and(|result| result.error.is_some())
@@ -1766,7 +1767,7 @@ fn set_visible(app: &mut SolveApp, folder: &str, items: &[&Entry], on: bool) {
                     app.session.visibility.hidden_bodies.extend(e.bodies.clone());
                 }
             }
-            "sketches" => {
+            "sketches" | "curves" => {
                 if let Ok(id) = e.key.parse() {
                     set_sketch_visible(app, id, on);
                 }
@@ -1791,6 +1792,7 @@ fn folder_label(folder: &str) -> &'static str {
         "bodies" => "Bodies",
         "surfaces" => "Surfaces",
         "sketches" => "Sketches",
+        "curves" => "Curves",
         _ => "Construction",
     }
 }
@@ -1800,6 +1802,7 @@ fn folder_static(folder: &str) -> &'static str {
         "bodies" => "bodies",
         "surfaces" => "surfaces",
         "sketches" => "sketches",
+        "curves" => "curves",
         _ => "construction",
     }
 }
@@ -1972,7 +1975,7 @@ fn entry_row(
 ) {
     app.tree.order.push(e.row_key.clone());
     let pattern_sketch =
-        (folder == "sketches").then(|| e.key.parse::<u64>().ok()).flatten().filter(|id| crate::sketch_pattern_tree::has_patterns(app, *id));
+        matches!(folder, "sketches" | "curves").then(|| e.key.parse::<u64>().ok()).flatten().filter(|id| crate::sketch_pattern_tree::has_patterns(app, *id));
     let pattern_key = format!("{}/patterns", e.row_key);
     let patterns_open = is_open(app, &pattern_key, true);
     let badges: &[&str] = if e.locked { &["lock"] } else { &[] };
@@ -2008,7 +2011,7 @@ fn entry_row(
     if r.eye {
         set_visible(app, folder, &[e], !e.visible);
     }
-    if r.double && folder == "sketches" {
+    if r.double && matches!(folder, "sketches" | "curves") {
         if let Ok(id) = e.key.parse() {
             if let Some(path) = path {
                 let _ = app.run("component.activate", json!({"component": comp,"occurrence":path.last(),"path":path}));
@@ -2114,7 +2117,7 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
         DropAction::Component { to, folder, keys } => {
             let _ = match folder {
                 "bodies" | "surfaces" => app.run("component.move_bodies", json!({ "bodies": keys, "component": to })),
-                "sketches" => app.run("component.move_sketches", json!({ "sketches": keys, "component": to })),
+                "sketches" | "curves" => app.run("component.move_sketches", json!({ "sketches": keys, "component": to })),
                 _ => Ok(serde_json::Value::Null),
             };
         }

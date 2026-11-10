@@ -891,7 +891,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 if app.session.active_sketch.is_some() {
                     steps.push(("sketch.finish".to_string(), json!({})));
                 }
-                steps.push(("sketch.create".to_string(), json!({"plane": name, "name": "Projected curves"})));
+                steps.push(("sketch.create".to_string(), json!({"plane": name, "name": "Projected curves", "role": "curve"})));
                 steps.push(("sketch.project".to_string(), json!({"refs": refs})));
                 steps.push(("sketch.finish".to_string(), json!({})));
                 return Ok(steps);
@@ -932,10 +932,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     if app.session.active_sketch.is_some() {
                         steps.push(("sketch.finish".to_string(), json!({})));
                     }
-                    steps.push(("sketch.create".to_string(), json!({"plane": plane.clone(), "name": source})));
+                    steps.push(("sketch.create".to_string(), json!({"plane": plane.clone(), "name": source, "role": "helper"})));
                     steps.push(("sketch.project".to_string(), json!({"refs": refs})));
                     steps.push(("sketch.finish".to_string(), json!({})));
-                    steps.push(("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}")})));
+                    steps.push(("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"})));
                     steps.push((
                         "sketch.project_to_surface".to_string(),
                         json!({"curves": [{"sketch": source}], "body": body, "all_faces": true, "direction": direction, "associative": associative}),
@@ -959,7 +959,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 let (o, x, y) = (sk.plane.origin, sk.plane.x, sk.plane.y);
                 let plane = json!({"origin": [o.x, o.y, o.z], "x_dir": [x.x, x.y, x.z], "y_dir": [y.x, y.y, y.z]});
                 return Ok(vec![
-                    ("sketch.create".to_string(), json!({"plane": plane, "name": "Projected curves"})),
+                    ("sketch.create".to_string(), json!({"plane": plane, "name": "Projected curves", "role": "curve"})),
                     ("sketch.project_to_surface".to_string(), project),
                     ("sketch.finish".to_string(), json!({})),
                 ]);
@@ -993,7 +993,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 refs.extend(edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})));
                 let project = json!({"refs": refs});
                 return Ok(finish_first(vec![
-                    ("sketch.create".to_string(), json!({"plane": {"face": [point.x, point.y, point.z], "body": body, "index": index}, "name": "Projected curves"})),
+                    ("sketch.create".to_string(), json!({"plane": {"face": [point.x, point.y, point.z], "body": body, "index": index}, "name": "Projected curves", "role": "curve"})),
                     ("sketch.project".to_string(), project),
                     ("sketch.finish".to_string(), json!({})),
                 ]));
@@ -1023,10 +1023,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 let source = format!("Projection source {n}");
                 let direction = if *dir == 0 { "normal" } else { "sketch" };
                 return Ok(finish_first(vec![
-                    ("sketch.create".to_string(), json!({"plane": plane.clone(), "name": source})),
+                    ("sketch.create".to_string(), json!({"plane": plane.clone(), "name": source, "role": "helper"})),
                     ("sketch.project".to_string(), json!({"refs": refs})),
                     ("sketch.finish".to_string(), json!({})),
-                    ("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}")})),
+                    ("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"})),
                     (
                         "sketch.project_to_surface".to_string(),
                         json!({"curves": [{"sketch": source}], "face": [point.x, point.y, point.z], "body": body, "direction": direction}),
@@ -1055,7 +1055,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let (o, x, y) = (sk.plane.origin, sk.plane.x, sk.plane.y);
             let plane = json!({"origin": [o.x, o.y, o.z], "x_dir": [x.x, x.y, x.z], "y_dir": [y.x, y.y, y.z]});
             return Ok(vec![
-                ("sketch.create".to_string(), json!({"plane": plane, "name": "Projected curves"})),
+                ("sketch.create".to_string(), json!({"plane": plane, "name": "Projected curves", "role": "curve"})),
                 ("sketch.project_to_surface".to_string(), project),
                 ("sketch.finish".to_string(), json!({})),
             ]);
