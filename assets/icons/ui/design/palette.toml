@@ -37,16 +37,16 @@ light = "#8a7f75"
 dark  = "#a0958b"
 [roles.active-1]   # changed or result geometry, palest face
 source = "#b9ddf8"
-light = "#fde0c2"
-dark  = "#e0a06a"
+light = "#bfe2cc"
+dark  = "#7ab792"
 [roles.active-2]
 source = "#328bd3"
-light = "#f0903c"
-dark  = "#e08a3a"
+light = "#439a65"
+dark  = "#3a965e"
 [roles.active-3]   # strongest blue: strokes and accents
 source = "#236ead"
-light = "#d9701a"
-dark  = "#e8872a"
+light = "#057f45"
+dark  = "#128d45"
 
 [strokes]          # on the 64 grid
 geometry = 2.55
@@ -58,7 +58,7 @@ parameters = 4.2
 # an icon keeps its drawing and only changes colour: "extrude" in the Solid accent and
 # "surface_extrude" (see aliases.toml) are the same artwork in orange. Roles an accent does not
 # list keep their base value. Edit hex values here; nothing else needs to change.
-# Shared accent definitions: Solid uses the base palette; Surface uses orange,
+# Shared accent definitions: Solid uses the base palette (green); Surface uses orange,
 # Form purple, Mesh yellow, Sketch green, constraints red and Sketch construction orange.
 # This is the single colour authority for SVGs, semantic UI tokens and the review page.
 # Active-3 is the primary stroke; active-1/2 preserve face shading. SVG source hexes
