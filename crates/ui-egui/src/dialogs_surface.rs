@@ -203,7 +203,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             SelInput::new("Keep of the other surface", FACES, true).places(),
         ],
         Surf::Untrim { .. } => vec![SelInput::new("Face", FACES, false), SelInput::new("Holes (edges on them)", EDGES, true)],
-        Surf::SplitFace => vec![SelInput::new("Faces to split", FACES, true), SelInput::new("Splitting tool", PLANES | FACES, false)],
+        Surf::SplitFace => vec![SelInput::new("Faces to split", FACES, true), SelInput::new("Splitting tool (plane, face or sketch curves)", PLANES | FACES | CURVES, false)],
         _ => k.simple_inputs(),
     }
 }
@@ -223,7 +223,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.ruled" => Surf::Ruled { distance: "10 mm".into(), mode: 1, angle: "5 deg".into(), flip: false, round: false, chain: true },
         "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, remove: false, mutual: false },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
-        "solid.split_face" => Surf::SplitFace,
+        "solid.split_face" | "solid.split_line" => Surf::SplitFace,
         _ => Surf::simple_start(id)?.0,
     };
     let i = inputs(&k);
@@ -412,7 +412,11 @@ fn tool(app: &SolveApp, sel: Option<&Sel>) -> Result<(&'static str, Value), Stri
             Some((_, n)) => Ok(("plane", json!({"origin": pt(*point), "normal": pt(n)}))),
             None => Ok(("tool", json!({"body": body, "point": pt(*point)}))),
         },
-        _ => Err("pick a plane or a face as the tool".into()),
+        Some(Sel::SketchCurve { id }) => match crate::dialogs::curves_sketch(app, std::slice::from_ref(id), None) {
+            Some(sketch) => Ok(("sketch", json!(sketch))),
+            None => Err("a picked curve is no longer in a sketch".into()),
+        },
+        _ => Err("pick a plane, a face or a sketch curve as the tool".into()),
     }
 }
 

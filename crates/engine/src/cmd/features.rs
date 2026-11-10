@@ -120,6 +120,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal, or along `along`: [x,y,z] direction)",
         ),
+    CommandSpec::new("solid.split_line", "Split Line", split_line)
+        .at("SOLID", "MODIFY")
+        .icon("split_face")
+        .params(
+            "body: name; faces?: [[x,y,z] points or face names] (default: every face of the body); how it splits — plane / tool: {body, point} / sketch (+ along?) as `solid.split_face` (a projection or an intersection), or silhouette: [x,y,z] the pull direction: every cylindrical face is split along its two outline lines seen from that direction (a parting line); other faces are listed in `skipped`",
+        ),
     CommandSpec::new("solid.split_body", "Split Body", split_body)
         .at("SOLID", "MODIFY")
         .icon("split_body")
@@ -1693,6 +1699,89 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::SplitFace { faces: faces.into_iter().map(FacePick).collect(), body: body.map(BodyName), plane, tool: None, sketch: None, along: None }
     };
     add_feature(s, p, kind)
+}
+
+/// Split Line: the faces of a body divided along a projected curve, an intersection or the
+/// outline seen from a pull direction (a parting line). No faces given: all of them.
+fn split_line(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.split_line";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
+    let listing = super::inspect::model_faces(s, &serde_json::json!({"body": body}))?;
+    let all: Vec<Value> = listing.get("faces").and_then(Value::as_array).cloned().unwrap_or_default();
+    if all.is_empty() || all.len() > 1000 {
+        return Err(bad(cmd, format!("`{body}` has no faces to split (or more than 1000)")));
+    }
+    let silhouette = p.get("silhouette").filter(|v| !v.is_null());
+    let picked: Vec<Value> = match p.get("faces").and_then(Value::as_array).filter(|a| !a.is_empty()) {
+        Some(a) => a.clone(),
+        None => all.iter().filter_map(|f| f.get("point").filter(|v| !v.is_null()).cloned()).collect(),
+    };
+    let Some(dir) = silhouette else {
+        let mut q = p.clone();
+        if let Some(m) = q.as_object_mut() {
+            m.insert("faces".into(), Value::Array(picked));
+            m.insert("body".into(), Value::String(body));
+        }
+        return split_face(s, &q);
+    };
+    let dir = crate::params::vec3(dir).filter(|d| d.len() > 1e-9 && d.is_finite()).ok_or_else(|| bad(cmd, "`silhouette` must be a pull direction [x, y, z]"))?;
+    let dir = dir.normalized().ok_or_else(|| bad(cmd, "`silhouette` must be a pull direction [x, y, z]"))?;
+    // The listing's faces by point, so a picked face (a point) finds its cylinder.
+    let mut made = 0usize;
+    let mut skipped: Vec<Value> = Vec::new();
+    for pick in &picked {
+        let Some(at) = crate::params::vec3(pick).or_else(|| pick.get("point").and_then(crate::params::vec3)) else {
+            // A face name: its listing entry.
+            let listed = all.iter().find(|f| pick.as_str().is_some() && f.get("name").and_then(Value::as_str) == pick.as_str());
+            let Some(f) = listed else {
+                skipped.push(pick.clone());
+                continue;
+            };
+            made += silhouette_one(s, p, cmd, &body, f, dir, &mut skipped)?;
+            continue;
+        };
+        let listed = all.iter().find(|f| {
+            f.get("point").and_then(crate::params::vec3).is_some_and(|q| (q - at).len() < 1e-6)
+                || f.get("centroid").and_then(crate::params::vec3).is_some_and(|q| (q - at).len() < 1e-6)
+        });
+        match listed {
+            Some(f) => made += silhouette_one(s, p, cmd, &body, f, dir, &mut skipped)?,
+            None => skipped.push(pick.clone()),
+        }
+    }
+    if made == 0 {
+        return Err(bad(cmd, "no cylindrical face has an outline line along that direction (other surfaces are not supported yet)"));
+    }
+    Ok(serde_json::json!({"split_faces": made, "skipped": skipped}))
+}
+
+/// One cylindrical face split along its two outline lines seen along `dir`: 1 when it was split.
+fn silhouette_one(s: &mut Session, p: &Value, cmd: &str, body: &str, f: &Value, dir: Vec3, skipped: &mut Vec<Value>) -> Result<usize> {
+    let name = f.get("name").cloned().unwrap_or(Value::Null);
+    let (Some(cyl), Some(point)) = (f.get("cylinder"), f.get("point").and_then(crate::params::vec3)) else {
+        skipped.push(name);
+        return Ok(0);
+    };
+    let (Some(origin), Some(axis)) = (cyl.get("origin").and_then(crate::params::vec3), cyl.get("axis").and_then(crate::params::vec3)) else {
+        skipped.push(name);
+        return Ok(0);
+    };
+    // The outline lines lie in the plane through the axis and the pull direction.
+    let Some(normal) = axis.cross(dir).normalized() else {
+        // Looking along the axis: the cylinder shows no outline line.
+        skipped.push(name);
+        return Ok(0);
+    };
+    let mut q = serde_json::json!({
+        "body": body,
+        "faces": [[point.x, point.y, point.z]],
+        "plane": {"origin": [origin.x, origin.y, origin.z], "normal": [normal.x, normal.y, normal.z]},
+    });
+    if let (Some(m), Some(n)) = (q.as_object_mut(), p.get("name").and_then(Value::as_str)) {
+        m.insert("name".into(), Value::String(n.to_string()));
+    }
+    split_face(s, &q).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(1)
 }
 
 fn split_body(s: &mut Session, p: &Value) -> Result<Value> {

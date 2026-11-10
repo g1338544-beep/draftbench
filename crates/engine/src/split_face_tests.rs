@@ -97,3 +97,32 @@ fn split_pieces_count_and_move_apart() {
     let (_, v) = faces_volume(&mut s, "B");
     assert!((v - 25200.0).abs() < 1e-6 * 25200.0, "{v}");
 }
+
+/// Split Line with a pull direction: a cylinder is split along its two outline lines, the
+/// flat faces are left alone, and looking along the axis shows no outline at all.
+#[test]
+fn split_line_silhouette_divides_a_cylinder_at_its_outline() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 30, "body_name": "Pin"}));
+    let (before, volume) = faces_volume(&mut s, "Pin");
+    let r = run(&mut s, "solid.split_line", json!({"body": "Pin", "silhouette": [1, 0, 0]}));
+    assert_eq!(r["split_faces"], json!(1), "{r}");
+    let (after, v) = faces_volume(&mut s, "Pin");
+    assert!(after > before, "{before} -> {after}");
+    assert!((v - volume).abs() < 1e-6 * volume, "{v} vs {volume}");
+    // Seen along the axis the side shows no outline.
+    let mut t = Session::default();
+    run(&mut t, "solid.cylinder", json!({"radius": 10, "height": 30, "body_name": "Pin"}));
+    assert!(t.execute("solid.split_line", &json!({"body": "Pin", "silhouette": [0, 0, 1]})).is_err());
+    assert!(t.execute("solid.split_line", &json!({"body": "Pin", "silhouette": [0, 0, 0]})).is_err());
+}
+
+/// Split Line without faces splits every face a plane crosses.
+#[test]
+fn split_line_without_faces_splits_every_face_the_plane_crosses() {
+    let mut s = boxed();
+    run(&mut s, "solid.split_line", json!({"body": "B", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    let (f, v) = faces_volume(&mut s, "B");
+    assert_eq!(f, 6 + 4, "four faces cross x = 20");
+    assert!((v - 24000.0).abs() < 1e-6 * 24000.0, "{v}");
+}

@@ -400,7 +400,7 @@ fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"body": b.name, "edges": edges}))
 }
 
-fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.world_state();
     let b = body_of(&st, p, "model.faces")?;
     let names = solidcraft_doc::naming::face_names(b);
