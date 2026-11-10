@@ -1593,11 +1593,27 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
                 }
             }
-            // The divider sits in the middle of the room shared out between the panels.
-            let half = if finish { 0.0 } else { spread * 0.5 };
-            px += width + half;
-            painter.line_segment([pos2(px, top + 4.0), pos2(px, top + group_height - 3.0)], Stroke::new(1.0, t.border));
-            px += PANEL_GAP + half;
+            // The divider sits in the room shared out between the panels, in the middle until it is
+            // dragged; it moves freely within that room and the next panel stays where it is.
+            let room_after = if finish { 0.0 } else { spread };
+            let divider_id = ui.id().with(("ribbon_divider", &tab, panel));
+            let before = ui.data(|d| d.get_temp::<f32>(divider_id)).unwrap_or(room_after * 0.5).clamp(0.0, room_after);
+            let divider_x = px + width + before;
+            let mut line = Stroke::new(1.0, t.border);
+            if room_after > 0.0 {
+                let grab = Rect::from_min_max(pos2(divider_x - 5.0, top + 2.0), pos2(divider_x + 5.0, top + group_height - 1.0));
+                let drag = ui.interact(grab, divider_id.with("grab"), Sense::drag());
+                if drag.hovered() || drag.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    line = Stroke::new(2.0, t.accent);
+                }
+                if drag.dragged() {
+                    let moved = (before + drag.drag_delta().x).clamp(0.0, room_after);
+                    ui.data_mut(|d| d.insert_temp(divider_id, moved));
+                }
+            }
+            painter.line_segment([pos2(divider_x, top + 4.0), pos2(divider_x, top + group_height - 3.0)], line);
+            px += width + room_after + PANEL_GAP;
         }
         if !overflow.is_empty() {
             let at = Rect::from_min_size(pos2(px.min(right - finish_width - 40.0), top + 4.0), vec2(38.0, button_height));
