@@ -103,7 +103,34 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
             _ => {}
         }
     }
-    ss.plane.intersect_ray(o, d).map(|w| (w, "Plane"))
+    // Free on the plane: a segment that nearly follows X, Y or Z is drawn exactly along it.
+    let w = ss.plane.intersect_ray(o, d)?;
+    let w = match chain().last() {
+        Some(last) => axis_snap(*last, w, AXIS_SNAP_DEG).map_or(w, |(_, q)| q),
+        None => w,
+    };
+    Some((w, "Plane"))
+}
+
+/// How close (degrees) a free segment must come to a world axis to be drawn along it.
+const AXIS_SNAP_DEG: f64 = 3.0;
+
+/// The world axis (0 X, 1 Y, 2 Z) the segment `from`..`to` follows within `tol_deg`, and `to` moved onto
+/// that axis line through `from`.
+pub(crate) fn axis_snap(from: Vec3, to: Vec3, tol_deg: f64) -> Option<(usize, Vec3)> {
+    let d = to - from;
+    let len = d.len();
+    if !(len.is_finite() && len > 1e-9) {
+        return None;
+    }
+    let c = tol_deg.to_radians().cos();
+    let comps = [d.x, d.y, d.z];
+    let (i, v) = comps.iter().copied().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))?;
+    if v.abs() < len * c {
+        return None;
+    }
+    let axis = [Vec3::X, Vec3::Y, Vec3::Z].get(i).copied()?;
+    Some((i, from + axis * v))
 }
 
 /// The centre of the circle a polyline edge makes (a full circle or an arc: the circle through its first,
@@ -323,6 +350,21 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             tk.text_dim,
         );
     }
+    // Axis guides through the last point: X, Y and Z faintly, the one the segment follows boldly and named.
+    if let Some(last) = pts.last().copied()
+        && let Some(o) = proj.to_screen(last)
+    {
+        let follows = hover.and_then(|(h, _)| axis_snap(last, h, 0.5)).map(|(i, _)| i);
+        for (i, (axis, col, name)) in [(Vec3::X, tk.axis_x, "X"), (Vec3::Y, tk.axis_y, "Y"), (Vec3::Z, tk.axis_z, "Z")].into_iter().enumerate() {
+            let on = follows == Some(i);
+            let (Some(a), Some(b)) = (proj.to_screen(last - axis * 1000.0), proj.to_screen(last + axis * 1000.0)) else { continue };
+            let faint = col.gamma_multiply(if on { 1.0 } else { 0.35 });
+            painter.line_segment([a, b], Stroke::new(if on { 2.0 } else { 1.0 }, faint));
+            if on {
+                painter.text(o + vec2(12.0, -26.0), egui::Align2::LEFT_BOTTOM, format!("{name} axis"), egui::FontId::proportional(tk.font_small), col);
+            }
+        }
+    }
     let (arc_on, _, t0) = ARC.with(|x| *x.borrow());
     let arc = (t.cmd == "sketch.line" && arc_on).then_some(()).and_then(|()| Some((pts.last().copied()?, t0?, hover?.0))).and_then(|(a, t0, h)| arc3d(a, t0, h));
     if let Some((curve, _)) = arc {
@@ -510,4 +552,20 @@ pub fn handle_points(app: &SolveApp, proj: &Proj) -> Vec<(&'static str, Pos2)> {
             (name, tip)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod axis_snap_tests {
+    use super::*;
+
+    #[test]
+    fn a_segment_near_an_axis_snaps_onto_it() {
+        let from = Vec3::new(1.0, 2.0, 3.0);
+        let (i, q) = axis_snap(from, Vec3::new(1.0 + 0.5, 2.0 + 100.0, 3.0 - 0.4), 3.0).unwrap();
+        assert_eq!(i, 1);
+        assert_eq!(q, Vec3::new(1.0, 102.0, 3.0));
+        assert!(axis_snap(from, Vec3::new(10.0, 10.0, 3.0), 3.0).is_none());
+        assert!(axis_snap(from, from, 3.0).is_none());
+        assert!(axis_snap(from, Vec3::new(f64::NAN, 0.0, 0.0), 3.0).is_none());
+    }
 }
