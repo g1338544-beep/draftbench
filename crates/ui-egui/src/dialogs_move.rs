@@ -63,6 +63,23 @@ pub fn type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     let Kind::Move { mode, .. } = d.kind else { return };
     let mut m = mode;
     choice_row(ui, "Move Type", "move_type", &mut m, &TYPES);
+    // Angle: the axis to turn about in one click (an axis can still be picked in the view or the browser).
+    if m == ROTATE {
+        let current = d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| if let Sel::Axis { name } = x { Some(name.clone()) } else { None });
+        let mut picked: Option<&'static str> = None;
+        ui.horizontal(|ui| {
+            ui.label(crate::i18n::tr_label("Turn about axis"));
+            for name in ["X", "Y", "Z"] {
+                let label = if current.as_deref() == Some(name) { format!("● {name}") } else { name.to_string() };
+                if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small).clicked() {
+                    picked = Some(name);
+                }
+            }
+        });
+        if let (Some(name), Some(input)) = (picked, d.inputs.get_mut(1)) {
+            input.items = vec![Sel::Axis { name: name.to_string() }];
+        }
+    }
     if m != mode {
         let bodies = d.inputs.first().map(|i| i.items.clone()).unwrap_or_default();
         d.kind = kind(m);
