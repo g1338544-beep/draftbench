@@ -912,13 +912,23 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                             crate::scenario::publish_handle(&format!("tab:{alias}"), tr.center());
                         }
                     }
+                    // Clicking the tab you are on, or right-clicking any tab, opens its list of commands
+                    // (drag a row from it onto a panel of the toolbar to place the command there).
                     if response.clicked() {
-                        app.ui.tab = tab.to_string();
+                        if app.ui.tab == tab {
+                            tab_menu_toggle(ui.ctx(), tab, tr.left_bottom());
+                        } else {
+                            app.ui.tab = tab.to_string();
+                            tab_menu_close(ui.ctx());
+                        }
+                    } else if response.secondary_clicked() {
+                        tab_menu_toggle(ui.ctx(), tab, tr.left_bottom());
                     }
                     x += width + 2.0;
                 }
             });
     });
+    tab_menu(app, ui.ctx());
     if matches!(app.ui.tab.as_str(), "SKETCH" | "SHEET METAL") {
         ui.painter().line_segment(
             [row.left_bottom() - vec2(0.0, 1.0), row.right_bottom() - vec2(0.0, 1.0)],
@@ -929,6 +939,79 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
             [row.left_bottom() - vec2(0.0, 0.5), row.right_bottom() - vec2(0.0, 0.5)],
             Stroke::new(1.0, t.toolbar.lerp_to_gamma(t.border, 0.5)),
         );
+    }
+}
+
+/// Which tab's command list is open (and where it hangs from).
+fn tab_menu_state() -> egui::Id {
+    egui::Id::new("sc_tab_menu")
+}
+
+fn tab_menu_toggle(ctx: &egui::Context, tab: &str, at: egui::Pos2) {
+    ctx.data_mut(|d| {
+        let open = d.get_temp::<(String, egui::Pos2)>(tab_menu_state());
+        if open.is_some_and(|(t, _)| t == tab) {
+            d.remove::<(String, egui::Pos2)>(tab_menu_state());
+        } else {
+            d.insert_temp(tab_menu_state(), (tab.to_string(), at));
+        }
+    });
+}
+
+fn tab_menu_close(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<(String, egui::Pos2)>(tab_menu_state()));
+}
+
+/// A tab's commands as a menu, panel by panel, like a menu bar: a row starts its command, or is
+/// dragged onto a panel of the toolbar to put it there.
+fn tab_menu(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some((tab, at)) = ctx.data(|d| d.get_temp::<(String, egui::Pos2)>(tab_menu_state())) else { return };
+    let lists = crate::toolbar_custom::panel_lists(&tab);
+    let all: Vec<&'static solidcraft_engine::CommandSpec> = lists.iter().flat_map(|(_, cmds, _)| cmds.iter().copied()).collect();
+    let mut start: Option<&'static str> = None;
+    let mut toggle: Option<&'static str> = None;
+    let here = app.ui.tab.clone();
+    let area = Container::new(ctx, Surface::Popup).area(egui::Id::new("sc_tab_menu_area")).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| {
+        section_frame(ui).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_min_width(200.0);
+            let row_w = dropdown_width(app, ui, &all);
+            ui.set_width(row_w);
+            let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
+            egui::ScrollArea::vertical().id_salt("tab_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
+                for (panel, cmds, _) in &lists {
+                    if cmds.is_empty() {
+                        continue;
+                    }
+                    section_heading(ui, app.tr_label(panel), row_w);
+                    for c in cmds {
+                        let pinned = crate::toolbar_custom::pinned_on(app, &here, c.id).is_some();
+                        match dropdown_row(app, ui, c, row_w, pinned) {
+                            RowAction::Start => start = Some(c.id),
+                            RowAction::TogglePin => toggle = Some(c.id),
+                            RowAction::Menu(_) | RowAction::None => {}
+                        }
+                    }
+                }
+            });
+            section_footer(ui);
+        });
+    });
+    crate::scenario::publish_rect("tab_menu", area.response.rect);
+    if let Some(id) = toggle {
+        crate::toolbar_custom::toggle(app, &here, id);
+    }
+    // Dragging out of the menu keeps it open; it closes when the drag is dropped, after a pick,
+    // on Escape or a click elsewhere.
+    let dragging = egui::DragAndDrop::has_payload_of_type::<ToolbarDrag>(ctx);
+    let was_dragging = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_tab_menu_drag"))).unwrap_or(false);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_tab_menu_drag"), dragging));
+    let dropped = was_dragging && !dragging;
+    if let Some(id) = start {
+        tab_menu_close(ctx);
+        app.start(id);
+    } else if dropped || ctx.input(|i| i.key_pressed(egui::Key::Escape)) || (area.response.clicked_elsewhere() && !dragging && !ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y < at.y))) {
+        tab_menu_close(ctx);
     }
 }
 
