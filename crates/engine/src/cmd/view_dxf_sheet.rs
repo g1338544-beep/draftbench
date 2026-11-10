@@ -2578,21 +2578,30 @@ fn add_ordinates(entities: &mut Vec<DxfEntity>, o: &Value, boxes: &[Value], th: 
     };
     let mut zero_done = [false, false];
     // One leader and its number: `from` the feature, to the level, the value in model mm.
-    let one = |entities: &mut Vec<DxfEntity>, from: Vec2, horizontal_value: bool, level: f64, value: f64, ang: f64| {
+    let one = |entities: &mut Vec<DxfEntity>, from: Vec2, horizontal_value: bool, level: f64, value: f64, ang: f64, jog: f64| {
         let shown = if value.abs() < 0.05 { 0.0 } else { value };
         // Distances, not coordinates: no sign, whichever side of the datum the point lies.
         let words = dim_value(shown.abs(), decimals);
         let len = words.chars().count() as f64 * 0.62 * th;
         // The leader may lean off square by `ang` degrees, so neighbouring numbers can be eased apart.
         let lean = ang.clamp(-75.0, 75.0).to_radians().tan();
+        // A leader may also run square for `jog` mm first and bend there, as a jogged leader does.
+        let toward = if horizontal_value { level - from.y } else { level - from.x };
+        let run = jog.clamp(0.0, toward.abs() * 0.95) * if toward < 0.0 { -1.0 } else { 1.0 };
         if horizontal_value {
             // A leader up (or down) to the level; the number turned along it.
             let dir = if level >= from.y { 1.0 } else { -1.0 };
-            let end = Vec2::new(from.x + (level - from.y) * lean, level);
-            let along = Vec2::new(end.x - from.x, end.y - from.y);
+            let bend = Vec2::new(from.x, from.y + run);
+            let end = Vec2::new(bend.x + (level - bend.y) * lean, level);
+            let along = Vec2::new(end.x - bend.x, end.y - bend.y);
             let unit = Vec2::new(along.x, along.y).normalized().unwrap_or(Vec2::new(0.0, dir));
-            let start = Vec2::new(from.x + unit.x * 1.5, from.y + unit.y * 1.5);
-            line("DIM", start, end, entities);
+            let start = if run.abs() > 1e-9 { from } else { Vec2::new(from.x + unit.x * 1.5, from.y + unit.y * 1.5) };
+            if run.abs() > 1e-9 {
+                line("DIM", start, bend, entities);
+                line("DIM", bend, end, entities);
+            } else {
+                line("DIM", start, end, entities);
+            }
             let side = Vec2::new(-unit.y, unit.x);
             let centre = Vec2::new(end.x + unit.x * (len / 2.0 + 0.8), end.y + unit.y * (len / 2.0 + 0.8));
             let off = th * 0.35;
@@ -2601,11 +2610,17 @@ fn add_ordinates(entities: &mut Vec<DxfEntity>, o: &Value, boxes: &[Value], th: 
             entities.push(DxfEntity { layer: "DIM".into(), shape: DxfShape::Text { at: centre, height: th, angle_deg: angle, text: words } });
         } else {
             let dir = if level >= from.x { 1.0 } else { -1.0 };
-            let end = Vec2::new(level, from.y + (level - from.x) * lean);
-            let along = Vec2::new(end.x - from.x, end.y - from.y);
+            let bend = Vec2::new(from.x + run, from.y);
+            let end = Vec2::new(level, bend.y + (level - bend.x) * lean);
+            let along = Vec2::new(end.x - bend.x, end.y - bend.y);
             let unit = along.normalized().unwrap_or(Vec2::new(dir, 0.0));
-            let start = Vec2::new(from.x + unit.x * 1.5, from.y + unit.y * 1.5);
-            line("DIM", start, end, entities);
+            let start = if run.abs() > 1e-9 { from } else { Vec2::new(from.x + unit.x * 1.5, from.y + unit.y * 1.5) };
+            if run.abs() > 1e-9 {
+                line("DIM", start, bend, entities);
+                line("DIM", bend, end, entities);
+            } else {
+                line("DIM", start, end, entities);
+            }
             // The text stays readable left to right, turned only by the lean.
             let tilt = lean.atan().to_degrees() * dir;
             let centre = Vec2::new(end.x + unit.x * (len / 2.0 + 0.8), end.y + unit.y * (len / 2.0 + 0.8) - th * 0.35);
@@ -2619,13 +2634,14 @@ fn add_ordinates(entities: &mut Vec<DxfEntity>, o: &Value, boxes: &[Value], th: 
         let along_x = it.get("axis").and_then(Value::as_str) != Some("y");
         let value = if along_x { (q.x - origin.x) / scale } else { (q.y - origin.y) / scale };
         let ang = it.get("ang").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0);
-        one(entities, q, along_x, level, value, ang);
+        let jog = it.get("jog").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0).clamp(0.0, 1e4);
+        one(entities, q, along_x, level, value, ang, jog);
         let slot = usize::from(!along_x);
         if let Some(done) = zero_done.get_mut(slot)
             && !*done
         {
             *done = true;
-            one(entities, origin, along_x, level, 0.0, 0.0);
+            one(entities, origin, along_x, level, 0.0, 0.0, 0.0);
         }
     }
 }
@@ -2697,6 +2713,17 @@ mod ordinate_tests {
         add_ordinates(&mut entities, &o, &[], 3.5, None);
         let ends: Vec<Vec2> = entities.iter().filter_map(|e| if let DxfShape::Line(_, b) = &e.shape { Some(*b) } else { None }).collect();
         assert!(ends.iter().any(|e| (e.x - 30.0).abs() < 1e-6 && (e.y - 30.0).abs() < 1e-6), "{ends:?}");
+    }
+
+    #[test]
+    fn a_leader_with_a_jog_runs_square_then_bends_to_its_end() {
+        let mut entities = Vec::new();
+        let o = json!({"o": [0.0, 0.0], "items": [{"p": [10.0, 10.0], "axis": "x", "at": 40.0, "ang": 45.0, "jog": 10.0}]});
+        add_ordinates(&mut entities, &o, &[], 3.5, None);
+        let lines: Vec<(Vec2, Vec2)> = entities.iter().filter_map(|e| if let DxfShape::Line(a, b) = &e.shape { Some((*a, *b)) } else { None }).collect();
+        // Square from the point (10, 10) up to the bend (10, 20), then 45 degrees to the level 40: x = 10 + 20.
+        assert!(lines.iter().any(|(a, b)| (a.x - 10.0).abs() < 1e-6 && (a.y - 10.0).abs() < 1e-6 && (b.x - 10.0).abs() < 1e-6 && (b.y - 20.0).abs() < 1e-6), "{lines:?}");
+        assert!(lines.iter().any(|(a, b)| (a.y - 20.0).abs() < 1e-6 && (b.x - 30.0).abs() < 1e-6 && (b.y - 40.0).abs() < 1e-6), "{lines:?}");
     }
 
     #[test]
