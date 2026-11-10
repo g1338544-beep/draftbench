@@ -1053,7 +1053,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let lists: Vec<_> = crate::toolbar_custom::panel_lists(&tab)
             .into_iter()
             .map(|(panel, cmds, promote)| {
+                // The icon grid lists every command of a panel, so no icon hides behind a drop-down;
+                // the variants of a sketch family stay inside their first member's button.
+                let promote = if icon_rows > 1 { cmds.len() } else { promote };
                 let mut shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
+                if icon_rows > 1 && tab == "SKETCH" && panel == "CREATE" {
+                    shown.retain(|c| crate::sketch_families::family(c.id).is_none_or(|f| f.commands.first().copied() == Some(c.id)));
+                }
                 // Gallery cells are painted together after the large buttons, in reading order.
                 if tab == "SKETCH" && panel == "CONSTRAIN" {
                     shown.sort_by_key(|c| crate::workspace::CONSTRAINT_GALLERY.iter().position(|id| *id == c.id).map(|i| i + 1).unwrap_or(0));
