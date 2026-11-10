@@ -58,9 +58,9 @@ fn ray_hit(o: Vec3, d: Vec3, t: &[Vec3; 3]) -> Option<f64> {
 
 /// Project a world polyline onto face `f` along `dir` (either way, nearest hit). Points that
 /// miss the face split the result.
-pub(crate) fn onto_face(m: &Mesh, f: u32, pts: &[Vec3], dir: Vec3) -> Vec<Vec<Vec3>> {
+pub(crate) fn onto_face(m: &Mesh, f: Option<u32>, pts: &[Vec3], dir: Vec3) -> Vec<Vec<Vec3>> {
     let Some(d) = dir.normalized() else { return Vec::new() };
-    let ts = tris(m, Some(f));
+    let ts = tris(m, f);
     let size = m.bounds().diagonal().max(1e-9);
     // Resample so the projected curve follows the surface.
     let step = size / 200.0;
@@ -102,8 +102,8 @@ pub(crate) fn onto_face(m: &Mesh, f: u32, pts: &[Vec3], dir: Vec3) -> Vec<Vec<Ve
 /// Project a world polyline onto face `f` normal to the surface: every point goes to the
 /// nearest point of the face (its foot point). Points farther from the face than the body's
 /// size split the result.
-pub(crate) fn onto_face_nearest(m: &Mesh, f: u32, pts: &[Vec3]) -> Vec<Vec<Vec3>> {
-    let ts = tris(m, Some(f));
+pub(crate) fn onto_face_nearest(m: &Mesh, f: Option<u32>, pts: &[Vec3]) -> Vec<Vec<Vec3>> {
+    let ts = tris(m, f);
     if ts.is_empty() {
         return Vec::new();
     }

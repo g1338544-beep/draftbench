@@ -71,6 +71,9 @@ pub enum LinkSource {
         at: Vec3,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         normal: bool,
+        /// Onto every face of the body, not just the one through `at`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all_faces: bool,
     },
     /// Where two bodies or faces (`Body` / `Face` sources) meet: 3D curves.
     Intersection { a: Box<LinkSource>, b: Box<LinkSource> },

@@ -204,7 +204,13 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
             }
         }
-        Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k),
+        Kind::SketchModify(k) => {
+            enter |= crate::sketch_modify_ui::rows(ui, k);
+            // Project Curve: one click takes a single curve or edge, or with this on the whole tangent chain.
+            if matches!(k, crate::sketch_modify_ui::Mod::ProjectCurve { .. }) {
+                extra_options(ui, "project_selection", &mut d.extra, &[("Tangent Chain", "tangent_chain")]);
+            }
+        }
         Kind::Text(k) => enter |= crate::sketch_text::rows(ui, k, &mut d.inputs, &mut d.active),
         Kind::TextMove(k) => enter |= crate::sketch_text_move::rows(ui, k),
         Kind::EditParam { name, expr } => {

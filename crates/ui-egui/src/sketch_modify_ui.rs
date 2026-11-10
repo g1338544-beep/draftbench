@@ -32,7 +32,7 @@ use solidcraft_engine::sketch::PatternAlignment;
 
 use crate::SolveApp;
 use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind};
-use crate::selection::{AXES, CURVES, EDGES, FACES, SKETCH_POINTS, SelInput};
+use crate::selection::{AXES, BODIES, CURVES, EDGES, FACES, SKETCH_POINTS, SelInput};
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::ui_kit;
 use crate::viewport::{Hit, Proj};
@@ -165,7 +165,7 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         Mod::Offset { .. } => vec![SelInput::new("Curves", CURVES, true)],
         Mod::ProjectCurve { .. } => {
             // Sketch curves (2D) and edges of the model (3D) both project.
-            vec![SelInput::new("Curves to project", CURVES | EDGES, true), SelInput::new("Object to project to", FACES, false)]
+            vec![SelInput::new("Curves to project", CURVES | EDGES, true), SelInput::new("Objects to project to (faces or a body)", FACES | BODIES, true)]
         }
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Mirror line", AXES, false)],
@@ -871,7 +871,42 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             if curves.is_empty() && edges.is_empty() {
                 return Err("Select the curves or edges to project first".into());
             }
-            let Some(Sel::Face { body, point, index }) = items(inputs, 1).first() else { return Err("Select the face to project onto".into()) };
+            // A body, or several faces: onto every face of that body.
+            let targets = items(inputs, 1);
+            let whole = match targets.first() {
+                Some(Sel::Body { name }) => Some(name.clone()),
+                Some(Sel::Face { body, .. }) if targets.len() > 1 => Some(body.clone()),
+                _ => None,
+            };
+            if let Some(body) = whole {
+                let state = app.session.world_state();
+                let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
+                if curves.is_empty() {
+                    return Err("Projecting model edges onto every face is not supported yet: pick sketch curves".into());
+                }
+                let picked = extra.get("tool_sketch").and_then(Value::as_u64);
+                let sketch = match picked {
+                    Some(k) if holding.contains(&k) => k,
+                    _ if holding.len() == 1 => holding.first().copied().ok_or("pick the curves in the viewport")?,
+                    _ => return Err("Pick curves from one sketch".into()),
+                };
+                let list: Vec<Value> = curves.iter().map(|c| json!({"sketch": sketch, "curve": c})).collect();
+                let direction = if *dir == 0 { "normal" } else { "sketch" };
+                let project = json!({"curves": list, "body": body, "all_faces": true, "direction": direction, "associative": associative});
+                let open = app.session.active_sketch.is_some();
+                if open {
+                    return Ok(vec![("sketch.project_to_surface".to_string(), project)]);
+                }
+                let sk = state.sketch(sketch).ok_or("the sketch of the curves is missing")?;
+                let (o, x, y) = (sk.plane.origin, sk.plane.x, sk.plane.y);
+                let plane = json!({"origin": [o.x, o.y, o.z], "x_dir": [x.x, x.y, x.z], "y_dir": [y.x, y.y, y.z]});
+                return Ok(vec![
+                    ("sketch.create".to_string(), json!({"plane": plane, "name": "Projected curves"})),
+                    ("sketch.project_to_surface".to_string(), project),
+                    ("sketch.finish".to_string(), json!({})),
+                ]);
+            }
+            let Some(Sel::Face { body, point, index }) = targets.first() else { return Err("Select the face to project onto".into()) };
             // A sketch still open is finished first (the projection makes its own sketches), so the command works from
             // inside a sketch too.
             let open = app.session.active_sketch.is_some();

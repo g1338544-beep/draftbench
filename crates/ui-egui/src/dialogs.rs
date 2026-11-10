@@ -1242,6 +1242,19 @@ impl Dialog {
         } else {
             picked
         };
+        // Project Curve's curves: with Tangent Chain on, one click takes the chain the curve or edge belongs to.
+        let picked = if matches!(self.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::ProjectCurve { .. }))
+            && self.active == 0
+            && self.extra.get("tangent_chain").and_then(Value::as_bool).unwrap_or(false)
+        {
+            match &sel {
+                Sel::Edge { .. } => fillet_edges(s, &sel, true),
+                Sel::SketchCurve { .. } => sweep_chain(s, &sel).unwrap_or(picked),
+                _ => picked,
+            }
+        } else {
+            picked
+        };
         // Extrude and revolve take profiles of one sketch.
         if let Sel::Profile { sketch, .. } = &sel
             && !matches!(self.kind, Kind::Loft { .. })

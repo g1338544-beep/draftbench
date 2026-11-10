@@ -32,7 +32,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.project_to_surface", "Project Curve", project_to_surface)
         .at("SKETCH", "CREATE")
         .icon("project_curve")
-        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?, associative?: bool (default true; false cuts the links so the curves stay put), direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
+        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?, all_faces?: bool (with body, no face point: project onto every face of the body), associative?: bool (default true; false cuts the links so the curves stay put), direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.intersection_curve", "Intersection Curve", intersection_curve)
         .at("SKETCH", "CREATE")
         .icon("intersection_curve")
@@ -299,8 +299,16 @@ fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Resu
 
 fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.project_to_surface";
-    let at = p.get("face").and_then(vec3).ok_or_else(|| bad(cmd, "`face` must be a point [x,y,z] on the target face"))?;
+    let all_faces = p.get("all_faces").and_then(Value::as_bool).unwrap_or(false);
+    let at = match p.get("face").and_then(vec3) {
+        Some(at) => at,
+        None if all_faces => Vec3::ZERO,
+        None => return Err(bad(cmd, "`face` must be a point [x,y,z] on the target face")),
+    };
     let body = str_(p, "body").unwrap_or("").to_string();
+    if all_faces && body.is_empty() {
+        return Err(bad(cmd, "`all_faces` needs the `body` to project onto"));
+    }
     let normal = match str_(p, "direction").unwrap_or("sketch") {
         "sketch" => false,
         "normal" | "surface" => true,
@@ -337,7 +345,7 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
         let LinkSource::SketchCurve { sketch, curve } = source(s, &v, cmd)? else {
             return Err(bad(cmd, "each entry must be {sketch, curve}"));
         };
-        out.push(one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve, body: body.clone(), at, normal })?);
+        out.push(one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve, body: body.clone(), at, normal, all_faces })?);
     }
     // Not associative: cut every new link loose, so the curves stay where they are.
     if p.get("associative").and_then(Value::as_bool) == Some(false) {

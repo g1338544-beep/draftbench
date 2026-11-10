@@ -677,3 +677,25 @@ fn a_face_sketch_saved_with_fitted_letters_reopens_and_builds_the_same() {
         sketch.curves.iter().filter(|c| c.link.is_some() && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. })).count();
     assert!(pieces > 0, "{pieces}");
 }
+
+#[test]
+fn project_curve_onto_every_face_of_a_body() {
+    // A line above a sphere lands on the sphere without naming any face.
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"center": [0, 0, 0], "radius": 20}));
+    let body = s.model.state().bodies[0].name.clone();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 50}));
+    let l = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [10, 0]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    let src = s.doc.features.last().unwrap().id;
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let r = run(&mut s, "sketch.project_to_surface", json!({"curves": [{"sketch": src, "curve": l}], "body": body, "all_faces": true, "direction": "normal"}));
+    let wid = r["links"][0]["wires"][0].as_str().unwrap().to_string();
+    let st = s.model.state();
+    let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+    let w = &sk.wires[sk.wire_index(&wid).unwrap()];
+    assert!(w.pts.len() > 20);
+    assert!(w.pts.iter().all(|p| (p.len() - 20.0).abs() < 0.2), "{:?}", w.pts.first());
+    // Without a body there is nothing to project onto.
+    assert!(s.execute("sketch.project_to_surface", &json!({"curves": [{"sketch": src, "curve": l}], "all_faces": true})).is_err());
+}
