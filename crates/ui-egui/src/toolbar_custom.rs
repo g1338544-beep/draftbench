@@ -24,13 +24,15 @@ pub struct ToolbarCustom {
     /// `"<workspace>/<tab>/<panel>"` → the panel's buttons, in order (only panels the user
     /// changed).
     pub panels: BTreeMap<String, Vec<String>>,
+    /// `"<tab>/<command>"` → how far the user moved that button off its place (Alt + drag), in points.
+    pub offsets: BTreeMap<String, [f32; 2]>,
     /// The Customize Toolbar window is open (not kept).
     pub customizing: bool,
 }
 
 impl ToolbarCustom {
     pub fn prefs(&self) -> Value {
-        json!({"version": 2, "panels": self.panels})
+        json!({"version": 2, "panels": self.panels, "offsets": self.offsets})
     }
     pub fn load(&mut self, v: &Value) {
         let current = v.get("version").and_then(Value::as_u64) == Some(2);
@@ -47,6 +49,23 @@ impl ToolbarCustom {
                     .collect()
             })
             .unwrap_or_default();
+        self.offsets = if current {
+            v.get("offsets")
+                .and_then(Value::as_object)
+                .map(|o| {
+                    o.iter()
+                        .take(1000)
+                        .filter_map(|(k, v)| {
+                            let a = v.as_array()?;
+                            let (x, y) = (a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32);
+                            (x.is_finite() && y.is_finite() && x.abs() < 4000.0 && y.abs() < 400.0).then(|| (k.clone(), [x, y]))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            BTreeMap::new()
+        };
         if !current {
             self.migrate();
         }
@@ -204,6 +223,7 @@ pub fn toggle(app: &mut SolveApp, tab: &str, id: &str) {
 pub fn reset(app: &mut SolveApp, tab: &str) {
     let prefix = format!("{WORKSPACE}/{tab}/");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
+    app.toolbar_custom.offsets.retain(|k, _| !k.starts_with(&format!("{tab}/")));
 }
 
 /// The menu of a command (toolbar button, drop-down row, S box row).

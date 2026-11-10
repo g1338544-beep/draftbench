@@ -1307,7 +1307,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // variants remain exact commands, including in customised toolbars.
                 let family = crate::sketch_families::family(c.id).filter(|f| sketch_create && f.commands.first().copied() == Some(c.id));
                 let selected = family.and_then(|f| app.preferences.sketch_variants.selected(f)).unwrap_or(c);
-                let whole = Rect::from_min_size(pos2(button_x, top + 2.0 + row_inset + row as f32 * (button_height + 1.0)), vec2(button_width, button_height));
+                let free_key = format!("{tab}/{}", c.id);
+                let moved = app.toolbar_custom.offsets.get(&free_key).copied().unwrap_or([0.0, 0.0]);
+                let whole = Rect::from_min_size(pos2(button_x, top + 2.0 + row_inset + row as f32 * (button_height + 1.0)), vec2(button_width, button_height))
+                    .translate(vec2(moved[0], moved[1]));
                 let mut br = whole;
                 if family.is_some() {
                     if labels {
@@ -1325,7 +1328,16 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if selected.id != c.id {
                     crate::scenario::publish_handle(&format!("button:{}", selected.id), br.center());
                 }
-                if resp.drag_started() {
+                // Alt + drag moves the button freely, anywhere (kept per tab); a plain drag still
+                // reorders it between the panels. Reset Toolbar puts it back.
+                let free_move = ui.input(|i| i.modifiers.alt);
+                if free_move && resp.dragged() {
+                    let d = resp.drag_delta();
+                    let entry = app.toolbar_custom.offsets.entry(free_key.clone()).or_insert([0.0, 0.0]);
+                    entry[0] = (entry[0] + d.x).clamp(-3000.0, 3000.0);
+                    entry[1] = (entry[1] + d.y).clamp(-300.0, 300.0);
+                }
+                if resp.drag_started() && !free_move {
                     resp.dnd_set_drag_payload(ToolbarDrag { id: c.id, from_menu: false });
                 }
                 if let Some(d) = resp.dnd_hover_payload::<ToolbarDrag>()
