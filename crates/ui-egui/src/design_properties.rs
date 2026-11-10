@@ -139,6 +139,19 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         rows.push(("Material", b["material"].as_str().unwrap_or("Default").to_string()));
         rows.push(("Density", format!("{:.3} g/cm³", number(b, "density_g_cm3"))));
     }
+    // Several bodies: each one's mass by its own material, then the sum below.
+    let per_body: Vec<(String, String)> = if bodies.len() > 1 {
+        bodies
+            .iter()
+            .map(|b| {
+                let name = b["name"].as_str().unwrap_or("Body");
+                let material = b["material"].as_str().unwrap_or("Default");
+                (format!("{name} ({material})"), format!("{:.4} kg", number(b, "mass_g") / 1000.0))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));
     if total.get("mass_kg").is_some() {
         rows.push(("Mass (kg)", format!("{:.4} kg", number(total, "mass_kg"))));
@@ -168,6 +181,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     rows.push(("Faces / edges / vertices", format!("{} / {} / {}", total["faces"], total["edges"], total["vertices"])));
     let heading = crate::i18n::format("properties.title", &[("name", &title)]);
     let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+        for (label, value) in &per_body {
+            ui_kit::row(ui, label, |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
+        }
         for (label, value) in &rows {
             ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
         }

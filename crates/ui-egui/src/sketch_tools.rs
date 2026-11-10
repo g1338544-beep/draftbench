@@ -177,9 +177,29 @@ fn mass_cursor(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Pr
     painter.text(centre, egui::Align2::CENTER_CENTER, "kg", egui::FontId::proportional(9.0), t.overlay);
 }
 
-/// Measure the given bodies and show the Mass properties card.
+thread_local! {
+    /// The bodies Mass Properties has been given since the tool started: each click or box adds to
+    /// them, and the card shows their running total.
+    static MASS_PICKED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A new Mass Properties run starts from nothing.
+pub fn mass_reset() {
+    MASS_PICKED.with(|p| p.borrow_mut().clear());
+}
+
+/// Add bodies to the ones being weighed and show the Mass properties card for all of them.
 pub fn mass_properties(app: &mut SolveApp, bodies: Vec<String>) {
-    match app.session.execute("inspect.mass_properties", &json!({"bodies": bodies})) {
+    let all = MASS_PICKED.with(|p| {
+        let mut p = p.borrow_mut();
+        for b in bodies {
+            if !p.contains(&b) {
+                p.push(b);
+            }
+        }
+        p.clone()
+    });
+    match app.session.execute("inspect.mass_properties", &json!({"bodies": all})) {
         Ok(v) => app.menu.props = Some(("Mass properties".into(), v)),
         Err(e) => app.set_status(e.to_string(), true),
     }
@@ -332,6 +352,10 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
             .filter_map(|(key, class)| summary[*key].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {class}")))
             .collect();
         app.set_status(format!("Continuity: {} (click the button again to turn it off)", counts.join(", ")), false);
+        return true;
+    }
+    if id == "inspect.mass_properties" {
+        mass_reset();
         return true;
     }
     if id == "inspect.center_of_mass" {

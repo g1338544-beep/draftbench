@@ -929,6 +929,7 @@ impl SolveApp {
         if id == "inspect.mass_properties" {
             let bodies = context_menu::sel_bodies(self);
             if !bodies.is_empty() {
+                sketch_tools::mass_reset();
                 sketch_tools::mass_properties(self, bodies);
                 return;
             }
