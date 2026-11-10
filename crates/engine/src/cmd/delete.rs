@@ -82,6 +82,8 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let mut bodies: Vec<String> = Vec::new();
     let mut faces: Vec<(String, Vec<Vec3>)> = Vec::new();
     let mut selected_occurrences = Vec::new();
+    // Curves of sketches that are not being edited (a projected curve picked in the viewport), by sketch.
+    let mut external: Vec<(u64, Vec<String>)> = Vec::new();
     for x in &items {
         match x {
             Sel::Occurrence { path } => {
@@ -106,7 +108,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
             Sel::Profile { .. } => skip("a profile goes with its sketch".into()),
-            Sel::ExternalSketchCurve { .. } | Sel::ExternalSketchPoint { .. } => skip("edit the source sketch to delete its geometry".into()),
+            Sel::ExternalSketchCurve { sketch, id } => match external.iter_mut().find(|(k, _)| k == sketch) {
+                Some((_, ids)) => ids.push(id.clone()),
+                None => external.push((*sketch, vec![id.clone()])),
+            },
+            Sel::ExternalSketchPoint { .. } => skip("edit the source sketch to delete its points".into()),
         }
     }
     features.dedup();
@@ -121,6 +127,29 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             sub(s, "sketch.delete", json!({ "entities": entities }))?;
             done = true;
+        }
+    }
+    // Picked curves of other sketches: the sketch goes when every one of its curves is picked, else the picked
+    // ones are removed from it (the sketch is opened for that and finished again).
+    if !external.is_empty() {
+        if s.active_sketch.is_some() {
+            skip("finish the sketch being edited to delete curves of another sketch".into());
+        } else {
+            for (sketch, ids) in &external {
+                let Some(sk) = s.doc.sketch(*sketch).ok() else { continue };
+                let all = sk.curves.iter().all(|c| ids.contains(&c.id)) && sk.wires.iter().all(|w| ids.contains(&w.id));
+                if all {
+                    if !features.contains(sketch) {
+                        features.push(*sketch);
+                    }
+                } else {
+                    sub(s, "sketch.edit", json!({ "sketch": sketch }))?;
+                    let removed = sub(s, "sketch.delete", json!({ "entities": ids }));
+                    sub(s, "sketch.finish", json!({}))?;
+                    removed?;
+                    done = true;
+                }
+            }
         }
     }
     // Faces of a body that is going anyway are left to it; the rest become Delete Face features.
@@ -219,6 +248,20 @@ mod tests {
         run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0]}));
         run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10}));
         (s, sk)
+    }
+
+    #[test]
+    fn curves_of_a_finished_sketch_can_be_deleted_from_the_viewport_selection() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap_or(0);
+        let a = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}))["curves"][0].as_str().unwrap_or("").to_string();
+        let b = run(&mut s, "sketch.line", json!({"points": [[0, 5], [10, 5]]}))["curves"][0].as_str().unwrap_or("").to_string();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "selection.delete", json!({"items": [{"type": "external_sketch_curve", "sketch": sk, "id": a}]}));
+        assert!(s.active_sketch.is_none());
+        assert_eq!(s.doc.sketch(sk).map(|x| x.curves.len()).unwrap_or(0), 1);
+        run(&mut s, "selection.delete", json!({"items": [{"type": "external_sketch_curve", "sketch": sk, "id": b}]}));
+        assert!(s.doc.feature(sk).is_none(), "the last curve takes its sketch with it");
     }
 
     #[test]
