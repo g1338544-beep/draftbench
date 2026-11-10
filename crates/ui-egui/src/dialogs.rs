@@ -1857,7 +1857,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Assembly(k) => k.title(),
         Kind::Sheet(k) => k.title(),
         Kind::Surface(k) => k.title(),
-        Kind::SaveMesh(_) => "SAVE AS MESH",
+        Kind::SaveMesh(_) => "EXPORT",
         Kind::ViewDxf { .. } => "Export Current View as DXF",
         Kind::Plastic(k) => k.title(),
         Kind::Appearance(_) => "APPEARANCE",

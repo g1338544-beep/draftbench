@@ -605,11 +605,11 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 if item_if(ui, "Export STEP…", "", "export", shown) {
-                    export(app, "step");
+                    crate::dialogs_save_mesh::start_with_format(app, "step");
                     close = true;
                 }
                 if item_if(ui, "Export IGES…", "", "export", shown) {
-                    export(app, "igs");
+                    crate::dialogs_save_mesh::start_with_format(app, "iges");
                     close = true;
                 }
                 if item_if(ui, app.tr_label("Export Current View as DXF…"), "", "export", shown) {
@@ -628,7 +628,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 if item_if(ui, "Export OBJ…", "", "export", shown) {
-                    export(app, "obj");
+                    crate::dialogs_save_mesh::start_with_format(app, "obj");
                     close = true;
                 }
                 if item_if(ui, "Export URDF…", "", "export", shown) {

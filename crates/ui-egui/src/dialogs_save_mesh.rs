@@ -22,7 +22,17 @@ use crate::theme::Tokens;
 
 /// The formats, as shown and as `file.save_mesh` names them.
 /// (label, `format` parameter, file extension).
-const FORMATS: [(&str, &str, &str); 3] = [("STL", "stl", "stl"), ("3MF", "3mf", "3mf"), ("3MF with face tags", "3mf-tagged", "3mf")];
+const FORMATS: [(&str, &str, &str); 6] = [
+    ("STL", "stl", "stl"),
+    ("3MF", "3mf", "3mf"),
+    ("3MF with face tags", "3mf-tagged", "3mf"),
+    ("STEP", "step", "step"),
+    ("IGES", "iges", "igs"),
+    ("OBJ", "obj", "obj"),
+];
+/// The first `MESH_FORMATS` entries are saved by `file.save_mesh` (and can go to a slicer); the
+/// rest are written by `file.export`, which takes the same bodies.
+const MESH_FORMATS: usize = 3;
 /// Edge of a slicer's icon in the list.
 const ICON: f32 = 16.0;
 /// Most programs the user can keep in the list.
@@ -171,6 +181,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) -> bool {
         k.send &= !entries.is_empty();
     }
     choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
+    if k.format >= MESH_FORMATS {
+        k.send = false;
+        return false;
+    }
 
     // A browser has no installed programs to send a file to.
     if app.services.pick_program.is_none() {
@@ -293,11 +307,15 @@ fn add_custom(app: &mut SolveApp, path: &str) -> Result<(), String> {
 /// What the Save (or Send) button asks `file.save_mesh` to do, without the file name.
 pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
     let format = FORMATS.get(k.format).map_or("stl", |f| f.1);
-    let mut p = json!({ "format": format });
     let names = crate::selection::items(inputs, 0).body_names();
     if names.is_empty() {
         return Err(crate::i18n::tr("ui.save_mesh_pick_bodies").into());
     }
+    if k.format >= MESH_FORMATS {
+        // STEP, IGES and OBJ: the file extension names the format.
+        return Ok(vec![("file.export".into(), json!({ "bodies": names }))]);
+    }
+    let mut p = json!({ "format": format });
     p["bodies"] = json!(names);
     if k.send {
         if k.slicer.is_empty() {
@@ -321,26 +339,28 @@ pub fn button(k: &SaveMesh) -> &'static str {
 /// Save: ask for a file name and write the file. Send: write it to a temporary file and start the
 /// slicer with it, with no file dialog.
 pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), String> {
-    let (_, params) = commands(k, inputs)?.into_iter().next().ok_or("nothing to save")?;
+    let (command, params) = commands(k, inputs)?.into_iter().next().ok_or("nothing to save")?;
     let (format, ext) = FORMATS.get(k.format).map_or(("stl", "stl"), |f| (f.1, f.2));
     let name = crate::selection::items(inputs, 0).body_names().first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
     let p = &mut app.preferences;
-    p.save_mesh_format = format.into();
-    p.save_mesh_send = k.send;
-    if !k.slicer.is_empty() {
-        p.save_mesh_slicer = k.slicer.clone();
+    if k.format < MESH_FORMATS {
+        p.save_mesh_format = format.into();
+        p.save_mesh_send = k.send;
+        if !k.slicer.is_empty() {
+            p.save_mesh_slicer = k.slicer.clone();
+        }
     }
     if k.send {
         let dir = std::env::temp_dir().join("solidcraft-slicer");
         std::fs::create_dir_all(&dir)
             .map_err(|e| crate::i18n::format("ui.save_mesh_temp_failed", &[("folder", &dir.display().to_string()), ("error", &e.to_string())]))?;
         let file: String = name.chars().map(|c| if c.is_alphanumeric() || "-_. ".contains(c) { c } else { '_' }).collect();
-        save(app, params, &dir.join(format!("{file}.{ext}")).to_string_lossy());
+        save(app, &command, params, &dir.join(format!("{file}.{ext}")).to_string_lossy());
     } else {
         // The file dialog answers later; the dialog closes meanwhile, as for every export.
         app.pick_save(&format!("{name}.{ext}"), &[ext], move |app, path| {
             if let Some(path) = path {
-                save(app, params, &path);
+                save(app, &command, params, &path);
             }
         });
     }
@@ -348,11 +368,11 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
 }
 
 /// Run `file.save_mesh` into `path` and report what happened.
-fn save(app: &mut SolveApp, mut params: Value, path: &str) {
+fn save(app: &mut SolveApp, command: &str, mut params: Value, path: &str) {
     // Runs from the file picker's answer, outside the frame's language scope.
     let _language = crate::i18n::scope(&app.preferences.language);
     params["path"] = json!(path);
-    let Ok(result) = app.run("file.save_mesh", params) else { return };
+    let Ok(result) = app.run(command, params) else { return };
     match result.get("slicer_error").and_then(Value::as_str) {
         Some(e) => app.set_status(e.to_string(), true),
         None => match result.get("slicer").and_then(Value::as_str) {
