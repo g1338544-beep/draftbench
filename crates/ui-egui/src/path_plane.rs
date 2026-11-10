@@ -57,10 +57,29 @@ fn path_points(app: &SolveApp, d: &Dialog) -> Option<Vec<Vec3>> {
     }
 }
 
+/// The world position of a picked point: a sketch point (in the path's sketch when it has the point, else the
+/// active one, else any sketch that has it), a vertex, or whatever else snaps to one.
+fn pick_world(app: &SolveApp, d: &Dialog, pick: &Sel) -> Option<Vec3> {
+    if let Sel::SketchPoint { id } = pick {
+        let st = app.session.world_state();
+        let preferred = match &d.kind {
+            Kind::PathPlane { sketch: Some(s), .. } => Some(*s),
+            _ => None,
+        };
+        let sketches = preferred.into_iter().chain(app.session.active_sketch).filter_map(|s| st.sketch(s));
+        let found = sketches.chain(st.sketches.iter().rev().map(|s| &**s)).find_map(|ss| {
+            let pi = ss.sketch.resolve_point(id)?;
+            Some(ss.plane.to_world(ss.sketch.point(pi)?))
+        });
+        return found;
+    }
+    crate::dialogs_move::sel_point(app, Some(pick))
+}
+
 /// A point was just picked for the dialog's second input: move the plane to it. Returns whether it did.
 pub(crate) fn follow_point(app: &SolveApp, d: &mut Dialog) -> bool {
     let Some(pick) = d.inputs.get(1).and_then(|i| i.items.last()) else { return false };
-    let Some(p) = crate::dialogs_move::sel_point(app, Some(pick)) else { return false };
+    let Some(p) = pick_world(app, d, pick) else { return false };
     let Some(f) = path_points(app, d).and_then(|pts| path_fraction(&pts, p)) else { return false };
     if let Kind::PathPlane { t, .. } = &mut d.kind {
         *t = format!("{f:.4}").trim_end_matches('0').trim_end_matches('.').to_string();

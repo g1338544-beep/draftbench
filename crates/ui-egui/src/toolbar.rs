@@ -1074,7 +1074,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         if labels {
                             ButtonSize { width: ribbon_button_width(&painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
                         } else {
-                            let width = if family.is_some() { 50.0 } else { 40.0 };
+                            // A grid column is as wide as its icon plus a little; the usual single row keeps wider buttons.
+                            let width = match (icon_rows > 1, family.is_some()) {
+                                (true, true) => 40.0,
+                                (true, false) => 30.0,
+                                (false, true) => 50.0,
+                                (false, false) => 40.0,
+                            };
                             ButtonSize { width, min_width: width }
                         }
                     })

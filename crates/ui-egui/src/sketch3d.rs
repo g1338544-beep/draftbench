@@ -350,6 +350,130 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             tk.text_dim,
         );
     }
+    // Axis guides through the last point: X, Y and Z as dashed coloured lines with their letters; the one the
+    // segment follows turns solid and thick and says so.
+    if let Some(last) = pts.last().copied()
+        && let Some(o) = proj.to_screen(last)
+    {
+        let follows = hover.and_then(|(h, _)| axis_snap(last, h, AXIS_SNAP_DEG)).map(|(i, _)| i);
+        for (i, (axis, col, name)) in [(Vec3::X, tk.axis_x, "X"), (Vec3::Y, tk.axis_y, "Y"), (Vec3::Z, tk.axis_z, "Z")].into_iter().enumerate() {
+            let on = follows == Some(i);
+            // Its direction on screen, from a point 100 mm along it (so a short step cannot lose the direction).
+            let Some(dir) = proj.to_screen(last + axis * 100.0).and_then(|a| unit(a - o)) else { continue };
+            let (a, b) = (o - dir * 4000.0, o + dir * 4000.0);
+            if on {
+                painter.line_segment([a, b], Stroke::new(2.5, col));
+            } else {
+                painter.extend(Shape::dashed_line(&[a, b], Stroke::new(1.5, col.gamma_multiply(0.8)), 9.0, 6.0));
+            }
+            let at = o + dir * 64.0;
+            painter.circle_filled(at, 9.0, tk.panel);
+            painter.circle_stroke(at, 9.0, Stroke::new(if on { 2.0 } else { 1.0 }, col));
+            painter.text(at, egui::Align2::CENTER_CENTER, name, egui::FontId::proportional(tk.font_small), col);
+            if on {
+                painter.text(o + vec2(12.0, -26.0), egui::Align2::LEFT_BOTTOM, format!("{name} axis"), egui::FontId::proportional(tk.font_small), col);
+            }
+        }
+    }
+    let (arc_on, _, t0) = ARC.with(|x| *x.borrow());
+                let arc = if arc_on { t0.and_then(|t0| arc3d(a, t0, p)) } else { None };
+                let next_tangent = match &arc {
+                    Some((_, t1)) => Some(*t1),
+                    None => (p - a).normalized(),
+                };
+                let r = if let Some((pts, _)) = &arc {
+                    let q: Vec<Value> = pts.iter().step_by(3).map(|v| json!([v.x, v.y, v.z])).collect();
+                    app.run("sketch.spline3d", json!({ "points": q }))
+                } else {
+                    match (on_plane(app, a), on_plane(app, p)) {
+                    (Some(qa), Some(qb)) => app.run("sketch.line", json!({"points": [[qa.x, qa.y], [qb.x, qb.y]], "infer": true})),
+                    _ => app.run("sketch.line3d", json!({"points": [[a.x, a.y, a.z], [p.x, p.y, p.z]]})),
+                    }
+                };
+                report(app, r);
+                ARC.with(|x| *x.borrow_mut() = (false, false, next_tangent));
+            }
+            let mut c = chain();
+            c.push(p);
+            let keep = ARC.with(|x| *x.borrow());
+            set_chain(Some(tool.cmd), c);
+            ARC.with(|x| *x.borrow_mut() = keep);
+        }
+        _ => {
+            let mut c = chain();
+            c.push(p);
+            set_chain(Some(tool.cmd), c);
+        }
+    }
+    true
+}
+
+fn report(app: &mut SolveApp, r: Result<Value, String>) {
+    if let Err(e) = r {
+        app.set_status(e, true);
+    }
+}
+
+/// Right-click / Esc while drawing in 3D: a spline is made from its points, a line chain ends
+/// (true: handled here; the tool stays for the next curve).
+pub fn finish(app: &mut SolveApp) -> bool {
+    let (cmd, pts) = CHAIN.with(|c| c.borrow().clone());
+    let Some(cmd) = cmd.filter(|c| app.tool.as_ref().is_some_and(|t| t.cmd == *c)) else {
+        set_chain(None, Vec::new());
+        return false;
+    };
+    if pts.is_empty() {
+        set_chain(None, Vec::new());
+        return false;
+    }
+    if cmd == "sketch.spline.fit_point" && pts.len() >= 2 {
+        let r = if pts.iter().all(|p| on_plane(app, *p).is_some()) {
+            let q: Vec<Value> = pts.iter().filter_map(|p| on_plane(app, *p)).map(|q| json!([q.x, q.y])).collect();
+            app.run("sketch.spline.fit_point", json!({ "points": q }))
+        } else {
+            let q: Vec<Value> = pts.iter().map(|p| json!([p.x, p.y, p.z])).collect();
+            app.run("sketch.spline3d", json!({ "points": q }))
+        };
+        report(app, r);
+    }
+    set_chain(Some(cmd), Vec::new());
+    true
+}
+
+/// Rubber band and snap marker of the curve being drawn in 3D (true: drawn here).
+pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -> bool {
+    if !takes(t.cmd) || !active(app) {
+        return false;
+    }
+    let tk = Tokens::get();
+    let stroke = Stroke::new(1.5, tk.sketch_accent);
+    let pts = if CHAIN.with(|c| c.borrow().0) == Some(t.cmd) { chain() } else { Vec::new() };
+    let hover = HOVER.with(|h| *h.borrow());
+    let mut all: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
+    if let Some((h, label)) = hover
+        && let Some(s) = proj.to_screen(h)
+    {
+        if t.cmd != "sketch.point" && !pts.is_empty() {
+            all.push(s);
+        }
+        painter.circle_stroke(s, if label == "Plane" { 3.0 } else { 6.0 }, stroke);
+        if label != "Plane" {
+            painter.text(
+                s + vec2(10.0, -14.0),
+                egui::Align2::LEFT_BOTTOM,
+                label,
+                egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+                tk.text,
+            );
+        }
+        painter.text(
+            s + vec2(10.0, 10.0),
+            egui::Align2::LEFT_TOP,
+            format!("{}, {}, {}", crate::prefs::show_mm(app, h.x, 1), crate::prefs::show_mm(app, h.y, 1), crate::prefs::show_mm(app, h.z, 1)),
+            egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+            tk.text_dim,
+        );
+    }
     // Axis guides through the last point: X, Y and Z faintly, the one the segment follows boldly and named.
     if let Some(last) = pts.last().copied()
         && let Some(o) = proj.to_screen(last)

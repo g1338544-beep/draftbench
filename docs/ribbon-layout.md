@@ -165,4 +165,4 @@ the full viewport remains available through the gaps and below a short browser.
 
 ## Icon rows
 
-Settings → General → "Icon rows" (`ribbon_icon_rows`, 1 to 4, default 1). From 2 up the ribbon is icon-only and each panel is a grid of that many rows of small icons, filled top to bottom and then left to right, so a tab with many commands (MODEL holds the former INSPECT and INSERT panels) fits without trimming. The panel width unit becomes a column, so a narrow toolbar drops whole columns into the panel drop-down.
+Settings → General → "Icon rows" (`ribbon_icon_rows`, 1 to 4, default 4). From 2 up the ribbon is icon-only and each panel is a grid of that many rows of small icons, filled top to bottom and then left to right, so a tab with many commands (MODEL holds the former INSPECT and INSERT panels) fits without trimming. The panel width unit becomes a column, so a narrow toolbar drops whole columns into the panel drop-down.
