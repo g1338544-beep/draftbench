@@ -123,7 +123,23 @@ impl OrdState {
         it.2 = (level * 10.0).round() / 10.0;
         let ang = (across / along).atan().to_degrees().clamp(-75.0, 75.0);
         self.straight = ang.abs() < SQUARE_SNAP_DEG;
-        it.3 = if self.straight { 0.0 } else { ang };
+        if self.straight {
+            it.3 = 0.0;
+            return;
+        }
+        if jog <= 0.0 {
+            // A leader that leans keeps its first part square and bends only near its end, like a
+            // drawn ordinate: the bend sits a quarter of the length from the end.
+            let bend = (toward.abs() * 0.75 * 10.0).floor() / 10.0;
+            let rest = toward.abs() - bend;
+            if rest >= 1.0 {
+                it.4 = bend;
+                let a = (across / rest).atan().to_degrees().clamp(-75.0, 75.0);
+                it.3 = if a.abs() < SQUARE_SNAP_DEG { 0.0 } else { a };
+                return;
+            }
+        }
+        it.3 = ang;
     }
 
     /// The saved form, which is also what the engine takes (`null` while there is no datum).
