@@ -32,7 +32,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.project_to_surface", "Project Curve", project_to_surface)
         .at("SKETCH", "CREATE")
         .icon("project_curve")
-        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?, all_faces?: bool (with body, no face point: project onto every face of the body), associative?: bool (default true; false cuts the links so the curves stay put), direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
+        .params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face (or faces: [[x,y,z]…], one point on each of several faces: a curve that misses one of them is skipped), skip_missing?: bool (skip a curve that lands on nothing), body?, all_faces?: bool (with body, no face point: project onto every face of the body), associative?: bool (default true; false cuts the links so the curves stay put), direction?: sketch (default: along the active sketch's normal) | normal (normal to the surface: each point goes to the nearest point of the face): projected onto the face as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.intersection_curve", "Intersection Curve", intersection_curve)
         .at("SKETCH", "CREATE")
         .icon("intersection_curve")
@@ -300,7 +300,9 @@ fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Resu
 fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.project_to_surface";
     let all_faces = p.get("all_faces").and_then(Value::as_bool).unwrap_or(false);
-    let at = match p.get("face").and_then(vec3) {
+    // `faces`: several target faces at once (a point on each); a curve that misses some of them is fine.
+    let several: Vec<Vec3> = p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).take(200).collect()).unwrap_or_default();
+    let at = match p.get("face").and_then(vec3).or_else(|| several.first().copied()) {
         Some(at) => at,
         None if all_faces => Vec3::ZERO,
         None => return Err(bad(cmd, "`face` must be a point [x,y,z] on the target face")),
@@ -341,11 +343,25 @@ fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let list = expanded;
     let mut out = Vec::new();
+    let ats: Vec<Vec3> = if several.is_empty() { vec![at] } else { several };
+    // With several faces, or `skip_missing`, a curve that lands on none of a face is skipped; only a projection
+    // that makes nothing at all is an error.
+    let lenient = ats.len() > 1 || p.get("skip_missing").and_then(Value::as_bool) == Some(true);
+    let mut missed: Option<EngineError> = None;
     for v in list {
         let LinkSource::SketchCurve { sketch, curve } = source(s, &v, cmd)? else {
             return Err(bad(cmd, "each entry must be {sketch, curve}"));
         };
-        out.push(one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve, body: body.clone(), at, normal, all_faces })?);
+        for at in &ats {
+            match one_link(s, cmd, LinkKind::Project, LinkSource::OnSurface { sketch, curve: curve.clone(), body: body.clone(), at: *at, normal, all_faces }) {
+                Ok(link) => out.push(link),
+                Err(e) if lenient => missed = Some(e),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(missed.unwrap_or_else(|| bad(cmd, "the curves land on none of the faces")));
     }
     // Not associative: cut every new link loose, so the curves stay where they are.
     if p.get("associative").and_then(Value::as_bool) == Some(false) {

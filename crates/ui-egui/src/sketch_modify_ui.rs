@@ -937,7 +937,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     steps.push(("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"})));
                     steps.push((
                         "sketch.project_to_surface".to_string(),
-                        json!({"curves": [{"sketch": source}], "body": body, "all_faces": true, "direction": "sketch", "associative": associative}),
+                        json!({"curves": [{"sketch": source}], "body": body, "all_faces": true, "direction": "sketch", "associative": associative, "skip_missing": true}),
                     ));
                     steps.push(("sketch.finish".to_string(), json!({})));
                     return Ok(steps);
@@ -949,7 +949,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     _ => return Err("Pick curves from one sketch".into()),
                 };
                 let list: Vec<Value> = curves.iter().map(|c| json!({"sketch": sketch, "curve": c})).collect();
-                let project = json!({"curves": list, "body": body, "all_faces": true, "direction": direction, "associative": associative});
+                let project = json!({"curves": list, "body": body, "all_faces": true, "direction": direction, "associative": associative, "skip_missing": true});
                 let open = app.session.active_sketch.is_some();
                 if open {
                     return Ok(vec![("sketch.project_to_surface".to_string(), project)]);
@@ -1030,13 +1030,13 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     ("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"})),
                 ])
                 .into_iter()
-                .chain(face_points.iter().map(|q| {
+                .chain([
                     (
                         "sketch.project_to_surface".to_string(),
-                        json!({"curves": [{"sketch": source}], "face": [q.x, q.y, q.z], "body": body, "direction": "sketch"}),
-                    )
-                }))
-                .chain([("sketch.finish".to_string(), json!({}))])
+                        json!({"curves": [{"sketch": source}], "faces": face_points.iter().map(|q| json!([q.x, q.y, q.z])).collect::<Vec<_>>(), "body": body, "direction": "sketch", "skip_missing": true}),
+                    ),
+                    ("sketch.finish".to_string(), json!({})),
+                ])
                 .collect());
             }
             // The sketch the curves belong to: the one a pick came from, else the only one holding them.
@@ -1050,7 +1050,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             };
             let list: Vec<Value> = curves.iter().map(|c| json!({"sketch": sketch, "curve": c})).collect();
             let direction = if *dir == 0 { "normal" } else { "sketch" };
-            let project = json!({"curves": list, "face": [point.x, point.y, point.z], "body": body, "direction": direction, "associative": associative});
+            let project = json!({"curves": list, "face": [point.x, point.y, point.z], "faces": face_points.iter().map(|q| json!([q.x, q.y, q.z])).collect::<Vec<_>>(), "body": body, "direction": direction, "associative": associative, "skip_missing": true});
             if app.session.active_sketch.is_some() {
                 return Ok(vec![("sketch.project_to_surface".to_string(), project)]);
             }

@@ -744,3 +744,20 @@ fn a_sketch_can_draw_its_lines_in_a_chosen_colour_and_a_curve_sketch_has_no_fill
     let cid = s.doc.features.last().unwrap().id;
     assert!(s.model.state().sketch(cid).is_none_or(|x| x.sketch.view.hide_profile));
 }
+
+#[test]
+fn project_curve_onto_several_faces_skips_the_ones_it_misses() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "B"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 50}));
+    let l = ids(&run(&mut s, "sketch.line", json!({"points": [[5, 5], [15, 5]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    let src = s.doc.features.last().unwrap().id;
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let curves = json!([{"sketch": src, "curve": l}]);
+    // The end face runs along the projection direction: a line cannot land on it alone…
+    assert!(s.execute("sketch.project_to_surface", &json!({"curves": curves, "face": [0, 15, 10], "body": "B", "direction": "sketch"})).is_err());
+    // …but with the top face too, the top gets the line and the end face is skipped.
+    let r = run(&mut s, "sketch.project_to_surface", json!({"curves": curves, "faces": [[20, 15, 20], [0, 15, 10]], "body": "B", "direction": "sketch"}));
+    assert_eq!(r["links"].as_array().map(Vec::len), Some(1), "{r}");
+}
