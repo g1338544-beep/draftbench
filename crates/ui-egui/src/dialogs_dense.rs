@@ -175,9 +175,27 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     }
     placement_row(d, ui);
     input_rows(d, ui, &app.session);
+    // Which bodies are picked for Physical Material: the Material row starts on what the first one has now.
+    let material_bodies: Vec<String> = if matches!(d.kind, Kind::Material { .. }) {
+        d.inputs
+            .first()
+            .map(|i| i.items.iter().filter_map(|x| if let Sel::Body { name } | Sel::Face { body: name, .. } = x { Some(name.clone()) } else { None }).collect())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     match &mut d.kind {
         Kind::Material { index } => {
             let names = app.session.doc.material_names();
+            // When the picked bodies change, the row shows the material the first one has (else the one assigned last).
+            let key = material_bodies.join("\u{1}");
+            if d.extra.get("material_for").and_then(serde_json::Value::as_str) != Some(key.as_str()) {
+                let wanted = material_bodies.first().and_then(|b| app.session.doc.materials.get(b).cloned()).or_else(last_material);
+                if let Some(at) = wanted.and_then(|w| names.iter().position(|n| *n == w)) {
+                    *index = at;
+                }
+                d.extra.insert("material_for".into(), serde_json::json!(key));
+            }
             let names: Vec<_> = names.iter().map(String::as_str).collect();
             choice_row(ui, "Material", "mat", index, &names);
         }
@@ -1463,4 +1481,30 @@ fn hole_type_buttons(ui: &mut egui::Ui, kind: &mut usize) {
             }
         }
     });
+}
+
+thread_local! {
+    /// The physical material assigned last (Physical Material opens on it when the bodies have none).
+    static LAST_MATERIAL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Remember the material the Physical Material dialog just applied.
+pub(crate) fn remember_material(name: &str) {
+    LAST_MATERIAL.with(|m| *m.borrow_mut() = Some(name.to_string()));
+}
+
+fn last_material() -> Option<String> {
+    LAST_MATERIAL.with(|m| m.borrow().clone())
+}
+
+#[cfg(test)]
+mod material_memory_tests {
+    #[test]
+    fn the_last_assigned_material_is_remembered() {
+        assert_eq!(super::last_material(), None);
+        super::remember_material("Aluminum");
+        assert_eq!(super::last_material().as_deref(), Some("Aluminum"));
+        super::remember_material("Steel");
+        assert_eq!(super::last_material().as_deref(), Some("Steel"));
+    }
 }
