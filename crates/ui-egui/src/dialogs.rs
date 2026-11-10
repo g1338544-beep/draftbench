@@ -724,16 +724,22 @@ impl Dialog {
                 let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
                 vec![SelInput::new("Profiles", PROFILES, true), rail, rail2]
             }),
-            "solid.sweep" => Dialog::new(Kind::Sweep { operation: usize::from(has_bodies), opts: crate::dialogs_sweep::SweepOpts::default() }, {
+            "solid.sweep" => {
                 let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
-                vec![
-                    SelInput::new("Profile", PROFILES, true),
-                    SelInput::new("Path", CURVES, true),
-                    crate::dialogs_sweep::direction_input(),
-                    rail,
-                    rail2,
-                ]
-            }),
+                let mut d = Dialog::new(
+                    Kind::Sweep { operation: usize::from(has_bodies), opts: crate::dialogs_sweep::SweepOpts::default() },
+                    vec![
+                        SelInput::new("Profile", PROFILES, true),
+                        SelInput::new("Path", CURVES, true),
+                        crate::dialogs_sweep::direction_input(),
+                        rail,
+                        rail2,
+                    ],
+                );
+                // One click on the path takes the whole chain of curves joined to it.
+                d.extra.insert("tangent_chain".into(), json!(true));
+                d
+            }
             "solid.move" => Dialog::new(crate::dialogs_move::kind(0), crate::dialogs_move::inputs(0)),
             "solid.hole" => Dialog::new(hole_defaults(), vec![SelInput::new("Face", HOLE_FACES, true)]),
             "solid.box" => Dialog::new(
@@ -1227,6 +1233,15 @@ impl Dialog {
             if !measure && self.active_input().is_some_and(|i| i.multi) { crate::viewport::picked_selection(s, &sel) } else { vec![sel.clone()] };
         // Tangent chain: an edge brings the edges that continue it smoothly.
         let picked = if chain { fillet_edges(s, &sel, true) } else { single.clone() };
+        // A sweep's path: the curves joined end to end with the picked one come with it.
+        let picked = if matches!(self.kind, Kind::Sweep { .. })
+            && self.active == 1
+            && self.extra.get("tangent_chain").and_then(Value::as_bool).unwrap_or(false)
+        {
+            sweep_chain(s, &sel).unwrap_or(picked)
+        } else {
+            picked
+        };
         // Extrude and revolve take profiles of one sketch.
         if let Sel::Profile { sketch, .. } = &sel
             && !matches!(self.kind, Kind::Loft { .. })
@@ -1331,6 +1346,27 @@ impl Dialog {
 
 /// The edges a Fillet or Chamfer pick stands for: its tangent chain when `chain` is on, else
 /// the picked edge (both halves of a split circular rim).
+/// A picked sketch curve with the curves joined end to end to it (in its sketch), or None for any other pick.
+fn sweep_chain(s: &Session, sel: &Sel) -> Option<Vec<Sel>> {
+    let Sel::SketchCurve { id } = sel else { return None };
+    let st = s.world_state();
+    let ss = s
+        .active_sketch
+        .and_then(|a| st.sketch(a))
+        .filter(|ss| ss.sketch.curve_index(id).is_some())
+        .or_else(|| st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some()))?;
+    let ci = ss.sketch.curve_index(id)?;
+    let curves: Vec<Sel> = ss
+        .sketch
+        .chain(ci)
+        .into_iter()
+        .filter_map(|i| ss.sketch.curves.get(i))
+        .filter(|c| !c.construction)
+        .map(|c| Sel::SketchCurve { id: c.id.clone() })
+        .collect();
+    (curves.len() > 1).then_some(curves)
+}
+
 fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
     let mut picked = crate::viewport::picked_selection(s, sel);
     if chain

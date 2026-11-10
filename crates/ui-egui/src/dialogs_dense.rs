@@ -974,6 +974,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             enter |= crate::dialogs_sweep::rows_with(ui, opts, "sw", |ui| {
                 choice_row(ui, "Operation", "sw_op", operation, &OP_LABELS);
             });
+            extra_options(ui, "sweep_options", &mut d.extra, &[("Tangent Chain", "tangent_chain")]);
         }
         k @ Kind::Move { .. } => {
             enter |= crate::dialogs_move::rows(ui, k);
