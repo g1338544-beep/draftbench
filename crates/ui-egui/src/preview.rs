@@ -55,6 +55,8 @@ pub struct SketchPreview {
     pub sketch: std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
     pub curves: Vec<usize>,
     pub points: Vec<usize>,
+    /// New 3D curves (projected onto a surface, say): indices into the sketch's wires.
+    pub wires: Vec<usize>,
 }
 
 /// A computed preview: the scene to draw and the bodies it stands in for.
@@ -674,7 +676,19 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
                 .enumerate()
                 .filter_map(|(i, p)| if old_points.contains(p.id.as_str()) { None } else { Some(i) })
                 .collect::<Vec<_>>();
-            if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
+            let old_wires = old.into_iter().flat_map(|s| s.sketch.wires.iter().map(|w| w.id.as_str())).collect::<std::collections::HashSet<_>>();
+            let wires = sketch
+                .sketch
+                .wires
+                .iter()
+                .enumerate()
+                .filter_map(|(i, w)| if old_wires.contains(w.id.as_str()) { None } else { Some(i) })
+                .collect::<Vec<_>>();
+            if indices.is_empty() && points.is_empty() && wires.is_empty() {
+                None
+            } else {
+                Some(SketchPreview { sketch: sketch.clone(), curves: indices, points, wires })
+            }
         })
         .collect();
     Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
@@ -812,6 +826,14 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
         for index in &preview.curves {
             crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, &mut budget);
             curves += 1;
+        }
+        for index in &preview.wires {
+            let line: Vec<egui::Pos2> =
+                sketch.sketch.wires.get(*index).into_iter().flat_map(|w| w.pts.iter()).take(20_000).filter_map(|p| proj.to_screen(*p)).collect();
+            if line.len() >= 2 {
+                painter.add(egui::Shape::line(line, stroke));
+                curves += 1;
+            }
         }
         for index in &preview.points {
             if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {

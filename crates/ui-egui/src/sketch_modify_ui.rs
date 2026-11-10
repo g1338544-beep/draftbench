@@ -127,7 +127,7 @@ pub enum Mod {
 
 impl Mod {
     pub fn previews(&self) -> bool {
-        matches!(self, Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. })
+        matches!(self, Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. } | Self::ProjectCurve { .. })
     }
 
     pub fn title(&self) -> &'static str {
@@ -905,8 +905,43 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             if let Some(body) = whole {
                 let state = app.session.world_state();
                 let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
-                if curves.is_empty() {
-                    return Err("Projecting model edges onto every face is not supported yet: pick sketch curves".into());
+                let direction = if *dir == 0 { "normal" } else { "sketch" };
+                // Model edges (alone or with curves): copied flat into a sketch facing the view, then that sketch's
+                // curves are projected onto every face of the body.
+                if !edges.is_empty() {
+                    let (right, up, _) = app.cam.basis();
+                    let origin = edges.first().map(|(_, p)| *p).unwrap_or(Vec3::ZERO);
+                    let plane = json!({
+                        "origin": [origin.x, origin.y, origin.z],
+                        "x_dir": [right.x, right.y, right.z],
+                        "y_dir": [up.x, up.y, up.z],
+                    });
+                    let mut refs: Vec<Value> = edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})).collect();
+                    if !curves.is_empty() {
+                        let picked = extra.get("tool_sketch").and_then(Value::as_u64);
+                        let sketch = match picked {
+                            Some(k) if holding.contains(&k) => k,
+                            _ if holding.len() == 1 => holding.first().copied().ok_or("pick the curves in the viewport")?,
+                            _ => return Err("Pick sketch curves from one sketch".into()),
+                        };
+                        refs.extend(curves.iter().map(|c| json!({"sketch": sketch, "curve": c})));
+                    }
+                    let n = state.sketches.len() + 1;
+                    let source = format!("Projection source {n}");
+                    let mut steps = Vec::new();
+                    if app.session.active_sketch.is_some() {
+                        steps.push(("sketch.finish".to_string(), json!({})));
+                    }
+                    steps.push(("sketch.create".to_string(), json!({"plane": plane.clone(), "name": source})));
+                    steps.push(("sketch.project".to_string(), json!({"refs": refs})));
+                    steps.push(("sketch.finish".to_string(), json!({})));
+                    steps.push(("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}")})));
+                    steps.push((
+                        "sketch.project_to_surface".to_string(),
+                        json!({"curves": [{"sketch": source}], "body": body, "all_faces": true, "direction": direction, "associative": associative}),
+                    ));
+                    steps.push(("sketch.finish".to_string(), json!({})));
+                    return Ok(steps);
                 }
                 let picked = extra.get("tool_sketch").and_then(Value::as_u64);
                 let sketch = match picked {
@@ -915,7 +950,6 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                     _ => return Err("Pick curves from one sketch".into()),
                 };
                 let list: Vec<Value> = curves.iter().map(|c| json!({"sketch": sketch, "curve": c})).collect();
-                let direction = if *dir == 0 { "normal" } else { "sketch" };
                 let project = json!({"curves": list, "body": body, "all_faces": true, "direction": direction, "associative": associative});
                 let open = app.session.active_sketch.is_some();
                 if open {
