@@ -608,6 +608,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     export(app, "step");
                     close = true;
                 }
+                if item_if(ui, "Export IGES…", "", "export", shown) {
+                    export(app, "igs");
+                    close = true;
+                }
                 if item_if(ui, app.tr_label("Export Current View as DXF…"), "", "export", shown) {
                     app.start("file.export_view_dxf");
                     close = true;
@@ -2596,7 +2600,7 @@ mod home_tests {
             let name = if cmd { format!("Ctrl+{key}") } else { key.to_string() };
             actions.push((name, Box::new(move |h| drop(h.call("ui.key", json!({"key": key, "cmd": cmd}))))));
         }
-        for item in ["Insert STEP…", "Insert Mesh…", "Save", "Save As…", "Export STL…", "Export STEP…", "Export 3MF…", "Export OBJ…", "Export URDF…"]
+        for item in ["Insert STEP…", "Insert Mesh…", "Save", "Save As…", "Export STL…", "Export STEP…", "Export IGES…", "Export 3MF…", "Export OBJ…", "Export URDF…"]
         {
             actions.push((
                 format!("File › {item}"),
