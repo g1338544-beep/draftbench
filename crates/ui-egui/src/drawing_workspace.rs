@@ -3,7 +3,7 @@
 //! The sheet is computed on request (entering, or Update), never every frame.
 
 use crate::ui_kit::{Container, Edge, Surface};
-use egui::{Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
+use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::Vec3;
 use solidcraft_engine::render::Camera;
@@ -358,6 +358,10 @@ pub struct State {
     sec_tool: Option<Vec<Pos2>>,
     /// The stepped section tool: the points of the bending cutting line so far.
     sec_poly: Option<Vec<Pos2>>,
+    /// The canvas size and the camera (target x, y, distance) of the last fit of the sheet: when the canvas
+    /// changes size (the side panels settle after entering Drawing) and the view has not been moved since,
+    /// the sheet is fitted again so it never hangs over the canvas edge.
+    fitted: Option<(Vec2, [f64; 3])>,
     /// A phone shows the settings panel only when asked.
     panel_open: Option<bool>,
     /// Whether the screen is a phone's (set each frame).
@@ -565,6 +569,7 @@ impl Default for State {
             mark_mode: 0,
             sec_tool: None,
             sec_poly: None,
+            fitted: None,
             panel_open: None,
             phone: false,
             det_tool: None,
@@ -3673,7 +3678,7 @@ fn orient_window(app: &mut SolveApp, ctx: &egui::Context) {
 pub fn fit(app: &mut SolveApp) {
     let (w, h) = app.drawing.sheet.as_ref().map(|s| (s.width, s.height)).unwrap_or((420.0, 297.0));
     let rect = app.viewport.rect.map(|r| r.size()).unwrap_or(vec2(1000.0, 700.0));
-    let aspect = (rect.x / rect.y.max(1.0)) as f64;
+    let aspect = f64::from(rect.x / rect.y.max(1.0));
     // Ortho half-height is 0.4 × distance; leave a margin around the paper.
     let need_h = f64::from(h) * 0.5;
     let need_w = f64::from(w) * 0.5 / aspect.max(0.1);
@@ -3687,6 +3692,7 @@ pub fn fit(app: &mut SolveApp) {
         up: solidcraft_engine::render::UpAxis::Z,
     };
     app.cancel_view_animation();
+    app.drawing.fitted = Some((rect, [app.cam.target.x, app.cam.target.y, app.cam.distance]));
 }
 
 pub fn enter(app: &mut SolveApp) -> Result<(), String> {
@@ -4316,6 +4322,15 @@ fn sheet_map(app: &SolveApp, rect: Rect, extent: f32) -> Option<Map> {
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
+    // The canvas changed size since the sheet was fitted and the view was left alone: fit it again.
+    if let Some((size, cam)) = app.drawing.fitted
+        && ((size.x - rect.width()).abs() > 2.0 || (size.y - rect.height()).abs() > 2.0)
+        && (app.cam.target.x - cam[0]).abs() < 1e-6
+        && (app.cam.target.y - cam[1]).abs() < 1e-6
+        && (app.cam.distance - cam[2]).abs() < 1e-6
+    {
+        fit(app);
+    }
     crate::viewport::refresh_layout(app, ui.ctx().pixels_per_point());
     let response = ui.interact(rect, ui.id().with("drawing_sheet"), Sense::click_and_drag());
     let painter = ui.painter_at(rect);
@@ -7718,9 +7733,11 @@ fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
     for (p, id) in pages.iter().zip(&ids) {
         let pictures: String = (0..p.images.len()).map(|k| format!("/Im{k} {} 0 R ", id + 2 + 2 * k)).collect();
         // The content is in mm. The pictures go first, under the lines, in the same units (a picture on top hid the lines).
+        // Millimetres to points, like the lines' own scale: without it the pictures came out 2.8 times too small, in the corner.
         let mut content = String::new();
+        let mm = 72.0 / 25.4;
         for (k, (_, [x, y, w, h])) in p.images.iter().enumerate() {
-            content.push_str(&format!("q {w:.3} 0 0 {h:.3} {x:.3} {y:.3} cm /Im{k} Do Q\n"));
+            content.push_str(&format!("q {mm:.5} 0 0 {mm:.5} 0 0 cm {w:.3} 0 0 {h:.3} {x:.3} {y:.3} cm /Im{k} Do Q\n"));
         }
         content.push_str(&p.content);
         object(
@@ -8179,5 +8196,15 @@ mod picture_size_tests {
         assert_eq!((w, h), (250, 188));
         let (w, h) = picture_size(f32::NAN, f32::NAN);
         assert!(w >= 8 && h >= 8 && w <= 2400 && h <= 2400);
+    }
+
+    /// A colour picture lands on the paper where its view is: its millimetres are scaled to points like the lines.
+    #[test]
+    fn pdf_pictures_are_scaled_from_millimetres_like_the_lines() {
+        let pic: Picture = std::sync::Arc::new((vec![255; 4 * 4], 2, 2));
+        let page = PdfPage { content: String::new(), w: 595.0, h: 842.0, images: vec![(pic, [10.0, 20.0, 50.0, 40.0])] };
+        let bytes = pdf_document(&[page]);
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("q 2.83465 0 0 2.83465 0 0 cm 50.000 0 0 40.000 10.000 20.000 cm /Im0 Do Q"), "{text}");
     }
 }
