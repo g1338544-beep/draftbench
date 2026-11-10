@@ -641,8 +641,8 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.slot.center_point" => "Slot: click the centre, an arc centre, then the width",
             "sketch.slot.arc_three_point" => "Arc slot: click start, a point on the arc, the end, then the width",
             "sketch.slot.arc_center" => "Arc slot: click the centre, the start, the end, then the width",
-            "sketch.spline.fit_point" => "Spline: click fit points; click the start to close smoothly, or right-click to finish",
-            "sketch.spline.control_point" | "sketch.spline.control_point_5" => "Control point spline: click control points; right-click to finish",
+            "sketch.spline.fit_point" => "Spline: click fit points; click the start to close smoothly; double-click the last point or right-click to finish",
+            "sketch.spline.control_point" | "sketch.spline.control_point_5" => "Control point spline: click control points; double-click the last point or right-click to finish",
             "sketch.text" => "Text: click where the text starts",
             "sketch.edit_text" => "Edit Text: click a letter interior or outline",
             "sketch.blend_curve" => "Blend curve: click the ends of two curves",
@@ -1015,6 +1015,15 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
         app.set_status(error, true);
+        return;
+    }
+    // A spline's second click on the same spot (a double-click on its last point) ends it: the same
+    // point twice would otherwise make a zero-length span the spline cannot be built through.
+    if n == 0 && tool.pts.last().is_some_and(|last| last.0.dist(p.0) < 1e-6) {
+        if tool.pts.len() >= 2 {
+            run_points(app, tool);
+            tool.pts.clear();
+        }
         return;
     }
     tool.pts.push(p);

@@ -88,3 +88,17 @@ fn a_short_drag_starts_a_rectangle_circle_or_polygon_by_clicks() {
         assert!(on_shape, "{command}: the second click wasn't where it was let go");
     }
 }
+
+#[test]
+fn a_spline_ends_on_a_second_click_at_its_last_point() {
+    for command in ["sketch.spline.fit_point", "sketch.spline.control_point"] {
+        let mut h = harness(command);
+        for at in [[-20.0, 0.0], [0.0, 10.0], [20.0, 0.0]] {
+            moving_click(&mut h, at, 12.0);
+        }
+        let p = h.call("ui.at", json!({"sketch":[20.0, 0.0]}))["result"].clone();
+        h.call("ui.click", json!({"x":p[0],"y":p[1]}));
+        h.settle();
+        assert!(curves(&h) > 0, "{command}: the double-click drew nothing; {:?}", h.app.status);
+    }
+}
