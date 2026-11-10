@@ -3,10 +3,10 @@ use egui::{Rect, pos2, vec2};
 use solidcraft_engine::geom::{Aabb3, Vec3};
 use solidcraft_engine::render::Camera;
 
-#[derive(Clone, Debug)]
 /// Buttons in the navigation bar (viewport::nav_bar); each visual style is a button of its own.
 pub(crate) const NAV_BUTTONS: f32 = 13.0;
 
+#[derive(Clone, Debug)]
 pub(crate) struct Layout {
     pub viewport: Rect,
     pub drawable: Rect,
