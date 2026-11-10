@@ -4284,7 +4284,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     }
     let t = Tokens::get();
-    let items: [(&str, &str); 10] = [
+    let items: [(&str, &str); 13] = [
         (
             "orbit",
             if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
@@ -4304,7 +4304,10 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ("lookat", "Look At the selected face or plane (or the active sketch)"),
         ("home", "Home view"),
         ("perspective", "Perspective / orthographic"),
-        ("style", "Visual style: shaded with edges, shaded, wireframe, shaded with hidden edges"),
+        ("style0", "Shaded with edges"),
+        ("style1", "Shaded"),
+        ("style2", "Wireframe"),
+        ("style3", "Shaded with hidden edges"),
         ("settings", "View settings: grid, ground shadow, ambient occlusion, agent cursor"),
     ];
     let menu_id = ui.id().with("nav_view_menu");
@@ -4328,7 +4331,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     painter.set_opacity(if active || app.preferences.navigator_style == crate::prefs::NavigatorStyle::Axes { 1.0 } else { 0.45 });
     let surface = Container::new(ui.ctx(), Surface::Navigation).frame(ui.ctx(), t.overlay, crate::frame::Side::Left);
     painter.add(surface.paint(bar.shrink(surface.stroke.width)));
-    let columns = ((bar.width() - 10.0) / 30.0).round().clamp(1.0, 10.0) as usize;
+    let columns = ((bar.width() - 10.0) / 30.0).round().clamp(1.0, crate::viewport_layout::NAV_BUTTONS) as usize;
     for (i, (icon, tip)) in items.iter().enumerate() {
         let br = Rect::from_min_size(
             pos2(bar.left() + 5.0 + (i % columns) as f32 * 30.0, bar.top() + 2.0 + (i / columns) as f32 * 30.0),
@@ -4342,12 +4345,17 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             "perspective" => app.ui.perspective,
             "settings" => menu_open,
             "spin" => app.viewport.spin,
+            "style0" | "style1" | "style2" | "style3" => icon.strip_prefix("style").and_then(|n| n.parse::<u8>().ok()) == Some(app.ui.visual_style),
             _ => false,
         };
         if active || resp.hovered() {
             painter.rect_filled(br, t.radius_sm, if active { t.accent_soft } else { t.hover });
         }
-        icons::paint_icon(&painter, br.shrink(4.0), icon, f32::from(t.icon.a()) / 255.0);
+        if let Some(style) = icon.strip_prefix("style").and_then(|n| n.parse::<u8>().ok()) {
+            style_glyph(&painter, br.shrink(6.0), style, t.icon);
+        } else {
+            icons::paint_icon(&painter, br.shrink(4.0), icon, f32::from(t.icon.a()) / 255.0);
+        }
         if resp.on_hover_text(*tip).clicked() {
             let toggle = |m: NavMode, cur: Option<NavMode>| if cur == Some(m) { None } else { Some(m) };
             match *icon {
@@ -4361,7 +4369,10 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 }
                 "home" => app.animate_view("home"),
                 "lookat" => look_at_selection(app),
-                "style" => app.ui.visual_style = (app.ui.visual_style + 1) % 4,
+                "style0" => app.ui.visual_style = 0,
+                "style1" => app.ui.visual_style = 1,
+                "style2" => app.ui.visual_style = 2,
+                "style3" => app.ui.visual_style = 3,
                 "perspective" => app.ui.perspective = !app.ui.perspective,
                 _ => menu_open = !menu_open,
             }
@@ -4374,6 +4385,47 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         }
     }
     ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
+}
+
+/// A small cube drawn for one visual style (0 shaded with edges, 1 shaded, 2 wireframe, 3 shaded with
+/// hidden edges). Drawn in code: it is a few lines, not artwork.
+fn style_glyph(painter: &egui::Painter, r: Rect, style: u8, ink: egui::Color32) {
+    let c = r.center();
+    let k = r.width().min(r.height()) * 0.5;
+    let p = |x: f32, y: f32| pos2(c.x + x * k, c.y + y * k);
+    let top = [p(0.0, -1.0), p(0.87, -0.5), p(0.0, 0.0), p(-0.87, -0.5)];
+    let left = [p(-0.87, -0.5), p(0.0, 0.0), p(0.0, 1.0), p(-0.87, 0.5)];
+    let right = [p(0.0, 0.0), p(0.87, -0.5), p(0.87, 0.5), p(0.0, 1.0)];
+    let faint = ink.gamma_multiply(0.45);
+    let line = egui::Stroke::new(1.2, ink);
+    if style != 2 {
+        let fill = |shade: f32| ink.gamma_multiply(shade);
+        for (quad, shade) in [(top, 0.35), (left, 0.6), (right, 0.8)] {
+            painter.add(egui::Shape::convex_polygon(quad.to_vec(), fill(shade), if style == 0 { line } else { egui::Stroke::NONE }));
+        }
+    } else {
+        for quad in [top, left, right] {
+            painter.add(egui::Shape::closed_line(quad.to_vec(), line));
+        }
+        // The back edges, seen through.
+        for (a, b) in [(p(0.0, 0.0), p(0.0, 1.0))] {
+            painter.line_segment([a, b], egui::Stroke::new(1.0, faint));
+        }
+    }
+    if style == 3 {
+        // Hidden edges: the three edges behind, dashed.
+        let back = p(0.0, -0.0);
+        for to in [p(-0.87, 0.5), p(0.87, 0.5), p(0.0, -1.0)] {
+            let n = 4;
+            for i in 0..n {
+                if i % 2 == 0 {
+                    let a = back + (to - back) * (i as f32 / n as f32);
+                    let b = back + (to - back) * ((i + 1) as f32 / n as f32);
+                    painter.line_segment([a, b], egui::Stroke::new(1.0, faint));
+                }
+            }
+        }
+    }
 }
 
 /// The View settings above the navigation bar's last button: grid, ground shadow and the agent

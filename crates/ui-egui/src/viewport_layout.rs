@@ -4,6 +4,9 @@ use solidcraft_engine::geom::{Aabb3, Vec3};
 use solidcraft_engine::render::Camera;
 
 #[derive(Clone, Debug)]
+/// Buttons in the navigation bar (viewport::nav_bar); each visual style is a button of its own.
+pub(crate) const NAV_BUTTONS: f32 = 13.0;
+
 pub(crate) struct Layout {
     pub viewport: Rect,
     pub drawable: Rect,
@@ -59,8 +62,8 @@ impl Layout {
             Rect::NOTHING
         };
         let nav_space = content;
-        let columns = ((nav_space.width() - 10.0) / 30.0).floor().clamp(1.0, 10.0);
-        let nav_height = (10.0 / columns).ceil() * 30.0;
+        let columns = ((nav_space.width() - 10.0) / 30.0).floor().clamp(1.0, NAV_BUTTONS);
+        let nav_height = (NAV_BUTTONS / columns).ceil() * 30.0;
         let navigation = if nav_space.width() >= columns * 30.0 + 10.0 && nav_space.height() >= nav_height + 7.0 {
             Rect::from_center_size(pos2(nav_space.center().x, nav_space.bottom() - nav_height * 0.5 - 7.0), vec2(columns * 30.0 + 10.0, nav_height))
         } else {
