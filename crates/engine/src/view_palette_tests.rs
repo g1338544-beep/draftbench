@@ -219,3 +219,16 @@ fn a_see_through_appearance_reaches_the_scene() {
     let sc = scene(&s, &cam);
     assert_eq!(sc.meshes.first().map(|m| m.opacity), Some(1.0));
 }
+
+/// An open sketch has its own grid, which its Sketch Grid option switches off (the option used to do nothing).
+#[test]
+fn a_sketch_can_hide_its_own_grid() {
+    let mut s = crate::Session::default();
+    assert!(s.execute("sketch.create", &json!({"plane": "XY"})).is_ok());
+    assert!(open_sketch_grid_plane(&s).is_some(), "on by default");
+    assert!(s.execute("sketch.options", &json!({"grid": false})).is_ok());
+    assert!(open_sketch_grid_plane(&s).is_none(), "off: no grid at all while the sketch is open");
+    assert!(open_sketch_plane(&s).is_some(), "the sketch itself is still open");
+    assert!(s.execute("sketch.options", &json!({"grid": true})).is_ok());
+    assert!(open_sketch_grid_plane(&s).is_some());
+}

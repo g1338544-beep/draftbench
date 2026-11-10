@@ -386,6 +386,13 @@ pub fn open_sketch_plane(s: &Session) -> Option<Plane> {
     s.world_state().sketch(id).map(|ss| ss.plane)
 }
 
+/// The plane of the sketch being edited, when its own grid is on (Sketch Grid in its options); None with no
+/// sketch open, or with the grid switched off for it.
+pub fn open_sketch_grid_plane(s: &Session) -> Option<Plane> {
+    let id = s.active_sketch?;
+    s.world_state().sketch(id).filter(|ss| !ss.sketch.view.hide_grid).map(|ss| ss.plane)
+}
+
 /// The grid on a sketch plane: its centre (the view target's foot on the plane, snapped to the
 /// major step in the plane's own axes) and the plane's x and y directions.
 pub fn sketch_grid_frame(plane: &Plane, target: Vec3, major: f64) -> (Vec3, Vec3, Vec3) {
@@ -480,7 +487,7 @@ fn build_scene(
         let ext = (cam.half_height() * 3.0 / major).ceil() * major;
         // Headless pictures keep the grid on the ground, the viewport's default; an open sketch
         // has its own plane's grid (world coordinates, no camera frame).
-        let (c, u, v, w): (Vec3, Vec3, Vec3, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_plane(s) {
+        let (c, u, v, w): (Vec3, Vec3, Vec3, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_grid_plane(s) {
             let (c, u, v) = sketch_grid_frame(&pl, cam.target, major);
             (c, u, v, Box::new(|p| p))
         } else {

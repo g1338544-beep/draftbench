@@ -225,7 +225,11 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
 /// The grid and the origin's axes as the window shows them (the Grid and Origin switches).
 pub(crate) fn window_guides(app: &SolveApp) -> solidcraft_engine::view::Guides {
     solidcraft_engine::view::Guides {
-        grid: app.session.active_sketch.is_some() || (app.ui.show_grid && !crate::viewport::active_view(app).hide_grid),
+        grid: if app.session.active_sketch.is_some() {
+            solidcraft_engine::view::open_sketch_grid_plane(&app.session).is_some()
+        } else {
+            app.ui.show_grid && !crate::viewport::active_view(app).hide_grid
+        },
         axes: app.origin_visible(),
     }
 }

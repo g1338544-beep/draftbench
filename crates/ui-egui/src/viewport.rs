@@ -929,8 +929,10 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let s = &app.session;
     let st = crate::open_meshing::shown_world(app);
     let mut fill_budget = 131_072;
-    let sketch_plane = solidcraft_engine::view::open_sketch_plane(s);
-    if sketch_plane.is_some() || (app.ui.show_grid && !active_view(app).hide_grid) {
+    // An open sketch has its own grid on its plane, unless its Sketch Grid option is off: then none at all.
+    let sketch_plane = solidcraft_engine::view::open_sketch_grid_plane(s);
+    let sketch_open = s.active_sketch.is_some();
+    if sketch_plane.is_some() || (!sketch_open && app.ui.show_grid && !active_view(app).hide_grid) {
         let (minor, major) = grid_step(app.cam.half_height());
         let mut ext = (app.cam.half_height() * 3.0 / major).ceil() * major;
         // An open sketch always has its grid on its own plane; otherwise the ground plane: XY with
