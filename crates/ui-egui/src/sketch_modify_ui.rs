@@ -900,7 +900,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 refs.extend(edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})));
                 let project = json!({"refs": refs});
                 return Ok(finish_first(vec![
-                    ("sketch.create".to_string(), json!({"plane": {"face": [point.x, point.y, point.z]}, "name": "Projected curves"})),
+                    ("sketch.create".to_string(), json!({"plane": {"face": [point.x, point.y, point.z], "body": body, "index": index}, "name": "Projected curves"})),
                     ("sketch.project".to_string(), project),
                     ("sketch.finish".to_string(), json!({})),
                 ]));

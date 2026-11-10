@@ -1354,7 +1354,7 @@ fn sweep_chain(s: &Session, sel: &Sel) -> Option<Vec<Sel>> {
         .active_sketch
         .and_then(|a| st.sketch(a))
         .filter(|ss| ss.sketch.curve_index(id).is_some())
-        .or_else(|| st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some()))?;
+        .or_else(|| st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some()).map(|v| &**v))?;
     let ci = ss.sketch.curve_index(id)?;
     let curves: Vec<Sel> = ss
         .sketch
