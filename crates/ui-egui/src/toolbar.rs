@@ -110,6 +110,14 @@ pub(crate) fn icon_rows(rows: u8) -> usize {
     usize::from(rows.clamp(1, 4))
 }
 
+/// The rows a panel of `count` icons uses in a grid of up to `rows`: the same number of columns, but
+/// spread evenly (5 icons in a 4-row grid make 3 + 2, not 4 + 1), so the panel looks balanced.
+pub(crate) fn panel_rows(count: usize, rows: usize) -> usize {
+    let rows = rows.max(1);
+    let cols = count.div_ceil(rows).max(1);
+    count.div_ceil(cols).clamp(1, rows)
+}
+
 fn icon_group_height(rows: usize) -> f32 {
     if rows <= 1 { ICON_GROUP_HEIGHT } else { 2.0 + rows as f32 * (ICON_ROW_HEIGHT + 1.0) + 24.0 }
 }
@@ -1176,8 +1184,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .collect();
                 // A grid of several rows: the panel's units are columns, as wide as their widest icon.
                 if icon_rows > 1 {
+                    let panel_rows = panel_rows(widths.len(), icon_rows);
                     widths = widths
-                        .chunks(icon_rows)
+                        .chunks(panel_rows)
                         .map(|column| {
                             let width = column.iter().map(|b| b.width).fold(0.0, f32::max);
                             ButtonSize { width, min_width: width }
@@ -1234,9 +1243,12 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .collect();
             let large: Vec<_> = shown.iter().copied().filter(|c| !gallery.iter().any(|g| g.id == c.id)).collect();
             // The panel's units are columns (one button each in a single row).
-            let large_cols = large.len().div_ceil(icon_rows);
+            let rows_here = panel_rows(large.len(), icon_rows);
+            let large_cols = large.len().div_ceil(rows_here);
             let drawn_cols = if collapsed { 0 } else { plan.shown.min(button_widths.len()) };
-            let drawn = (drawn_cols.min(large_cols) * icon_rows).min(large.len());
+            let drawn = (drawn_cols.min(large_cols) * rows_here).min(large.len());
+            // A panel with fewer rows than the grid sits in the middle of its height.
+            let row_inset = (icon_rows - rows_here) as f32 * (button_height + 1.0) / 2.0;
             // Buttons narrower than the panel's minimum width (a one-button panel) are centred.
             let buttons_width = button_widths.iter().take(drawn_cols).sum::<f32>() + drawn_cols.saturating_sub(1) as f32 * BUTTON_GAP;
             let inset = if drawn_cols == 0 { 0.0 } else { ((width - 8.0 - buttons_width) / 2.0).max(0.0).floor() };
@@ -1270,14 +1282,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             let mut button_x: f32;
             for (index, c) in large.iter().enumerate().take(drawn) {
-                let (column, row) = (index / icon_rows, index % icon_rows);
+                let (column, row) = (index / rows_here, index % rows_here);
                 let button_width = button_widths.get(column).copied().unwrap_or(40.0);
                 button_x = bx + button_widths.iter().take(column).sum::<f32>() + column as f32 * BUTTON_GAP;
                 // Only the family's default pin follows the part's choice. Explicitly pinned
                 // variants remain exact commands, including in customised toolbars.
                 let family = crate::sketch_families::family(c.id).filter(|f| sketch_create && f.commands.first().copied() == Some(c.id));
                 let selected = family.and_then(|f| app.preferences.sketch_variants.selected(f)).unwrap_or(c);
-                let whole = Rect::from_min_size(pos2(button_x, top + 2.0 + row as f32 * (button_height + 1.0)), vec2(button_width, button_height));
+                let whole = Rect::from_min_size(pos2(button_x, top + 2.0 + row_inset + row as f32 * (button_height + 1.0)), vec2(button_width, button_height));
                 let mut br = whole;
                 if family.is_some() {
                     if labels {
@@ -2124,6 +2136,18 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
 
 #[cfg(test)]
 mod header_report_tests {
+    #[test]
+    fn a_panel_spreads_its_icons_evenly_over_the_grid_rows() {
+        use super::panel_rows;
+        assert_eq!(panel_rows(5, 4), 3, "5 icons: 3 + 2, not 4 + 1");
+        assert_eq!(panel_rows(9, 4), 3);
+        assert_eq!(panel_rows(4, 4), 4);
+        assert_eq!(panel_rows(1, 4), 1);
+        assert_eq!(panel_rows(0, 4), 1);
+        assert_eq!(panel_rows(10, 1), 1);
+        assert!((1..=40).all(|n| (1..=4).all(|r| panel_rows(n, r) <= r && panel_rows(n, r) * n.div_ceil(r) >= n)));
+    }
+
     use super::*;
 
     #[test]
