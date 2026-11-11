@@ -1038,6 +1038,37 @@ fn dropdown_arrow(painter: &egui::Painter, at: egui::Pos2, ink: Color32) {
     crate::ui_kit::dropdown_indicator(painter, Rect::from_center_size(at, vec2(10.0, 10.0)), ink);
 }
 
+/// The ribbon's bottom edge is a handle: dragged down it shows more rows of icons (up to 4), up
+/// fewer (down to 1), one row every `ICON_ROW_HEIGHT` of travel. Kept in the preferences.
+fn resize_rows(app: &mut SolveApp, ui: &egui::Ui, ribbon: Rect) {
+    let t = Tokens::get();
+    let edge = Rect::from_min_max(pos2(ribbon.left(), ribbon.bottom() - 4.0), pos2(ribbon.right(), ribbon.bottom() + 3.0));
+    let id = ui.id().with("ribbon_rows_handle");
+    let resp = ui.interact(edge, id, Sense::drag());
+    if resp.hovered() || resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        ui.painter().line_segment([edge.left_center(), edge.right_center()], Stroke::new(2.0, t.accent));
+    }
+    crate::scenario::publish_rect("ribbon:rows_handle", edge);
+    let pull = id.with("pull");
+    if resp.drag_started() {
+        ui.data_mut(|d| d.insert_temp(pull, 0.0f32));
+    }
+    if resp.dragged() {
+        let mut moved = ui.data(|d| d.get_temp::<f32>(pull)).unwrap_or(0.0) + resp.drag_delta().y;
+        let step = ICON_ROW_HEIGHT.max(8.0);
+        let rows = app.preferences.ribbon_icon_rows.clamp(1, 4);
+        if moved >= step && rows < 4 {
+            app.preferences.ribbon_icon_rows = rows + 1;
+            moved -= step;
+        } else if moved <= -step && rows > 1 {
+            app.preferences.ribbon_icon_rows = rows - 1;
+            moved += step;
+        }
+        ui.data_mut(|d| d.insert_temp(pull, moved.clamp(-step, step)));
+    }
+}
+
 pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     crate::workspace::sync_context(app);
@@ -1065,6 +1096,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let r = if floating { Rect::from_min_max(cards.workspace.min, cards.ribbon.max) } else { frame.outer_rect(ui.max_rect()) };
         let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(WORKSPACE_WIDTH, ribbon_height - 1.0)) };
         let ribbon_left = if floating { cards.ribbon.left() } else { ws.right() };
+        resize_rows(app, ui, Rect::from_min_max(r.left_top(), pos2(r.right(), r.top() + ribbon_height)));
         if floating {
             for card in [ws, cards.ribbon] {
                 let frame = Container::new(ui.ctx(), Surface::Chrome).frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
