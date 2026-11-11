@@ -398,7 +398,7 @@ preference_settings! {
     /// The display options a new sketch starts with (the last sketch's: grid, snap, what is shown).
     sketch_display: Option<solidcraft_engine::sketch::SketchView> = None, 1;
     /// Width of the model's edges on screen (logical pixels).
-    edge_width: f32 = 2.0, 1, accept(0.5..=5.0);
+    edge_width: f32 = 2.0, 1, accept(0.5..=8.0);
     /// Enter in a dialog previews the result first; Enter again applies it. (Off under test so the
     /// many tests that press Enter once keep applying.)
     enter_previews: bool = !cfg!(test), 1;
@@ -1552,7 +1552,7 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 ui_kit::slider(
                     ui,
                     &mut app.preferences.edge_width,
-                    0.5..=5.0,
+                    0.5..=8.0,
                     ui_kit::Slider { step: Some(0.1), format: |v| format!("{v:.1} px"), ..Default::default() },
                 );
             });

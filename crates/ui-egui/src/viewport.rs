@@ -4072,7 +4072,7 @@ static EDGE_WIDTH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::
 
 /// Draw the model's edges `px` logical pixels wide (kept within 0.5 to 5).
 pub(crate) fn set_edge_width(px: f32) {
-    let px = if px.is_finite() { px.clamp(0.5, 5.0) } else { DEFAULT_EDGE_WIDTH };
+    let px = if px.is_finite() { px.clamp(0.5, 8.0) } else { DEFAULT_EDGE_WIDTH };
     EDGE_WIDTH.store(px.to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -4341,7 +4341,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     }
     let t = Tokens::get();
-    let items: [(&str, &str); 13] = [
+    let items: [(&str, &str); 14] = [
         (
             "orbit",
             if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
@@ -4365,10 +4365,13 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ("style1", "Shaded"),
         ("style2", "Wireframe"),
         ("style3", "Shaded with hidden edges"),
+        ("appearance", "Part colour and line weight"),
         ("settings", "View settings: grid, ground shadow, ambient occlusion, agent cursor"),
     ];
     let menu_id = ui.id().with("nav_view_menu");
     let mut menu_open = ui.data(|d| d.get_temp::<bool>(menu_id)).unwrap_or(false);
+    let look_id = ui.id().with("nav_look_menu");
+    let mut look_open = ui.data(|d| d.get_temp::<bool>(look_id)).unwrap_or(false);
     let w = items.len() as f32 * 30.0 + 10.0;
     let bar = app
         .viewport
@@ -4401,6 +4404,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             "zoom" => app.viewport.nav == Some(NavMode::Zoom),
             "perspective" => app.ui.perspective,
             "settings" => menu_open,
+            "appearance" => look_open,
             "spin" => app.viewport.spin,
             "style0" | "style1" | "style2" | "style3" => icon.strip_prefix("style").and_then(|n| n.parse::<u8>().ok()) == Some(app.ui.visual_style),
             _ => false,
@@ -4410,6 +4414,12 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         }
         if let Some(style) = icon.strip_prefix("style").and_then(|n| n.parse::<u8>().ok()) {
             style_glyph(&painter, br.shrink(6.0), style, t.icon);
+        } else if *icon == "appearance" {
+            // The part colour as a swatch with a line under it as thick as the edges.
+            let sw = br.shrink(6.0);
+            let col = parse_hex_colour(&app.preferences.part_colour).map_or(t.body, |c| egui::Color32::from_rgb(c[0], c[1], c[2]));
+            painter.rect(Rect::from_min_size(sw.min, vec2(sw.width(), sw.height() - 5.0)), 2.0, col, Stroke::new(1.0, t.icon), egui::StrokeKind::Inside);
+            painter.line_segment([pos2(sw.left(), sw.bottom() - 1.0), pos2(sw.right(), sw.bottom() - 1.0)], Stroke::new(edge_width().min(4.0), t.icon));
         } else {
             icons::paint_icon(&painter, br.shrink(4.0), icon, f32::from(t.icon.a()) / 255.0);
         }
@@ -4431,7 +4441,20 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 "style2" => app.ui.visual_style = 2,
                 "style3" => app.ui.visual_style = 3,
                 "perspective" => app.ui.perspective = !app.ui.perspective,
-                _ => menu_open = !menu_open,
+                "appearance" => {
+                    look_open = !look_open;
+                    menu_open = false;
+                }
+                _ => {
+                    menu_open = !menu_open;
+                    look_open = false;
+                }
+            }
+        }
+        if *icon == "appearance" {
+            crate::scenario::publish_handle("nav:appearance", br.center());
+            if look_open {
+                look_open = look_menu(app, ui, br);
             }
         }
         if *icon == "settings" {
@@ -4442,6 +4465,105 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         }
     }
     ui.data_mut(|d| d.insert_temp(menu_id, menu_open));
+    ui.data_mut(|d| d.insert_temp(look_id, look_open));
+}
+
+/// Line weights offered in the 3D view, in millimetres as on a drawing (0.13 to 2): shown at
+/// about their printed size on screen (1 mm is 3.78 px at 96 dpi), at least half a pixel.
+pub(crate) const LINE_WEIGHTS_MM: [f32; 9] = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0];
+
+/// The screen width (px) for a line weight in millimetres.
+pub(crate) fn weight_px(mm: f32) -> f32 {
+    (mm * 96.0 / 25.4).clamp(0.5, 8.0)
+}
+
+/// Part colours to pick from at a click (a custom one is picked below them).
+const PART_SWATCHES: [[u8; 3]; 16] = [
+    [160, 178, 196],
+    [190, 196, 204],
+    [128, 136, 146],
+    [70, 78, 88],
+    [222, 214, 196],
+    [196, 160, 110],
+    [176, 122, 80],
+    [70, 120, 190],
+    [60, 150, 200],
+    [40, 150, 120],
+    [110, 170, 80],
+    [230, 190, 60],
+    [230, 130, 50],
+    [200, 70, 60],
+    [160, 90, 170],
+    [240, 240, 240],
+];
+
+/// The part colour and line weight popup of the 3D view (owner's request: in the view, not only
+/// in Preferences). Returns whether it stays open.
+fn look_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
+    let t = crate::theme::Tokens::get();
+    let child_popup_open = egui::Popup::is_any_open(ui.ctx());
+    let area = Container::new(ui.ctx(), Surface::Popup)
+        .area(egui::Id::new("sc_look_menu"))
+        .order(egui::Order::Foreground)
+        .pivot(Align2::RIGHT_BOTTOM)
+        .fixed_pos(button.right_top() - vec2(0.0, 6.0));
+    let r = area.show(ui.ctx(), |ui| {
+        Container::popup_frame(ui.style()).show(ui, |ui| {
+            ui.set_width(236.0);
+            ui.label(egui::RichText::new(crate::i18n::tr_label("Part colour")).semibold().color(t.text).size(t.font_caption));
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                for (k, c) in PART_SWATCHES.iter().enumerate() {
+                    let (r, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+                    let hex = format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+                    let chosen = app.preferences.part_colour.eq_ignore_ascii_case(&hex);
+                    ui.painter().rect(r, 4.0, egui::Color32::from_rgb(c[0], c[1], c[2]), Stroke::new(if chosen { 2.5 } else { 1.0 }, if chosen { t.accent } else { t.border }), egui::StrokeKind::Inside);
+                    crate::scenario::publish_handle(&format!("look:swatch:{k}"), r.center());
+                    if resp.on_hover_text(&hex).clicked() {
+                        app.preferences.part_colour = hex;
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(crate::i18n::tr_label("Custom"));
+                let mut rgb = parse_hex_colour(&app.preferences.part_colour).unwrap_or([160, 178, 196]);
+                if ui.color_edit_button_srgb(&mut rgb).changed() {
+                    app.preferences.part_colour = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+                }
+                if !app.preferences.part_colour.is_empty() && crate::ui_kit::button(ui, crate::i18n::tr_label("Theme"), crate::ui_kit::Button::Small).clicked() {
+                    app.preferences.part_colour.clear();
+                }
+            });
+            ui.separator();
+            ui.label(egui::RichText::new(crate::i18n::tr_label("Line weight")).semibold().color(t.text).size(t.font_caption));
+            for (k, mm) in LINE_WEIGHTS_MM.iter().enumerate() {
+                let px = weight_px(*mm);
+                let chosen = (app.preferences.edge_width - px).abs() < 0.05;
+                let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::click());
+                if chosen || resp.hovered() {
+                    ui.painter().rect_filled(r, 3.0, if chosen { t.accent_soft } else { t.hover });
+                }
+                ui.painter().text(r.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, format!("{mm:.2} mm"), egui::FontId::proportional(t.font_body), t.text);
+                ui.painter().line_segment([pos2(r.left() + 80.0, r.center().y), pos2(r.right() - 8.0, r.center().y)], Stroke::new(px, t.text));
+                crate::scenario::publish_handle(&format!("look:weight:{k}"), r.center());
+                if resp.clicked() {
+                    app.preferences.edge_width = px;
+                }
+            }
+            ui.separator();
+            let mut ec = parse_hex_colour(&app.preferences.edge_colour).unwrap_or([10, 12, 14]);
+            ui.horizontal(|ui| {
+                ui.label(crate::i18n::tr_label("Edge colour"));
+                if ui.color_edit_button_srgb(&mut ec).changed() {
+                    app.preferences.edge_colour = format!("#{:02x}{:02x}{:02x}", ec[0], ec[1], ec[2]);
+                }
+            });
+        });
+    });
+    let clicked_out = !child_popup_open
+        && ui.input(|i| i.pointer.any_pressed())
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !r.response.rect.contains(p) && !button.contains(p));
+    !clicked_out
 }
 
 /// A small cube drawn for one visual style (0 shaded with edges, 1 shaded, 2 wireframe, 3 shaded with
