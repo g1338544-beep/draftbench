@@ -473,7 +473,34 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
                 }
             }
         }
-        Sel::Vertex { body, point } => (body, SnapPt { at: *point, z: Vec3::Z, kind: SnapKind::Vertex, param: json!({"point": pt(*point)}) }),
+        Sel::Vertex { body, point } => {
+            let b = st.body(body)?;
+            let m = b.mesh();
+            let tol = (b.body.size() * 1e-4).max(1e-6);
+            let ends_here = |e: &Vec<Vec3>| e.first().is_some_and(|a| a.dist(*point) < tol) || e.last().is_some_and(|a| a.dist(*point) < tol);
+            // The seam point of a round edge (a hole's or a boss's rim) stands for the circle: a
+            // pick near the rim snaps to its centre, with the circle's axis, not to a point whose
+            // axis is just "up" (the owner's rod was stood across the cylinder that way).
+            let round = m.edges.iter().enumerate().find_map(|(i, e)| if ends_here(e) { circle_of(e).map(|cn| (i, cn)) } else { None });
+            if let Some((i, (c, n))) = round {
+                let faces = m.edge_faces.get(i).cloned().unwrap_or_default();
+                let out = faces.iter().filter_map(|f| face_normal_near(&m, *f, *point)).fold(Vec3::ZERO, |a, x| a + x);
+                let z = if out.dot(n) < 0.0 { -n } else { n };
+                (body, SnapPt { at: c, z, kind: SnapKind::CircleCenter, param: json!({"point": pt(c), "z": pt(z)}) })
+            } else {
+                // A corner: its axis points out of the material, along the faces' normals there.
+                let mut out = Vec3::ZERO;
+                for (i, e) in m.edges.iter().enumerate().filter(|(_, e)| ends_here(e)).take(16) {
+                    for f in m.edge_faces.get(i).cloned().unwrap_or_default() {
+                        if let Some(n) = face_normal_near(&m, f, *point) {
+                            out = out + n;
+                        }
+                    }
+                }
+                let z = out.normalized().unwrap_or(Vec3::Z);
+                (body, SnapPt { at: *point, z, kind: SnapKind::Vertex, param: json!({"point": pt(*point), "z": pt(z)}) })
+            }
+        }
         _ => return None,
     };
     if let (Some(occ), Value::Object(m)) = (occurrence_of_body(s, body), &mut snap.param) {

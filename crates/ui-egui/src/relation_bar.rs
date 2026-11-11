@@ -34,40 +34,54 @@ pub fn items(app: &SolveApp) -> Vec<Item> {
     all.into_iter().skip(start + 1).take_while(|i| i.id != "-" && !i.id.starts_with('#')).filter(|i| i.enabled).collect()
 }
 
-/// A sketch line and a model edge picked together (as in other CAD tools, a relation can be
+/// A sketch line, arc or circle and a model edge picked together (as in other CAD tools, a relation can be
 /// made to the part's own edges): the relations between two lines. Clicking one first projects
 /// the edge into the sketch (linked), then relates the line to it. Their params carry `edge`.
 fn edge_items(app: &SolveApp) -> Option<Vec<Item>> {
     use solidcraft_engine::Sel;
+    use solidcraft_engine::sketch::CurveKind;
     let sid = app.session.active_sketch?;
     let st = app.session.world_state();
     let ss = st.sketch(sid)?;
-    let (mut line, mut edge) = (None, None);
+    // (sketch curve id, it is a line); (model edge reference, the edge is round).
+    let (mut curve, mut edge): (Option<(String, bool)>, Option<(serde_json::Value, bool)>) = (None, None);
     for s in &app.session.selection {
         match s {
             Sel::SketchCurve { id } => {
-                let is_line = ss
-                    .sketch
-                    .curve_index(id)
-                    .and_then(|i| ss.sketch.curves.get(i))
-                    .is_some_and(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }));
-                if !is_line || line.is_some() {
+                let kind = ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i)).map(|c| c.kind.clone())?;
+                let line = matches!(kind, CurveKind::Line { .. });
+                let round = matches!(kind, CurveKind::Circle { .. } | CurveKind::Arc { .. });
+                if !(line || round) || curve.is_some() {
                     return None;
                 }
-                line = Some(id.clone());
+                curve = Some((id.clone(), line));
             }
-            Sel::Edge { body, point, .. } if edge.is_none() => edge = Some(serde_json::json!({"edge": [point.x, point.y, point.z], "body": body})),
+            Sel::Edge { body, index, point } if edge.is_none() => {
+                let round = st.body(body).and_then(|b| b.mesh().edges.get(*index).and_then(|e| crate::dialogs_assembly::circle_of(e))).is_some();
+                edge = Some((serde_json::json!({"edge": [point.x, point.y, point.z], "body": body}), round));
+            }
             _ => return None,
         }
     }
-    let (line, edge) = (line?, edge?);
-    let rel = |id: &str, label: &str| crate::context_menu::cmd(app, id, label).with(serde_json::json!({"a": line, "edge": edge}));
-    Some(vec![
-        rel("sketch.constraint.parallel", "Parallel"),
-        rel("sketch.constraint.perpendicular", "Perpendicular"),
-        rel("sketch.constraint.collinear", "Collinear"),
-        rel("sketch.constraint.equal", "Equal"),
-    ])
+    let ((a, line), (edge, round_edge)) = (curve?, edge?);
+    let rel = |id: &str, label: &str| crate::context_menu::cmd(app, id, label).with(serde_json::json!({"a": a, "edge": edge}));
+    Some(match (line, round_edge) {
+        // Two straight ones.
+        (true, false) => vec![
+            rel("sketch.constraint.parallel", "Parallel"),
+            rel("sketch.constraint.perpendicular", "Perpendicular"),
+            rel("sketch.constraint.collinear", "Collinear"),
+            rel("sketch.constraint.equal", "Equal"),
+        ],
+        // A line and a round edge, or an arc and a straight edge.
+        (true, true) | (false, false) => vec![rel("sketch.constraint.tangent", "Tangent")],
+        // Two round ones.
+        (false, true) => vec![
+            rel("sketch.constraint.tangent", "Tangent"),
+            rel("sketch.constraint.concentric", "Concentric"),
+            rel("sketch.constraint.equal", "Equal"),
+        ],
+    })
 }
 
 /// Project the picked model edge into the sketch, then relate the line to the projected line.
