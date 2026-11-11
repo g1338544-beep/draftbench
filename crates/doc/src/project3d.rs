@@ -134,10 +134,11 @@ pub(crate) fn onto_face_nearest(m: &Mesh, f: Option<u32>, pts: &[Vec3]) -> Vec<V
             (lo, hi)
         })
         .collect();
+    let normals = tri_normals(m, f);
     for p in dense {
-        let mut best: Option<(f64, Vec3)> = None;
-        for (t, (lo, hi)) in ts.iter().zip(&boxes) {
-            if let Some((bd, _)) = best {
+        let mut best: Option<(f64, Vec3, usize)> = None;
+        for (i, (t, (lo, hi))) in ts.iter().zip(&boxes).enumerate() {
+            if let Some((bd, _, _)) = best {
                 let d = Vec3::new((lo.x - p.x).max(p.x - hi.x).max(0.0), (lo.y - p.y).max(p.y - hi.y).max(0.0), (lo.z - p.z).max(p.z - hi.z).max(0.0));
                 if d.x * d.x + d.y * d.y + d.z * d.z >= bd * bd {
                     continue;
@@ -145,12 +146,12 @@ pub(crate) fn onto_face_nearest(m: &Mesh, f: Option<u32>, pts: &[Vec3]) -> Vec<V
             }
             let q = crate::project::closest_on_triangle(p, t[0], t[1], t[2]);
             let d = q.dist(p);
-            if best.is_none_or(|(bd, _)| d < bd) {
-                best = Some((d, q));
+            if best.is_none_or(|(bd, _, _)| d < bd) {
+                best = Some((d, q, i));
             }
         }
         match best {
-            Some((d, q)) if d <= size => cur.push(q),
+            Some((d, q, i)) if d <= size => cur.push(smooth_foot(p, q, i, &ts, &boxes, &normals, step)),
             _ => {
                 if cur.len() >= 2 {
                     out.push(std::mem::take(&mut cur));
@@ -164,6 +165,80 @@ pub(crate) fn onto_face_nearest(m: &Mesh, f: Option<u32>, pts: &[Vec3]) -> Vec<V
         out.push(cur);
     }
     out
+}
+
+/// The vertex normals of the triangles `tris` returns, in the same order (the flat normal where the
+/// mesh has none).
+fn tri_normals(m: &Mesh, face: Option<u32>) -> Vec<[Vec3; 3]> {
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, f)| face.is_none_or(|x| x == **f))
+        .filter_map(|(t, _)| {
+            let tri = m.tri(t)?;
+            let flat = (tri[1] - tri[0]).cross(tri[2] - tri[0]).normalized().unwrap_or(Vec3::Z);
+            let of = |i: u32| m.normals.get(i as usize).copied().and_then(|n| n.normalized()).unwrap_or(flat);
+            Some([of(t[0]), of(t[1]), of(t[2])])
+        })
+        .collect()
+}
+
+/// The foot point of `p` on the smooth surface the triangles stand for. The nearest point `q` of the
+/// flat triangles sticks to their edges and corners (a far point is nearest to an edge over a wide
+/// range), which makes a projected curve zigzag. So the surface normal there, blended from the
+/// corner normals, is followed from `p` back to the triangles a few times: the result moves evenly
+/// as `p` does.
+fn smooth_foot(p: Vec3, q: Vec3, tri: usize, ts: &[[Vec3; 3]], boxes: &[(Vec3, Vec3)], normals: &[[Vec3; 3]], step: f64) -> Vec3 {
+    let far = p.dist(q);
+    if !far.is_finite() || far < 1e-9 {
+        return q;
+    }
+    // Only the triangles near the first foot point can hold the smooth one.
+    let reach = far * 0.5 + step * 4.0;
+    let near: Vec<usize> = boxes
+        .iter()
+        .enumerate()
+        .filter(|(_, (lo, hi))| {
+            let d = Vec3::new((lo.x - q.x).max(q.x - hi.x).max(0.0), (lo.y - q.y).max(q.y - hi.y).max(0.0), (lo.z - q.z).max(q.z - hi.z).max(0.0));
+            d.x * d.x + d.y * d.y + d.z * d.z <= reach * reach
+        })
+        .map(|(i, _)| i)
+        .take(20_000)
+        .collect();
+    let (mut q, mut tri) = (q, tri);
+    for _ in 0..4 {
+        let (Some(t), Some(ns)) = (ts.get(tri), normals.get(tri)) else { break };
+        // The blended normal at q (its weights in the triangle).
+        let (e0, e1, e2) = (t[1] - t[0], t[2] - t[0], q - t[0]);
+        let (d00, d01, d11, d20, d21) = (e0.dot(e0), e0.dot(e1), e1.dot(e1), e2.dot(e0), e2.dot(e1));
+        let den = d00 * d11 - d01 * d01;
+        if den.abs() < 1e-18 {
+            break;
+        }
+        let v = ((d11 * d20 - d01 * d21) / den).clamp(0.0, 1.0);
+        let w = ((d00 * d21 - d01 * d20) / den).clamp(0.0, 1.0);
+        let u = (1.0 - v - w).clamp(0.0, 1.0);
+        let Some(n) = (ns[0] * u + ns[1] * v + ns[2] * w).normalized() else { break };
+        // Where the line through p along that normal meets the triangles, nearest the point so far.
+        let mut best: Option<(f64, Vec3, usize)> = None;
+        for &i in &near {
+            let Some(t) = ts.get(i) else { continue };
+            if let Some(k) = ray_hit(p, n, t) {
+                let hit = p + n * k;
+                let d = hit.dist(q);
+                if d.is_finite() && best.is_none_or(|(bd, _, _)| d < bd) {
+                    best = Some((d, hit, i));
+                }
+            }
+        }
+        let Some((moved, hit, i)) = best else { break };
+        q = hit;
+        tri = i;
+        if moved < step * 1e-3 {
+            break;
+        }
+    }
+    q
 }
 
 /// Segment where two triangles cross (None when they do not, or are coplanar).
@@ -525,5 +600,52 @@ fn link_polyline(g: &solidcraft_sketch::LinkGeom) -> Vec<Vec2> {
         }
         LinkGeom::Spline { ref pts, control, degree, periodic } => solidcraft_sketch::spline_polyline_mode(pts, control, degree, periodic),
         LinkGeom::Point(_) => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A coarse dome (radius 10, centre at the origin) with smooth corner normals.
+    fn dome() -> Mesh {
+        let (around, rings) = (16usize, 8usize);
+        let mut m = Mesh::default();
+        for r in 0..=rings {
+            let lat = std::f64::consts::FRAC_PI_2 * r as f64 / rings as f64;
+            for a in 0..around {
+                let lon = std::f64::consts::TAU * a as f64 / around as f64;
+                let n = Vec3::new(lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin());
+                m.positions.push(n * 10.0);
+                m.normals.push(n);
+            }
+        }
+        for r in 0..rings {
+            for a in 0..around {
+                let (i, j) = ((r * around + a) as u32, (r * around + (a + 1) % around) as u32);
+                let (k, l) = (i + around as u32, j + around as u32);
+                m.triangles.push([i, j, l]);
+                m.triangles.push([i, l, k]);
+                m.tri_face.extend([0, 0]);
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn a_curve_projected_normal_to_a_dome_does_not_zigzag_along_the_facets() {
+        let m = dome();
+        // A circle well above the dome: each point belongs on the dome straight below it towards the centre.
+        let ring: Vec<Vec3> = (0..=90).map(|i| std::f64::consts::TAU * i as f64 / 90.0).map(|t| Vec3::new(9.0 * t.cos(), 9.0 * t.sin(), 30.0)).collect();
+        let wires = onto_face_nearest(&m, None, &ring);
+        assert_eq!(wires.len(), 1, "one unbroken curve");
+        let want = Vec3::new(9.0, 0.0, 30.0).normalized().unwrap().z;
+        let mut worst: f64 = 0.0;
+        for q in &wires[0] {
+            let d = q.normalized().unwrap();
+            worst = worst.max((d.z - want).abs());
+        }
+        // Nearest points of the flat triangles wander between the rings (about 0.1 here); the smooth foot stays level.
+        assert!(worst < 0.03, "the curve keeps its height on the dome: off by {worst}");
     }
 }
