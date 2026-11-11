@@ -965,7 +965,9 @@ mod tests {
 
     #[test]
     fn bundled_faces_lead_every_family_and_keep_egui_fallbacks() {
+        // The bundled Thai face follows egui's own (Thai is drawn without a system font).
         let defaults = with_symbol_fallback(FontDefinitions::default());
+        let defaults = with_fallback(defaults.clone(), THAI_FALLBACK, THAI_BUNDLED.to_vec()).unwrap_or(defaults);
         let fonts = base_font_definitions();
         for ((name, weight), family) in WEIGHTS.into_iter().zip(sans_families()) {
             let list = &fonts.families[&family];

@@ -89,7 +89,7 @@ impl Tokens {
             surface_ink: Color32::from_rgb(164, 80, 0),
             surface_soft: Color32::from_rgb(251, 235, 216),
             mesh_fill: Color32::from_rgb(224, 178, 0),
-            mesh_ink: Color32::from_rgb(138, 109, 0),
+            mesh_ink: Color32::from_rgb(132, 104, 0),
             mesh_soft: Color32::from_rgb(255, 248, 220),
             form_fill: Color32::from_rgb(115, 73, 205),
             form_tab_ink: Color32::from_rgb(115, 73, 205),

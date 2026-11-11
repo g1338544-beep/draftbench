@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>AutoConstrain from datum</title>
-  <path d="M8 56H40M8 56V24" fill="none" stroke="#34465b" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="8" cy="56" r="5.8" fill="#ffffff"/><circle cx="8" cy="56" r="3.4" fill="#236ead"/><path d="M38 11Q39.6 24.4 53 26Q39.6 27.6 38 41Q36.4 27.6 23 26Q36.4 24.4 38 11Z" fill="#b9ddf8" stroke="#236ead" stroke-width="3.2" stroke-linejoin="round"/>
+  <path d="M8 56L40 56M8 56L8 24" fill="none" stroke="#34465b" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/><circle cx="8" cy="56" r="5.8" fill="#ffffff"/><circle cx="8" cy="56" r="3.4" fill="#236ead"/><path d="M38 11Q39.6 24.4 53 26Q39.6 27.6 38 41Q36.4 27.6 23 26Q36.4 24.4 38 11Z" fill="#b9ddf8" stroke="#236ead" stroke-width="3.2" stroke-linejoin="round"/>
 </svg>

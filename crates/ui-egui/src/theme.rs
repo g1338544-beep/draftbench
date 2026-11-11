@@ -809,7 +809,7 @@ mod tests {
         for (tab, light, dark) in [
             ("SKETCH", [0x057f45, 0x057f45, 0xedf7f1], [0x128d45, 0x46be78, 0x1f3b2b]),
             ("SURFACE", [0xa45000, 0xa45000, 0xfbebd8], [0xb26a14, 0xe0914a, 0x45331e]),
-            ("MESH", [0xe0b200, 0x8a6d00, 0xfff8dc], [0xc6a800, 0xd4b726, 0x41391a]),
+            ("MESH", [0xe0b200, 0x846800, 0xfff8dc], [0xc6a800, 0xd4b726, 0x41391a]),
             ("FORM", [0x7349cd, 0x7349cd, 0xeee8fa], [0x8a6fcc, 0xb39bee, 0x372f4f]),
             ("SHEET METAL", [0x1e6f96, 0x1e6f96, 0xe1f0f7], [0x2a7fa8, 0x4fb3d9, 0x1f3a47]),
             ("RENDER", [0xa8326e, 0xa8326e, 0xf8e6ef], [0xc8588f, 0xe074ae, 0x402336]),
@@ -821,8 +821,8 @@ mod tests {
             let accent = super::TabAccent::for_tab(&super::Tokens::light(), tab);
             assert_eq!(accent.ink != accent.color, tab == "MESH", "only light Mesh separates ink from fill");
         }
-        // These existing Model values intentionally take precedence over the board's proposal.
-        for (t, values) in [(super::Tokens::light(), [0x2678da, 0x1a507f, 0xd6e6fa]), (super::Tokens::dark(), [0x3a88ee, 0x9cc7f5, 0x2a466e])] {
+        // Model follows the owner's NX-like light theme (accent #236ead).
+        for (t, values) in [(super::Tokens::light(), [0x236ead, 0x1a507f, 0xdeeaf7]), (super::Tokens::dark(), [0x3a88ee, 0x9cc7f5, 0x2a466e])] {
             let [color, ink, soft] = values.map(rgb);
             assert_eq!(super::TabAccent::for_tab(&t, "MODEL"), super::TabAccent { color, ink, soft });
         }

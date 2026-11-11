@@ -339,8 +339,8 @@ mod tests {
         assert!(asked.borrow().is_empty(), "no file yet");
         h.app.dialog = None;
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
-        tick(&mut h.app, &h.ctx);
-        tick(&mut h.app, &h.ctx);
+        // The app's frame asks for the file once the sketch is open.
+        h.frames(2);
         assert_eq!(asked.borrow().last().cloned(), Some(vec!["dxf".to_string()]), "then the file");
     }
 

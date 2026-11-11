@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Transparency</title>
-  <rect x="8" y="8" width="30" height="30" fill="#b8c3cf" stroke="#34465b" stroke-width="3" stroke-linejoin="round"/><rect x="26" y="26" width="30" height="30" fill="#b9ddf8" stroke="#236ead" stroke-width="3"/><path d="M26 26H38V38H26Z" fill="#328bd3"/><path d="M26 26H38V38H26Z" fill="none" stroke="#34465b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <rect x="8" y="8" width="30" height="30" fill="#b8c3cf" stroke="#34465b" stroke-width="3" stroke-linejoin="round"/><rect x="26" y="26" width="30" height="30" fill="#b9ddf8" stroke="#236ead" stroke-width="3"/><path d="M26 26L38 26L38 38L26 38Z" fill="#328bd3"/><path d="M26 26L38 26L38 38L26 38Z" fill="none" stroke="#34465b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>
