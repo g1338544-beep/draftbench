@@ -20,7 +20,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("inspect.measure.length", "Simple Length", simple_length).icon("measure_length").noundo().params(SIMPLE_PARAMS),
     CommandSpec::new("inspect.measure.radius", "Simple Radius", simple_radius).icon("measure_radius").noundo().params(SIMPLE_PARAMS),
     CommandSpec::new("inspect.measure.diameter", "Simple Diameter", simple_diameter).icon("measure_diameter").noundo().params(SIMPLE_PARAMS),
-    CommandSpec::new("inspect.mass_properties", "Mass Properties", measure).at("SOLID", "INSPECT").icon("measure").noundo().params(
+    CommandSpec::new("inspect.mass_properties", "Mass Properties", measure).at("SOLID", "INSPECT").icon("mass_properties").noundo().params(
         "bodies?: [names] (default all). Volume, area, mass (g and kg), weight (N), centre of mass and the moments of inertia (kg·mm², about the centre of mass) of each body and in total, from each body's material",
     ),
     CommandSpec::new("document.inspect", "Inspect Design", inspect).icon("inspect").noundo().params("measure?: bool (include body measurements)"),
@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              appearance?: library name (appearance.library) | color: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1, default 1); \
              pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (requires color/appearance and opacity 1); omitted/null uses legacy scalar shading. Neither appearance nor color (or color: null): clear, so the face follows its body, the body its component, the component its material",
     ),
-    CommandSpec::new("appearance.opacity", "Transparency", appearance_opacity).at("SOLID", "MODIFY").icon("appearance").params(
+    CommandSpec::new("appearance.opacity", "Transparency", appearance_opacity).at("SOLID", "MODIFY").icon("transparency").params(
         "opacity: 0–1 (1 = solid, 0.4 = see-through); bodies?: [names]; faces?: [{body, point: [x,y,z] on the face}]. Changes only the transparency of the picked bodies or faces and keeps their colour",
     ),
     CommandSpec::new("appearance.library", "Appearance Library", appearance_library).icon("library")
