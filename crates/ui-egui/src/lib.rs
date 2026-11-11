@@ -1663,6 +1663,12 @@ impl SolveApp {
         viewport::set_viewport_bg(&self.preferences.viewport_bg);
         viewport::set_line_colours(&self.preferences.edge_colour, &self.preferences.sketch_colour);
         viewport::set_edge_width(self.preferences.edge_width);
+        // A new sketch starts with the display options the last one was left with, across runs.
+        match (&self.session.sketch_display, &self.preferences.sketch_display) {
+            (None, Some(saved)) => self.session.sketch_display = Some(saved.clone()),
+            (Some(now), saved) if saved.as_ref() != Some(now) => self.preferences.sketch_display = Some(now.clone()),
+            _ => {}
+        }
         viewport::set_part_colours(&self.preferences.part_colour, &self.preferences.selection_colour);
         let tone = [self.preferences.tone_hue, self.preferences.tone_saturation, self.preferences.tone_light];
         if !self.styled || theme::is_dark() != self.ui.dark || theme::vision() != self.preferences.color_vision || theme::tone() != tone {

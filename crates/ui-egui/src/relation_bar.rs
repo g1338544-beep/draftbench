@@ -26,9 +26,66 @@ pub fn items(app: &SolveApp) -> Vec<Item> {
     if app.session.active_sketch.is_none() || app.tool.is_some() || app.dialog.is_some() || app.params.is_some() {
         return Vec::new();
     }
+    if let Some(mixed) = edge_items(app) {
+        return mixed;
+    }
     let all = crate::context_menu::sketch_items_for_selection(app);
     let Some(start) = all.iter().position(|i| i.id == "#Constraints") else { return Vec::new() };
     all.into_iter().skip(start + 1).take_while(|i| i.id != "-" && !i.id.starts_with('#')).filter(|i| i.enabled).collect()
+}
+
+/// A sketch line and a model edge picked together (as in other CAD tools, a relation can be
+/// made to the part's own edges): the relations between two lines. Clicking one first projects
+/// the edge into the sketch (linked), then relates the line to it. Their params carry `edge`.
+fn edge_items(app: &SolveApp) -> Option<Vec<Item>> {
+    use solidcraft_engine::Sel;
+    let sid = app.session.active_sketch?;
+    let st = app.session.world_state();
+    let ss = st.sketch(sid)?;
+    let (mut line, mut edge) = (None, None);
+    for s in &app.session.selection {
+        match s {
+            Sel::SketchCurve { id } => {
+                let is_line = ss
+                    .sketch
+                    .curve_index(id)
+                    .and_then(|i| ss.sketch.curves.get(i))
+                    .is_some_and(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }));
+                if !is_line || line.is_some() {
+                    return None;
+                }
+                line = Some(id.clone());
+            }
+            Sel::Edge { body, point, .. } if edge.is_none() => edge = Some(serde_json::json!({"edge": [point.x, point.y, point.z], "body": body})),
+            _ => return None,
+        }
+    }
+    let (line, edge) = (line?, edge?);
+    let rel = |id: &str, label: &str| crate::context_menu::cmd(app, id, label).with(serde_json::json!({"a": line, "edge": edge}));
+    Some(vec![
+        rel("sketch.constraint.parallel", "Parallel"),
+        rel("sketch.constraint.perpendicular", "Perpendicular"),
+        rel("sketch.constraint.collinear", "Collinear"),
+        rel("sketch.constraint.equal", "Equal"),
+    ])
+}
+
+/// Project the picked model edge into the sketch, then relate the line to the projected line.
+fn relate_to_edge(app: &mut SolveApp, item: &Item) -> Result<(), String> {
+    let p = item.params.as_ref().ok_or("no parameters")?;
+    let edge = p.get("edge").cloned().ok_or("no edge")?;
+    let a = p.get("a").and_then(serde_json::Value::as_str).ok_or("no line")?.to_string();
+    let r = app.run("sketch.project", serde_json::json!({"refs": [edge]}))?;
+    let b = r
+        .get("created")
+        .and_then(|c| c.get("curves"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|c| c.first())
+        .and_then(serde_json::Value::as_str)
+        .ok_or("the edge did not project into the sketch")?
+        .to_string();
+    app.run(&item.id, serde_json::json!({"a": a, "b": b}))?;
+    Ok(())
 }
 
 /// A key for the selection, so the bar stays put while the same entities stay picked.
@@ -96,7 +153,13 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, area: Rect) {
         },
     );
     if let Some(item) = clicked {
-        crate::context_menu::run_item(app, &item, at);
+        if item.params.as_ref().is_some_and(|p| p.get("edge").is_some()) {
+            if let Err(e) = relate_to_edge(app, &item) {
+                app.set_status(e, true);
+            }
+        } else {
+            crate::context_menu::run_item(app, &item, at);
+        }
         ANCHOR.with(|a| *a.borrow_mut() = None);
     }
 }

@@ -729,6 +729,10 @@ fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneRef, interna
     s.doc.resolve_plane_in(&vals, &plane, 0, Some(&s.model.state()))?;
     let name = str_(p, "name");
     let mut fresh = Sketch::new();
+    // The display options the last sketch was left with (grid, snap, what is shown).
+    if let Some(v) = &s.sketch_display {
+        remembered_view(&mut fresh.view, v);
+    }
     if let Some(role) = str_(p, "role") {
         if !matches!(role, "curve" | "helper") {
             return Err(bad("sketch.create", "`role` must be `curve` or `helper`"));
@@ -2730,6 +2734,20 @@ fn drag_end(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The Sketch Palette options of a sketch, by their palette names (true = shown / on).
+/// Copy the display options a new sketch keeps from the last one: what is shown, grid, snap and
+/// slice; not its role, colour or 3D kind.
+fn remembered_view(to: &mut solidcraft_sketch::SketchView, from: &solidcraft_sketch::SketchView) {
+    to.hide_profile = from.hide_profile;
+    to.hide_points = from.hide_points;
+    to.hide_dimensions = from.hide_dimensions;
+    to.hide_constraints = from.hide_constraints;
+    to.hide_projected = from.hide_projected;
+    to.hide_construction = from.hide_construction;
+    to.hide_grid = from.hide_grid;
+    to.no_snap = from.no_snap;
+    to.slice = from.slice;
+}
+
 fn options_json(v: &solidcraft_sketch::SketchView) -> Value {
     json!({
         "show_profile": !v.hide_profile,
@@ -2786,8 +2804,13 @@ pub(super) fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
         put("snap", &mut v.no_snap, true);
         put("slice", &mut v.slice, false);
         put("sketch_3d", &mut v.three_d, false);
-        Ok(options_json(v))
+        Ok((options_json(v), v.clone()))
     })?;
+    let (v, view) = v;
+    // Remembered for the next new sketch (an ordinary one: not a projection's helper).
+    if view.role.is_empty() {
+        s.sketch_display = Some(view);
+    }
     Ok(json!({"options": v, "sketch": info}))
 }
 

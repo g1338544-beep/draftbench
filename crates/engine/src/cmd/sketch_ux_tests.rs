@@ -1625,3 +1625,25 @@ fn convert_entities_copies_a_model_edge_into_the_3d_sketch_in_place() {
     let fit = &sk.wires[sk.wire_index(&ids[0]).expect("wire")].fit;
     assert!(fit.first().expect("p").dist(a) < 1e-6 && fit.last().expect("p").dist(b) < 1e-6, "the copy lies where the edge is");
 }
+
+/// The display options a sketch is left with carry over to the next new sketch, also after
+/// `file.new`: the owner had to switch them again for every sketch.
+#[test]
+fn a_new_sketch_starts_with_the_last_sketchs_display_options() {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+    s.execute("sketch.options", &json!({"grid": false, "show_dimensions": false, "slice": true})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("sketch.create", &json!({"plane": "XZ"})).unwrap();
+    let o = s.execute("sketch.options", &json!({})).unwrap()["options"].clone();
+    assert_eq!(
+        (o["grid"].clone(), o["show_dimensions"].clone(), o["slice"].clone(), o["snap"].clone()),
+        (json!(false), json!(false), json!(true), json!(true)),
+        "{o}"
+    );
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("sketch.create", &json!({"plane": "YZ"})).unwrap();
+    let o = s.execute("sketch.options", &json!({})).unwrap()["options"].clone();
+    assert_eq!(o["grid"], json!(false), "kept across designs: {o}");
+}

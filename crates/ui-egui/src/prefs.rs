@@ -395,6 +395,8 @@ preference_settings! {
     /// At launch, offer the designs a closed or crashed app left unsaved (off: nothing is asked;
     /// the autosaves stay in the recovery folder for `doc.recovery_list` / `doc.recover`).
     offer_recovery: bool = false, 1 => check("Offer to recover unsaved designs at start");
+    /// The display options a new sketch starts with (the last sketch's: grid, snap, what is shown).
+    sketch_display: Option<solidcraft_engine::sketch::SketchView> = None, 1;
     /// Width of the model's edges on screen (logical pixels).
     edge_width: f32 = 2.0, 1, accept(0.5..=5.0);
     /// Enter in a dialog previews the result first; Enter again applies it. (Off under test so the

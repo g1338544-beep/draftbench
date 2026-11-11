@@ -79,6 +79,9 @@ thread_local! {
     /// The inference the cursor snapped to last (label, sketch point), for the hint.
     static SNAP: RefCell<Option<(&'static str, Vec2)>> = const { RefCell::new(None) };
     static PREV: Cell<Option<Vec2>> = const { Cell::new(None) };
+    /// Dotted guide lines the cursor is lined up along: from the point it lines up with to where it
+    /// snapped (sketch-plane coordinates).
+    static GUIDES: RefCell<Vec<(Vec2, Vec2)>> = const { RefCell::new(Vec::new()) };
     /// Curvature comb teeth (foot, tip) shown while the comb tool is active.
     static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// The image file a Canvas or Decal tool places.
@@ -432,6 +435,18 @@ pub fn refine_snap(
             return Some((plane.to_local(point), Some(format!("vertex:{},{},{}", point.x, point.y, point.z))));
         }
     }
+    // The middle of a model edge under the cursor, within a few pixels of it (a straight edge's
+    // midpoint, as for sketch lines below): the owner wanted to start lines from the middle of
+    // the part's edges.
+    for h in pick(app, proj, a) {
+        if let Hit::Edge { mid, .. } = h {
+            let q = plane.to_local(mid);
+            if proj.to_screen(plane.to_world(q)).is_some_and(|s| s.distance(a) < 10.0) {
+                SNAP.with(|s| *s.borrow_mut() = Some(("Mid", q)));
+                return Some((q, None));
+            }
+        }
+    }
     // The centre of a round model edge (a hole, a boss) under the cursor.
     for c in crate::sketch3d::circle_centres(app) {
         let q = plane.to_local(c);
@@ -487,6 +502,53 @@ pub fn refine_snap(
                 best = Some((d, "On", q));
                 mid_of = Some(format!("{}:{},{}", c.id, q.x, q.y));
             }
+        }
+    }
+    GUIDES.with(|g| g.borrow_mut().clear());
+    // Lined up with a corner, a midpoint or a centre (the sketch's own, or the part's): the cursor
+    // takes its x and/or y and a dotted guide shows from that point, so a point can be put level
+    // with a corner or straight above a hole's centre.
+    if !mid_only && best.is_none() {
+        let mut targets: Vec<Vec2> = Vec::new();
+        for i in 0..sk.points.len().min(400) {
+            if let Some(q) = sk.point(i) {
+                targets.push(q);
+            }
+        }
+        for (i, c) in sk.curves.iter().enumerate().take(400) {
+            if let solidcraft_engine::sketch::CurveKind::Line { .. } = c.kind
+                && let Some(solidcraft_engine::sketch::Shape::Line { a, b }) = sk.shape(i)
+            {
+                targets.push((a + b) * 0.5);
+            }
+        }
+        for q in model_points(app) {
+            targets.push(plane.to_local(q));
+        }
+        if let Some(prev) = prev {
+            targets.retain(|q| q.dist(prev) > 1e-9);
+        }
+        let near_x = targets
+            .iter()
+            .filter(|q| (q.x - lp.x).abs() < tol && (q.y - lp.y).abs() > tol)
+            .min_by(|a, b| (a.x - lp.x).abs().total_cmp(&(b.x - lp.x).abs()))
+            .copied();
+        let near_y = targets
+            .iter()
+            .filter(|q| (q.y - lp.y).abs() < tol && (q.x - lp.x).abs() > tol)
+            .min_by(|a, b| (a.y - lp.y).abs().total_cmp(&(b.y - lp.y).abs()))
+            .copied();
+        if near_x.is_some() || near_y.is_some() {
+            let step = solidcraft_engine::view::grid_step(app.cam.half_height()).0 / 10.0;
+            let g = |v: f64| (v / step).round() * step;
+            let at = Vec2::new(near_x.map_or(g(lp.x), |q| q.x), near_y.map_or(g(lp.y), |q| q.y));
+            GUIDES.with(|gd| {
+                let mut gd = gd.borrow_mut();
+                gd.extend(near_x.map(|q| (q, at)));
+                gd.extend(near_y.map(|q| (q, at)));
+            });
+            let d = near_x.map_or(f64::MAX, |q| (q.x - lp.x).abs()).min(near_y.map_or(f64::MAX, |q| (q.y - lp.y).abs()));
+            best = Some((d, "Align", at));
         }
     }
     if !mid_only
@@ -619,7 +681,12 @@ pub fn takes(id: &str, hit: &Hit) -> bool {
 
 fn mode(id: &str) -> Option<Mode> {
     Some(match id {
-        "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.convert_entities" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
+        "sketch.project"
+        | "sketch.intersect"
+        | "sketch.include_3d"
+        | "sketch.convert_entities"
+        | "sketch.fit_curves_to_section"
+        | "sketch.isoparametric_curve" => Mode::ModelRef,
         "inspect.curvature_comb" | "canvas.insert" | "canvas.decal" => Mode::ModelRef,
         "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.isocurve" | "inspect.continuity" | "inspect.mass_properties" => Mode::ModelRef,
         "sketch.trim" | "sketch.extend" | "sketch.break" => Mode::CurveAt,
@@ -958,7 +1025,8 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                     // In a 3D sketch a picked model edge is copied where it is (Convert Entities), not flattened onto
                     // the sketch plane (which would put it on the bottom face, out of sight).
                     let in_3d_edge = r.get("edge").is_some() && crate::sketch3d::active(app) && matches!(cmd, "sketch.project" | "sketch.include_3d");
-                    let result = if in_3d_edge { app.run("sketch.convert_entities", json!({"refs": [r]})) } else { app.run(cmd, json!({"refs": [r]})) };
+                    let result =
+                        if in_3d_edge { app.run("sketch.convert_entities", json!({"refs": [r]})) } else { app.run(cmd, json!({"refs": [r]})) };
                     if let Err(error) = result {
                         app.set_status(error, true);
                     }
@@ -1494,6 +1562,33 @@ fn glyph_anchors(sk: &solidcraft_engine::sketch::Sketch, k: &solidcraft_engine::
 }
 
 /// The inference label next to the snapped cursor (while a tool is active).
+/// The part's corners, the middles of its straight edges and its circle centres (visible bodies,
+/// capped): what a sketch point can line up with.
+fn model_points(app: &SolveApp) -> Vec<Vec3> {
+    let st = app.session.world_state();
+    let mut out: Vec<Vec3> = Vec::new();
+    for b in st.bodies.iter().take(40).filter(|b| app.session.body_visible(&b.name)) {
+        let m = b.mesh();
+        for e in m.edges.iter().take(3000) {
+            if out.len() >= 600 {
+                return out;
+            }
+            if let (Some(a), Some(z)) = (e.first(), e.last()) {
+                for p in [*a, *z] {
+                    if !out.iter().any(|o| o.dist(p) < 1e-6) {
+                        out.push(p);
+                    }
+                }
+                if e.len() == 2 {
+                    out.push((*a + *z) * 0.5);
+                }
+            }
+        }
+    }
+    out.extend(crate::sketch3d::circle_centres(app));
+    out
+}
+
 fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.tool.is_none() {
         return;
@@ -1503,6 +1598,15 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return };
     let Some(sp) = proj.to_screen(ss.plane.to_world(p)) else { return };
     let tk = crate::theme::Tokens::get();
+    // The guides the point is lined up along: dotted, from the corner or centre to the cursor.
+    GUIDES.with(|g| {
+        for (from, to) in g.borrow().iter() {
+            if let (Some(a), Some(b)) = (proj.to_screen(ss.plane.to_world(*from)), proj.to_screen(ss.plane.to_world(*to))) {
+                painter.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.2, tk.accent), 4.0, 4.0));
+                painter.circle_stroke(a, 3.5, Stroke::new(1.2, tk.accent));
+            }
+        }
+    });
     let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
     painter.rect_filled(r, 3.0, tk.accent_soft);
     painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(crate::theme::Tokens::get().font_micro), tk.text);

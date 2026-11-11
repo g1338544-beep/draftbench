@@ -249,6 +249,9 @@ pub struct Session {
     pub revision: u64,
     /// Project a face's edges into a sketch created on it (off by default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// The display options (grid, snap, slice, what is shown) the last sketch was left with: a new
+    /// sketch starts with them. A preference of the user's, kept across designs like `auto_project`.
+    pub sketch_display: Option<solidcraft_sketch::SketchView>,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -414,6 +417,7 @@ impl Session {
             log: Vec::new(),
             revision: 1,
             auto_project: false,
+            sketch_display: None,
             param_check: schema::ParamCheck::Off,
             active_component: 0,
             active_occurrence_path: None,
@@ -450,6 +454,7 @@ impl Session {
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
     pub fn replace_design(&mut self, fresh: Session) {
         let auto_project = self.auto_project;
+        let sketch_display = self.sketch_display.clone();
         let param_check = self.param_check;
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
@@ -457,6 +462,7 @@ impl Session {
         let next_checkpoint = self.next_checkpoint;
         *self = fresh;
         self.auto_project = auto_project;
+        self.sketch_display = sketch_display;
         self.param_check = param_check;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
@@ -947,6 +953,7 @@ impl Session {
             log: Vec::new(),
             revision: self.revision,
             auto_project: self.auto_project,
+            sketch_display: self.sketch_display.clone(),
             param_check: self.param_check,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
