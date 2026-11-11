@@ -479,12 +479,12 @@ preference_settings! {
     /// Which look the saved preferences were made for: preferences saved without it get the compact
     /// look (an icon grid, 85 % scale, free orbit) once, so a browser that saved the old defaults
     /// sees the new ones ([`lenient`]).
-    layout_version: u8 = 2, 0;
+    layout_version: u8 = 3, 0;
     /// Rows of small icons per ribbon panel (1 = the usual single row). From 2 up the ribbon is icon-only,
     /// each panel a grid of that many rows, so a tab with many commands fits without trimming.
     ribbon_icon_rows: u8 = 4, 0 => number("ui.ribbon_icon_rows", 1..=4);
     /// Interface scale (1 = 100 %).
-    ui_scale: f32 = 0.85, 0, accept(0.5..=2.5) => slider("ui.ui_scale", 0.5..=2.5, 0.05, |v| format!("{:.0} %", v * 100.0), "prefs:scale");
+    ui_scale: f32 = 1.0, 0, accept(0.5..=2.5) => slider("ui.ui_scale", 0.5..=2.5, 0.05, |v| format!("{:.0} %", v * 100.0), "prefs:scale");
     /// Colour of the icons (`#rrggbb`); empty keeps the built-in green. Surface, Sketch and the other
     /// semantic accents keep their own colours.
     icon_color: String = String::new(), 0;
@@ -2209,7 +2209,15 @@ pub fn lenient(saved: &serde_json::Value) -> Prefs {
     if saved.as_object().is_some_and(|o| !o.is_empty()) && version.is_none_or(|v| v < 2) && p.theme == "dark" {
         p.theme = "light".into();
     }
-    p.layout_version = 2;
+    // Saved before the CAD-style light look (version 2 or older): light theme and a full-size
+    // interface, once (the owner found the dark, 85 % interface too dark and small).
+    if saved.as_object().is_some_and(|o| !o.is_empty()) && version.is_none_or(|v| v < 3) {
+        p.theme = "light".into();
+        if p.ui_scale < 1.0 {
+            p.ui_scale = 1.0;
+        }
+    }
+    p.layout_version = 3;
     p
 }
 

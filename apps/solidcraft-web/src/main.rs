@@ -384,6 +384,10 @@ mod web {
 
         /// Offer the autosave an earlier session left.
         fn recovery_prompt(&mut self, ctx: &egui::Context) {
+            // Only when asked for (Preferences): the autosave stays for the next time.
+            if !self.app.preferences.offer_recovery {
+                return;
+            }
             let Some((name, path)) = self.files.recovery.borrow().clone() else { return };
             let mut answer = None;
             let _ = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::new("sc_browser_recovery"), "restore", "Recover unsaved work?")

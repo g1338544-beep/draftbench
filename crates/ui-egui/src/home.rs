@@ -817,15 +817,11 @@ fn tinted_card(ui: &mut egui::Ui, pic: Pic, name: &str, name_en: &str, sub: &str
     let p = ui.painter().with_clip_rect(egui::Rect::from_min_max(egui::pos2(r.left() + 8.0, ty), egui::pos2(r.right() - 8.0, r.bottom())));
     p.text(egui::pos2(r.left() + 12.0, ty), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(t.font_heading), t.text);
     p.text(egui::pos2(r.left() + 12.0, ty + 20.0), egui::Align2::LEFT_TOP, sub, egui::FontId::proportional(t.font_caption), t.text_dim);
-    // The kind of design as a small tag in the card's colour.
-    let tag = p.layout_no_wrap(
-        crate::i18n::tr_label(sample_kind(name_en)).to_string(),
-        egui::FontId::proportional(t.font_caption),
-        palette("active-3", accent),
-    );
+    // The kind of design as a small tag: white on the card's strong colour, readable in both themes.
+    let tag = p.layout_no_wrap(crate::i18n::tr_label(sample_kind(name_en)).to_string(), egui::FontId::proportional(t.font_caption), Color32::WHITE);
     let tr = egui::Rect::from_min_size(egui::pos2(r.left() + 12.0, r.bottom() - 26.0), tag.size() + vec2(14.0, 6.0));
-    p.rect_filled(tr, CornerRadius::same(8), palette("active-1", accent).gamma_multiply(0.6));
-    p.galley(tr.min + vec2(7.0, 3.0), tag, palette("active-3", accent));
+    p.rect_filled(tr, CornerRadius::same(8), palette("active-3", accent));
+    p.galley(tr.min + vec2(7.0, 3.0), tag, Color32::WHITE);
     if hover {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
