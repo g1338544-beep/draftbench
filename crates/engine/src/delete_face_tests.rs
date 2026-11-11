@@ -45,13 +45,17 @@ fn delete_a_hole_through_the_selection() {
     assert!((volume(&mut s, "Plate") - 15000.0).abs() < 1e-3 * 15000.0, "{}", volume(&mut s, "Plate"));
 }
 
-/// A face whose neighbours can't close the gap is refused, and the design is unchanged.
+/// A face whose neighbours can't close the gap (a box's side) is still deleted (owner's request):
+/// the other five stay as an open surface body.
 #[test]
-fn a_box_face_cannot_be_deleted() {
+fn a_box_face_is_deleted_leaving_an_open_surface() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "B"}));
     let n = s.doc.features.len();
-    let e = s.execute("face.delete", &json!({"faces": [[5, 5, 10]]})).unwrap_err().to_string();
-    assert!(e.contains("Delete Face"), "{e}");
-    assert_eq!(s.doc.features.len(), n);
+    let r = run(&mut s, "face.delete", json!({"faces": [[5, 5, 10]]}));
+    assert!(r["feature"].is_u64(), "{r}");
+    assert_eq!(s.doc.features.len(), n + 1);
+    let st = s.world_state();
+    let b = st.body("B").expect("the body stays");
+    assert_eq!(b.body.face_count(), 5, "five faces left");
 }

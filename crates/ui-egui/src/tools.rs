@@ -313,6 +313,10 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             });
             // A part's edge or corner (not in the sketch yet): projected into the sketch first,
             // linked, then dimensioned like the sketch's own geometry, as in other CAD tools.
+            // The centre of a hole or boss of the part near the cursor: a fixed sketch point there.
+            if hit.is_none() {
+                hit = model_centre_point(app, proj, pos);
+            }
             if hit.is_none() {
                 hit = hits.iter().find_map(|h| match h {
                     Hit::Vertex { point, body } => project_for_dimension(app, json!({"vertex": [point.x, point.y, point.z], "body": body}), false),
@@ -367,6 +371,25 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     if !crate::sketch_text::editing(app) {
         app.tool = Some(tool);
     }
+}
+
+/// A part's circle centre (hole, boss) within a few pixels of `pos`, put into the active sketch as
+/// a fixed point for the dimension tool: the point's id.
+fn model_centre_point(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Option<(String, bool)> {
+    let sid = app.session.active_sketch?;
+    let plane = app.session.world_state().sketch(sid)?.plane;
+    let c = crate::sketch3d::circle_centres(app).into_iter().find(|c| proj.to_screen(*c).is_some_and(|s| s.distance(pos) < 9.0))?;
+    let q = plane.to_local(c);
+    let out = match app.run("sketch.point", json!({ "point": [q.x, q.y] })) {
+        Ok(v) => v,
+        Err(e) => {
+            app.set_status(e, true);
+            return None;
+        }
+    };
+    let id = out.get("created")?.get("points")?.as_array()?.first()?.as_str()?.to_string();
+    let _ = app.run("sketch.constraint.fix", json!({ "entities": [id] }));
+    Some((id, false))
 }
 
 /// Project a model edge or vertex into the active sketch for the dimension tool: the new curve's

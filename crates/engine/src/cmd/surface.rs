@@ -919,10 +919,12 @@ mod tests {
         assert!((volume(&s, "Box") - 1000.0).abs() < 1e-9);
         let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
         assert!((volume(&cold, "Box") - 1000.0).abs() < 1e-9);
-        // By default the gap heals, and a box's sides can't close its top: refused, the box kept.
+        // By default the gap heals; a box's sides can't close its top, so the top goes and the rest
+        // stays as an open surface (the owner wants any face deletable).
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Healed"}));
-        assert!(s.execute("face.delete", &json!({"faces": [[25, 5, 10]], "body": "Healed"})).is_err());
-        assert!(!s.world_state().body("Healed").unwrap().body.is_surface());
+        assert!(s.execute("face.delete", &json!({"faces": [[25, 5, 10]], "body": "Healed"})).is_ok());
+        assert!(s.world_state().body("Healed").unwrap().body.is_surface());
+        run(&mut s, "edit.undo", json!({}));
         let all = json!([[25, 5, 10], [25, 5, 0], [25, 0, 5], [25, 10, 5], [20, 5, 5], [30, 5, 5]]);
         assert!(s.execute("face.delete", &json!({"faces": all, "body": "Healed", "heal": false})).is_err());
     }

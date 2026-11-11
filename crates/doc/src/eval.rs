@@ -6383,7 +6383,10 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                         Ok(b) => b,
                         Err(_) => kernel::remove_faces(&mb.body, &all)?,
                     },
-                    Err(e) => return Err(e.into()),
+                    // Any face can be deleted (owner's request): when the neighbours can't close
+                    // the gap (a box's side), the face goes and the rest stays as an open surface
+                    // body, as without healing.
+                    Err(_) => kernel::remove_faces(&mb.body, &all)?,
                 }
             } else {
                 kernel::remove_faces(&mb.body, &all)?
