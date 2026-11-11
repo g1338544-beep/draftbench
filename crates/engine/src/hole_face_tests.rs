@@ -415,3 +415,33 @@ fn face_sketch_holes_through_all_stay_in_their_body_unless_targets_say_otherwise
     run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["in"], "diameter": 5, "targets": ["Back"], "name": "H"}));
     assert!(solid_at(&s, 20.0, 20.0, 15.0) && !solid_at(&s, 20.0, 20.0, 3.0));
 }
+
+/// Owner: a counterbore in a round part showed straight lines across its flat floor and the top
+/// face (the kernel builds those round flat faces in pieces), so the hole did not look smooth,
+/// and only a third of the floor lit up under the pointer. Cuts across a round flat face are
+/// hidden seams; the round edges stay.
+#[test]
+fn a_counterbore_in_a_round_part_draws_no_lines_across_its_flat_faces() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 15, "height": 20}));
+    let mut p = CB();
+    p["position"] = json!([0, 0, 20]);
+    run(&mut s, "solid.hole", p);
+    let st = s.model.state();
+    let b = st.bodies.first().unwrap();
+    let m = b.body.reference_display_mesh_angular(0.01, 0.3).unwrap();
+    let mut across = Vec::new();
+    for (i, e) in m.edges.iter().enumerate() {
+        if !m.shaded_edge_visible(i) {
+            continue;
+        }
+        let (a, z) = (e[0], e[e.len() - 1]);
+        let r = |p: Vec3| (p.x * p.x + p.y * p.y).sqrt();
+        // A straight edge lying in a flat face (constant z) that runs between two radii.
+        let flat = e.iter().all(|p| (p.z - a.z).abs() < 1e-6);
+        if flat && (r(a) - r(z)).abs() > 0.5 {
+            across.push((i, a, z));
+        }
+    }
+    assert!(across.is_empty(), "lines across round flat faces: {across:?}");
+}

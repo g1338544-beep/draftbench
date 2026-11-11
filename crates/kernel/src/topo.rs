@@ -284,10 +284,39 @@ pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
             Some([a, b2]) => {
                 (!matches!(surfs.get(*a), Some(Surf::Plane { .. })) && same_surface(&surfs, &verts, mesh.edges.get(ei), *a, *b2, tol * 10.0))
                     || (surf_keys.get(*a).is_some_and(|k| Some(k) == surf_keys.get(*b2)) && !matches!(surfs.get(*a), Some(Surf::Plane { .. })))
+                    || round_flat_split(&surfs, mesh, ei, *a, *b2, tol)
             }
             _ => false,
         })
         .collect()
+}
+
+/// Is edge `ei` a straight cut across a round flat face (a disc or ring the kernel builds in
+/// pieces, as a counterbore's floor): the two faces lie in one plane and both ends of the edge
+/// meet curved edges? Drawn, such cuts show as spokes across a face that is one round face to
+/// the eye (owner: "the hole doesn't look smooth"); hidden, the pieces also light up together.
+fn round_flat_split(surfs: &[Surf], mesh: &Mesh, ei: usize, a: usize, b: usize, tol: f64) -> bool {
+    let (Some(sa @ Surf::Plane { .. }), Some(sb)) = (surfs.get(a), surfs.get(b)) else { return false };
+    if !sa.same(sb, tol * 10.0) {
+        return false;
+    }
+    let Some(e) = mesh.edges.get(ei) else { return false };
+    let (Some(p), Some(q)) = (e.first().copied(), e.last().copied()) else { return false };
+    let Some(dir) = (q - p).normalized() else { return false };
+    if e.iter().any(|x| ((*x - p) - dir * (*x - p).dot(dir)).len() > tol * 10.0) {
+        return false;
+    }
+    let curved = |w: &Vec<Vec3>| {
+        let (Some(s), Some(t)) = (w.first().copied(), w.last().copied()) else { return false };
+        let Some(d) = (t - s).normalized().or_else(|| w.get(w.len() / 2).and_then(|m| (*m - s).normalized())) else { return false };
+        w.len() > 2 && w.iter().any(|x| ((*x - s) - d * (*x - s).dot(d)).len() > tol * 10.0)
+    };
+    let meets_curve = |end: Vec3| {
+        mesh.edges.iter().enumerate().any(|(j, w)| {
+            j != ei && curved(w) && (w.first().is_some_and(|s| s.dist(end) <= tol * 10.0) || w.last().is_some_and(|t| t.dist(end) <= tol * 10.0))
+        })
+    };
+    meets_curve(p) && meets_curve(q)
 }
 
 /// Least-squares sphere through points: centre and radius.
