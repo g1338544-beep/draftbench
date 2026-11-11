@@ -573,11 +573,20 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
                 form_row(ui, "Animate", |ui| {
-                    let label = if f.animate { "■ Stop" } else { "▶ Play" };
-                    if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).on_hover_text("Play the joint's motion in the view").clicked()
-                    {
-                        f.animate = !f.animate;
-                    }
+                    ui.horizontal(|ui| {
+                        let label = if f.animate { "■ Stop" } else { "▶ Play" };
+                        if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).on_hover_text("Play the joint's motion in the view").clicked()
+                        {
+                            f.animate = !f.animate;
+                        }
+                        // How fast Play goes (kept while the app runs).
+                        let id = egui::Id::new("joint_animate_speed");
+                        let mut speed = ui.data(|d| d.get_temp::<usize>(id)).unwrap_or(2);
+                        let names: Vec<String> = crate::dialogs_motion::SPEEDS.iter().map(|x| format!("{x}×")).collect();
+                        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+                        ui.allocate_ui(egui::vec2(t.form_label_width, t.control_height), |ui| combo(ui, "jt_speed", &refs, &mut speed));
+                        ui.data_mut(|d| d.insert_temp(id, speed));
+                    });
                 });
                 // How far it may go: open by default, in plain words.
                 crate::ui_kit::section(ui, "joint_limits", "Range", true, |ui| {
@@ -598,7 +607,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             if f.animate {
                 // One small step a frame (120 over a cycle), never a jump: a slow preview slows the
                 // motion down instead of skipping ahead, so it can be followed by eye.
-                f.phase = (f.phase + 1.0 / 120.0).fract();
+                let speed = ui
+                    .data(|d| d.get_temp::<usize>(egui::Id::new("joint_animate_speed")))
+                    .and_then(|i| crate::dialogs_motion::SPEEDS.get(i).copied())
+                    .unwrap_or(1.0);
+                f.phase = (f.phase + speed / 120.0).fract();
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(40));
             }
         }
