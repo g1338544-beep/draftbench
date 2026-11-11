@@ -15,6 +15,8 @@ use crate::theme::Tokens;
 
 /// Recent designs kept.
 pub const MAX_RECENT: usize = 12;
+/// Height of the banner's buttons (New Design, Open, Run script).
+pub(crate) const BUTTON_HEIGHT: f32 = 46.0;
 const THUMB: [usize; 2] = solidcraft_engine::io::THUMBNAIL_SIZE;
 const SAMPLE_PICTURES: [&[u8]; 6] = [
     include_bytes!("../../../assets/samples/exports/0.png"),
@@ -707,7 +709,7 @@ fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, _recent: &[String]) -> Option<Ac
         let primary = which == 0;
         let ink = if primary { dark } else { white };
         let g = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_subtitle), ink);
-        let size = vec2(g.size().x + 64.0, 46.0);
+        let size = vec2(g.size().x + 64.0, BUTTON_HEIGHT);
         if x + size.x > r.right() - 20.0 {
             x = r.left() + 34.0;
             y += size.y + 10.0;

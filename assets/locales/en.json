@@ -1877,6 +1877,7 @@
   "ui.simulation": "Simulation",
   "ui.single": "Single",
   "ui.sketch": "Sketch",
+  "ui.sketchColorMenu": "Line Color",
   "ui.sketch_dimension": "Sketch Dimension",
   "ui.sketch_grid": "Sketch Grid",
   "ui.sketch_modifiers": "Sketch modifiers",

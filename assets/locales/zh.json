@@ -1877,6 +1877,7 @@
   "ui.simulation": "仿真",
   "ui.single": "单个",
   "ui.sketch": "草图",
+  "ui.sketchColorMenu": "线条颜色",
   "ui.sketch_dimension": "草图尺寸",
   "ui.sketch_grid": "草图网格",
   "ui.sketch_modifiers": "草图修饰键",
