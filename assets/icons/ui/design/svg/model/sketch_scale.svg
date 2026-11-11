@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Sketch Scale</title>
+  <path d="M10 54L30 54L10 34Z" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/><path d="M10 54L54 54L10 10Z" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2.4 4.2"/><circle cx="10" cy="54" r="5.8" fill="#ffffff"/><circle cx="10" cy="54" r="3.4" fill="#236ead"/><path d="M24 40L40 24" fill="none" stroke="#34465b" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/><path d="M32 23L41 23L41 32" fill="none" stroke="#34465b" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

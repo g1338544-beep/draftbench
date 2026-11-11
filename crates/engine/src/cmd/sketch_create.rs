@@ -76,7 +76,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("points: control points (2…500), cubic", created_doc!())),
     CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", spline_cv5)
         .at("SKETCH", "CREATE")
-        .icon("spline_cv")
+        .icon("spline_cv5")
         .enabled(in_sketch)
         .params(concat!("points: control points (2…500), degree 5", created_doc!())),
     CommandSpec::new("sketch.conic", "Conic Curve", conic)

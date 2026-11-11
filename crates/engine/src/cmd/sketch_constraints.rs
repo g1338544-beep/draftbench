@@ -28,12 +28,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("tolerance?: mm (default 0.01), angle_tolerance?: deg (default 1), dimensions?: bool (default true): infer constraints, then dimension until fully constrained"),
     CommandSpec::new("sketch.auto_constrain_from_datum", "AutoConstrain from datum", auto_constrain_datum)
         .at("SKETCH", "CONSTRAINTS")
-        .icon("auto_constrain")
+        .icon("auto_constrain_datum")
         .enabled(in_sketch)
         .params("datum: point ref (default origin); like AutoConstrain with positions measured from the datum"),
     CommandSpec::new("sketch.finish_auto_constrain", "Finish with AutoConstrain", auto_constrain_finish)
         .at("SKETCH", "FINISH SKETCH")
-        .icon("finish")
+        .icon("finish_auto_constrain")
         .enabled(in_sketch)
         .params("like AutoConstrain, then Finish Sketch"),
     CommandSpec::new("sketch.constrainer", "Sketch Constrainer", smart_constrain)
