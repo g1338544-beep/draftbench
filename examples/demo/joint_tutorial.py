@@ -27,9 +27,8 @@ NARRATION = {
     "3. Moving part: คลิกหน้าปลายก้านสูบ (ชิ้นที่จะขยับ) ก้านจะกระโดดเข้ามาประกบ": "ขั้นที่สาม ช่อง มูฟวิ่ง พาร์ท คลิกที่หน้าปลายก้านสูบ ซึ่งเป็นชิ้นที่จะขยับ ก้านจะกระโดดเข้ามาประกบทันที",
     "4. Type: เลือก Slider (เลื่อนตามแกน)": "ขั้นที่สี่ ช่อง ไทป์ เลือก สไลเดอร์ คือการเลื่อนตามแกน",
     "5. Range: ติ๊ก Keep within ใส่ระยะชัก From -80 mm To 0 mm": "ขั้นที่ห้า หัวข้อ เรนจ์ ติ๊ก คีพ วิธอิน แล้วใส่ระยะชัก จาก ลบแปดสิบ มิลลิเมตร ถึง ศูนย์ มิลลิเมตร",
-    "6. กด OK": "ขั้นที่หก กด โอเค",
-    "7. ปิดหน้าต่างทั้งหมดแล้วคลิกค้างที่ก้านสูบ ลากเข้า-ออกด้วยเมาส์": "ขั้นที่เจ็ด คลิกค้างที่ก้านสูบ แล้วลากเข้า ลากออก ด้วยเมาส์",
-    "ก้านเลื่อนได้แค่ในช่วง Range ที่ตั้ง ไม่หลุดออกจากกระบอก": "ก้านจะเลื่อนได้แค่ในช่วงที่ตั้งไว้ ไม่หลุดออกจากกระบอกครับ",
+    "6. กด Play ดูก้านเลื่อนเข้า-ออก ได้แค่ในช่วง Range ที่ตั้ง": "ขั้นที่หก กด เพลย์ ดูก้านสูบเลื่อนเข้า เลื่อนออก จะเลื่อนได้แค่ในช่วงที่ตั้งไว้ ไม่หลุดออกจากกระบอก",
+    "7. กด OK เสร็จ ข้อต่อจะอยู่ใน Browser หัวข้อ Joints": "ขั้นที่เจ็ด กด โอเค เสร็จแล้วครับ ข้อต่อจะไปอยู่ในหัวข้อ จอยท์ ทางซ้ายมือ",
 }
 
 
@@ -113,21 +112,23 @@ def run(d):
     d.caption("5. Range: ติ๊ก Keep within ใส่ระยะชัก From -80 mm To 0 mm", "")
     tick_range(d)
     fill(d, handle_like(d, "dialog:", "From"), "-80 mm")
-    fill(d, handle_like(d, "dialog:", "To"), "0 mm")
+    fill(d, handle_like(d, "dialog:", "To (no"), "0 mm")
+    d.ui("ui.key", {"key": "Tab"})
     d.wait(0.8)
-    d.caption("6. กด OK", "")
+    d.caption("6. กด Play ดูก้านเลื่อนเข้า-ออก ได้แค่ในช่วง Range ที่ตั้ง", "")
+    try:
+        play = handle_like(d, "Play")
+    except RuntimeError:
+        play = None
+    if play:
+        d.click(play, settle=0.3)
+        d.wait(7.0)
+        d.click(play, settle=0.3)
+    else:
+        d.wait(3.0)
+    d.caption("7. กด OK เสร็จ ข้อต่อจะอยู่ใน Browser หัวข้อ Joints", "")
     d.click(d.at(handle="dialog:OK"), settle=1.0)
-    d.wait(0.8)
-    d.caption("7. ปิดหน้าต่างทั้งหมดแล้วคลิกค้างที่ก้านสูบ ลากเข้า-ออกด้วยเมาส์", "")
-    frm = d.at(world=[200, 4, 21])
-    back = d.at(world=[130, 4, 21])
-    d.drag(frm, back, steps=60)
-    d.wait(0.6)
-    d.drag(back, frm, steps=60)
-    d.wait(0.8)
-    d.caption("ก้านเลื่อนได้แค่ในช่วง Range ที่ตั้ง ไม่หลุดออกจากกระบอก", "")
-    d.drag(frm, d.at(world=[60, 4, 21]), steps=60)
-    d.wait(1.5)
+    d.wait(2.5)
     d.caption("", "")
 
 
@@ -152,6 +153,8 @@ def main():
     except RuntimeError:
         pass
     d.ui("ui.prefs", {"ui_scale": 1.15, "button": "apply"})
+    # The window's size is in interface points: fill the 1920 x 1080 screen at this scale.
+    d.ui("ui.resize", {"width": round(1920 / 1.15), "height": round(1080 / 1.15)})
     d.ui("ui.home", {"open": False})
     d.ui("ui.file", {"path": os.path.abspath(a.design)})
     for _ in range(1200):
