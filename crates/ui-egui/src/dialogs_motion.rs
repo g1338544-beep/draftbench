@@ -436,6 +436,31 @@ fn explode_pose(app: &SolveApp, scale: f64) -> Result<BTreeMap<u64, Mat>, String
 
 // ---- rows ----
 
+/// A joint value as a key's text: degrees for an angle, millimetres for a distance (internal radians/mm).
+fn value_text(app: &SolveApp, joint: usize, index: usize, value: f64) -> String {
+    let angle = app.session.doc.assembly.joints.get(joint).is_some_and(|j| j.kind.is_angle(index));
+    if angle { format!("{} deg", (value.to_degrees() * 1000.0).round() / 1000.0) } else { format!("{} mm", (value * 1000.0).round() / 1000.0) }
+}
+
+/// The joint value now (internal units), 0 when unknown.
+fn value_now(app: &SolveApp, joint: usize, index: usize) -> f64 {
+    app.session.doc.assembly.joints.get(joint).and_then(|j| j.values.get(index)).copied().filter(|v| v.is_finite()).unwrap_or(0.0)
+}
+
+/// A new track that already moves: from the joint's value now at the start to its upper limit (or a
+/// quarter turn / 50 mm further) at the end, so Play shows motion straight away.
+fn ready_track(app: &SolveApp, joint: usize, index: usize, total: u32) -> Track {
+    let now = value_now(app, joint, index);
+    let angle = app.session.doc.assembly.joints.get(joint).is_some_and(|j| j.kind.is_angle(index));
+    let limit = app.session.doc.assembly.joints.get(joint).and_then(|j| j.limits.get(index).copied().flatten());
+    let end = match limit {
+        Some((_, hi)) if (hi - now).abs() > 1e-9 => hi,
+        Some((lo, _)) => lo,
+        None => now + if angle { std::f64::consts::FRAC_PI_2 } else { 50.0 },
+    };
+    Track { joint, index, points: vec![(0, value_text(app, joint, index, now)), (total, value_text(app, joint, index, end))] }
+}
+
 fn joints_moving(app: &SolveApp) -> Vec<(usize, String, JointKind)> {
     app.session.doc.assembly.joints.iter().enumerate().filter(|(_, j)| j.kind != JointKind::Rigid).map(|(i, j)| (i, j.name.clone(), j.kind)).collect()
 }
@@ -564,6 +589,16 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         });
         return enter;
     }
+    if tracks.is_empty() {
+        ui.vertical(|ui| {
+            ui.label(
+                RichText::new(crate::i18n::tr_label(
+                    "How to: 1. Add Key picks a joint and moves it from where it is now to its limit (or a quarter turn / 50 mm). 2. Change the joint or the values at the start and end keys. 3. Play. Add keys in between to make a sequence.",
+                ))
+                .color(t.text_dim),
+            );
+        });
+    }
     // Playback: to start, step back, play/stop, step on, to end; loop and speed.
     crate::ui_kit::section(ui, "motion_playback", "Playback", true, |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -657,10 +692,10 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         form_row(ui, "  Keys", |ui| {
             key_strip(ui, tr, total, now, &t);
         });
-        // The key at this step, if any: its value.
-        if let Some(p) = tr.points.iter_mut().find(|(s, _)| *s == now) {
-            // The key's value (Enter commits it; OK makes the study).
-            let _ = expr_row(ui, "Value", &mut p.1);
+        // Every key's value, by its step (Enter commits it; OK makes the study).
+        for p in tr.points.iter_mut() {
+            let label = if p.0 == now { format!("  ▶ Step {}", p.0) } else { format!("  Step {}", p.0) };
+            let _ = expr_row(ui, &label, &mut p.1);
         }
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
@@ -669,9 +704,9 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
                     .clicked()
                     && !tr.points.iter().any(|(s, _)| *s == now)
                 {
-                    let unit =
-                        app.session.doc.assembly.joints.get(tr.joint).map(|j| if j.kind.is_angle(tr.index) { "deg" } else { "mm" }).unwrap_or("mm");
-                    tr.points.push((now, format!("0 {unit}")));
+                    // The joint's value now, so a key in between starts where the motion already is.
+                    let v = value_now(app, tr.joint, tr.index);
+                    tr.points.push((now, value_text(app, tr.joint, tr.index, v)));
                     tr.points.sort_by_key(|p| p.0);
                 }
                 if crate::ui_kit::button(ui, crate::i18n::tr_label("Delete key"), crate::ui_kit::Button::Small).clicked() {
@@ -689,10 +724,10 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
             if crate::ui_kit::button(ui, crate::i18n::tr_label("Add Key"), crate::ui_kit::Button::Normal)
                 .on_hover_text(crate::i18n::tr_label("Key a joint's value at this step"))
                 .clicked()
-                && let Some((ji, _, kind)) = moving.first()
+                && let Some((ji, _, _)) = moving.iter().find(|(i, _, _)| !tracks.iter().any(|tr| tr.joint == *i)).or(moving.first())
             {
-                let unit = if kind.is_angle(0) { "deg" } else { "mm" };
-                tracks.push(Track { joint: *ji, index: 0, points: vec![(now, format!("0 {unit}"))] });
+                // The next joint not keyed yet, already moving over the whole study.
+                tracks.push(ready_track(app, *ji, 0, total));
             }
             export = crate::ui_kit::button(ui, crate::i18n::tr_label("Export Animation…"), crate::ui_kit::Button::Normal)
                 .on_hover_text(crate::i18n::tr_label("Save the study as an animated GIF, seen as the viewport shows it"))

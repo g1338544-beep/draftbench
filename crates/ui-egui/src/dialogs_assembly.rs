@@ -497,6 +497,23 @@ fn shifted(s: &SnapPt, x: f64, y: f64) -> Value {
 
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [SelInput], active: &mut usize) -> bool {
+    // A short how-to on the dialogs people find hard to start (Joint, Cam, Drive Joints).
+    let guide = match k {
+        Asm::Joint(_) => Some(
+            "How to: 1. Component 1 = the part that moves: click a face, edge or circle on it where it joins. 2. Component 2 = the part it is joined to: click the matching place. 3. Pick the joint type (Revolute turns, Slider slides) and watch it move; Flip if it faces the wrong way. 4. OK.",
+        ),
+        Asm::Cam(_) => Some(
+            "How to: first make a Revolute joint for the cam and a Slider (or Revolute) joint for the follower. 1. Profile = click the cam's outline edges. 2. Pick the cam joint and the follower joint below. 3. Optional: a round Roller on the follower, or its Tip. 4. Animate to check, then OK.",
+        ),
+        Asm::Drive { .. } => Some("How to: pick the joint, then drag the slider or type a value to move it. OK keeps the position; Cancel puts it back."),
+        _ => None,
+    };
+    if let Some(text) = guide {
+        let t = crate::theme::Tokens::get();
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new(crate::i18n::tr_label(text)).color(t.text_dim));
+        });
+    }
     let t = Tokens::get();
     let mut enter = false;
     let problem = joint_problem(app, k, inputs);
