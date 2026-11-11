@@ -123,8 +123,8 @@
    "command": "joint.limits",
    "params": {
     "joint": "Stroke",
-    "min": "0 mm",
-    "max": "80 mm"
+    "min": "-80 mm",
+    "max": "0 mm"
    }
   },
   {

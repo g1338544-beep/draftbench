@@ -102,8 +102,8 @@
    "command": "joint.limits",
    "params": {
     "joint": "Hinge",
-    "min": "0 deg",
-    "max": "110 deg"
+    "min": "-110 deg",
+    "max": "0 deg"
    }
   },
   {

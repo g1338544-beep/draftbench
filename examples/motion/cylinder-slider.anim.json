@@ -5,7 +5,7 @@
    "params": {
     "joint": "Stroke",
     "from": "0 mm",
-    "to": "80 mm",
+    "to": "-80 mm",
     "samples": 60,
     "fps": 24,
     "width": 1280,

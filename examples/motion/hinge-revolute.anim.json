@@ -5,7 +5,7 @@
    "params": {
     "joint": "Hinge",
     "from": "0 deg",
-    "to": "110 deg",
+    "to": "-110 deg",
     "samples": 60,
     "fps": 24,
     "width": 1280,
