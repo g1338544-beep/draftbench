@@ -24,17 +24,46 @@ def seconds(path):
     return float(out.stdout.strip())
 
 
-async def speak(outdir):
-    import edge_tts
+async def one(words, f):
+    """One clip: a neural Thai voice (edge-tts), then Google's (gTTS), then espeak-ng."""
+    errors = []
+    try:
+        import edge_tts
 
+        for voice, rate in ((VOICE, "-5%"), (VOICE, "+0%"), ("th-TH-NiwatNeural", "+0%")):
+            for _ in range(2):
+                try:
+                    await edge_tts.Communicate(words, voice, rate=rate).save(f)
+                    if os.path.getsize(f) > 1000:
+                        return f"edge-tts {voice}"
+                except Exception as e:  # noqa: BLE001 - try the next voice
+                    errors.append(f"edge-tts {voice}: {e}")
+                await asyncio.sleep(2)
+    except ImportError as e:
+        errors.append(str(e))
+    try:
+        from gtts import gTTS
+
+        gTTS(words, lang="th").save(f)
+        return "gTTS"
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"gTTS: {e}")
+    wav = f[:-4] + ".wav"
+    if subprocess.run(["espeak-ng", "-v", "th", "-w", wav, words]).returncode == 0:
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", wav, f], check=True)
+        return "espeak-ng"
+    raise SystemExit("no Thai voice worked: " + "; ".join(errors))
+
+
+async def speak(outdir):
     d = os.path.join(outdir, "voice")
     os.makedirs(d, exist_ok=True)
     index = {}
     for i, (caption, words) in enumerate(NARRATION.items()):
         f = os.path.join(d, f"{i:02}.mp3")
-        await edge_tts.Communicate(words, VOICE, rate="-5%").save(f)
+        how = await one(words, f)
         index[caption] = {"file": f, "seconds": seconds(f)}
-        print(f"{index[caption]['seconds']:5.1f}s  {words}")
+        print(f"{index[caption]['seconds']:5.1f}s  [{how}]  {words}", flush=True)
     json.dump(index, open(os.path.join(d, "index.json"), "w"), ensure_ascii=False, indent=1)
 
 
