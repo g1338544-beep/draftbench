@@ -386,3 +386,39 @@ fn a_modelled_thread_leaves_the_other_hole_round() {
         "the other hole keeps its round face"
     );
 }
+
+thread_local! {
+    static KERNEL_PANICS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Owner: the web app closed when a modelled thread was made. On the web a panic inside the
+/// kernel can't be caught (the desktop app turns it into an error), so threading the usual parts
+/// must not panic at all: a drilled blind or through hole in a round part, and a shaft on it.
+#[test]
+fn modelled_threads_on_a_round_part_never_panic_inside_the_kernel() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| KERNEL_PANICS.with(|c| c.set(c.get() + 1))));
+    let cases: Vec<(&str, Vec<(&str, Value)>, Value)> = vec![
+        ("blind M6 hole", vec![("solid.hole", json!({"position": [5, 0, 20], "diameter": 5, "depth": 10}))], json!({"face": [7.5, 0, 15], "designation": "M6", "modeled": true})),
+        ("through M6 hole", vec![("solid.hole", json!({"position": [5, 0, 20], "diameter": 5}))], json!({"face": [7.5, 0, 10], "designation": "M6", "modeled": true})),
+        (
+            "M6 shaft",
+            vec![("solid.cylinder", json!({"base": [0, 0, 20], "radius": 3, "height": 12, "operation": "join"}))],
+            json!({"face": [3, 0, 26], "designation": "M6", "modeled": true}),
+        ),
+    ];
+    let mut report = Vec::new();
+    for (what, steps, thread) in cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 15, "height": 20}));
+        for (id, p) in steps {
+            run(&mut s, id, p);
+        }
+        KERNEL_PANICS.with(|c| c.set(0));
+        let r = s.execute("solid.thread", &thread);
+        let panics = KERNEL_PANICS.with(std::cell::Cell::get);
+        report.push(format!("{what}: {} panics, {:?}", panics, r.as_ref().map(|_| "ok").map_err(ToString::to_string)));
+    }
+    std::panic::set_hook(previous);
+    assert!(report.iter().all(|r| r.contains(": 0 panics, Ok")), "{report:#?}");
+}

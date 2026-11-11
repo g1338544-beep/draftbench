@@ -454,7 +454,7 @@ preference_settings! {
     grid_follows_view: bool = false => check("Grid follows the view", "Side views show the grid on the upright plane facing them instead of the ground");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
     /// `ultra` (#1287). Only the display plan the viewport draws; never the design or exports.
-    display_quality: String = "normal".into(), PAGE_GRAPHICS;
+    display_quality: String = "fine".into(), PAGE_GRAPHICS;
     /// Supersampling (#1288): the view drawn at this many times its pixels each way and filtered
     /// down (1, 1.5 or 2; 1 is off).
     supersampling: f32 = 1.0, PAGE_GRAPHICS;
@@ -481,7 +481,7 @@ preference_settings! {
     /// Which look the saved preferences were made for: preferences saved without it get the compact
     /// look (an icon grid, 85 % scale, free orbit) once, so a browser that saved the old defaults
     /// sees the new ones ([`lenient`]).
-    layout_version: u8 = 3, 0;
+    layout_version: u8 = 4, 0;
     /// Rows of small icons per ribbon panel (1 = the usual single row). From 2 up the ribbon is icon-only,
     /// each panel a grid of that many rows, so a tab with many commands fits without trimming.
     ribbon_icon_rows: u8 = 4, 0 => number("ui.ribbon_icon_rows", 1..=4);
@@ -2219,7 +2219,12 @@ pub fn lenient(saved: &serde_json::Value) -> Prefs {
             p.ui_scale = 1.0;
         }
     }
-    p.layout_version = 3;
+    // Saved before curved faces were drawn finer by default (version 3 or older): Normal
+    // becomes Fine, once (the owner found holes and round faces not smooth enough).
+    if saved.as_object().is_some_and(|o| !o.is_empty()) && version.is_none_or(|v| v < 4) && p.display_quality == "normal" {
+        p.display_quality = "fine".into();
+    }
+    p.layout_version = 4;
     p
 }
 
@@ -2445,14 +2450,17 @@ mod tests {
     fn display_quality_is_set_checked_and_restored() {
         use serde_json::json;
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        assert_eq!(app.preferences.display_quality, "normal");
-        let out = super::set(&mut app, &json!({"display_quality": "fine"})).unwrap();
-        assert_eq!(out["display_quality"], "fine");
+        assert_eq!(app.preferences.display_quality, "fine", "round faces are drawn fine by default");
+        let out = super::set(&mut app, &json!({"display_quality": "normal"})).unwrap();
+        assert_eq!(out["display_quality"], "normal");
         assert!(super::set(&mut app, &json!({"display_quality": "silky"})).unwrap_err().contains("coarse, normal, fine or ultra"));
-        assert_eq!(app.preferences.display_quality, "fine");
-        assert_eq!(super::lenient(&json!({"display_quality": "ultra"})).display_quality, "ultra");
-        super::defaults(&mut app, super::PAGE_GRAPHICS);
         assert_eq!(app.preferences.display_quality, "normal");
+        assert_eq!(super::lenient(&json!({"display_quality": "ultra"})).display_quality, "ultra");
+        // Normal saved by an older release becomes Fine once; a newer save keeps Normal.
+        assert_eq!(super::lenient(&json!({"display_quality": "normal", "layout_version": 3})).display_quality, "fine");
+        assert_eq!(super::lenient(&json!({"display_quality": "normal", "layout_version": 4})).display_quality, "normal");
+        super::defaults(&mut app, super::PAGE_GRAPHICS);
+        assert_eq!(app.preferences.display_quality, "fine");
     }
 
     /// Supersampling (#1288): off by default, adaptive, set by factor and checked.
