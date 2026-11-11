@@ -365,3 +365,24 @@ fn a_second_hole_takes_a_thread_after_a_modelled_one() {
     run(&mut s, "solid.thread", json!({"face": [15.0 + d1 / 2.0, 0, 5], "designation": "M10", "modeled": true}));
     assert!(volume(&mut s, "Plate") < before - 1.0, "the second thread cut its groove too");
 }
+
+/// As NX does: a modelled thread in one hole leaves the rest of the part with its true faces,
+/// so the other hole is still one round face, not hundreds of flat facets.
+#[test]
+fn a_modelled_thread_leaves_the_other_hole_round() {
+    let mut s = Session::default();
+    let d1 = 8.376;
+    run(&mut s, "solid.box", json!({"corner": [-30, -15, 0], "length": 60, "width": 30, "height": 10, "body_name": "Plate"}));
+    for x in [-15.0, 15.0] {
+        run(&mut s, "solid.cylinder", json!({"base": [x, 0, -1], "radius": d1 / 2.0, "height": 12, "body_name": "Bore"}));
+        run(&mut s, "solid.combine", json!({"target": "Plate", "tools": ["Bore"], "operation": "cut"}));
+    }
+    run(&mut s, "solid.thread", json!({"face": [-15.0 + d1 / 2.0, 0, 5], "designation": "M10", "modeled": true}));
+    let st = s.model.state();
+    let b = st.body("Plate").unwrap();
+    let face = solidcraft_doc::appearance::face_index_at(b, Vec3::new(15.0 + d1 / 2.0, 0.0, 5.0)).unwrap();
+    assert!(
+        matches!(solidcraft_kernel::face_surface(&b.body, face), Some(solidcraft_kernel::FaceSurface::Cylinder { .. })),
+        "the other hole keeps its round face"
+    );
+}
