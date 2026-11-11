@@ -1,0 +1,374 @@
+{
+ "commands": [
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Base"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 135,
+    "width": 28,
+    "height": 8,
+    "corner": [
+     -80,
+     -25,
+     0
+    ],
+    "body_name": "Base"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.5,
+    "height": 6,
+    "base": [
+     0,
+     0,
+     8
+    ],
+    "operation": "join",
+    "targets": [
+     "Base"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.5,
+    "height": 6,
+    "base": [
+     40,
+     0,
+     8
+    ],
+    "operation": "join",
+    "targets": [
+     "Base"
+    ]
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Base:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Arm"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 12,
+    "width": 52,
+    "height": 6,
+    "corner": [
+     -6,
+     -6,
+     8
+    ],
+    "body_name": "Arm"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 76,
+    "width": 12,
+    "height": 6,
+    "corner": [
+     -70,
+     34,
+     8
+    ],
+    "operation": "join",
+    "targets": [
+     "Arm"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 8,
+    "base": [
+     0,
+     0,
+     7
+    ],
+    "operation": "cut",
+    "targets": [
+     "Arm"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.5,
+    "height": 6,
+    "base": [
+     0,
+     40,
+     14
+    ],
+    "operation": "join",
+    "targets": [
+     "Arm"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 34,
+    "base": [
+     -62,
+     40,
+     11
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Arm"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 6,
+    "height": 3,
+    "base": [
+     -62,
+     6,
+     11
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Arm"
+    ]
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Handle"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 96,
+    "width": 10,
+    "height": 6,
+    "corner": [
+     -6,
+     35,
+     14
+    ],
+    "body_name": "Handle"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 8,
+    "base": [
+     0,
+     40,
+     13
+    ],
+    "operation": "cut",
+    "targets": [
+     "Handle"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 8,
+    "base": [
+     30,
+     40,
+     13
+    ],
+    "operation": "cut",
+    "targets": [
+     "Handle"
+    ]
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Link"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 41.2311,
+    "base": [
+     40,
+     0,
+     11
+    ],
+    "axis": [
+     -0.24253562503633297,
+     0.9701425001453319,
+     0
+    ],
+    "body_name": "Link"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 6,
+    "height": 6,
+    "base": [
+     40,
+     0,
+     8
+    ],
+    "operation": "join",
+    "targets": [
+     "Link"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 6,
+    "height": 6,
+    "base": [
+     30,
+     40,
+     8
+    ],
+    "operation": "join",
+    "targets": [
+     "Link"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 8,
+    "base": [
+     40,
+     0,
+     7
+    ],
+    "operation": "cut",
+    "targets": [
+     "Link"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.5,
+    "height": 6,
+    "base": [
+     30,
+     40,
+     14
+    ],
+    "operation": "join",
+    "targets": [
+     "Link"
+    ]
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "components": [
+     "Base"
+    ],
+    "color": "#7d8796"
+   }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "components": [
+     "Arm"
+    ],
+    "color": "#2f8fd8"
+   }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "components": [
+     "Handle"
+    ],
+    "color": "#e8873a"
+   }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "components": [
+     "Link"
+    ],
+    "color": "#5aa05a"
+   }
+  }
+ ]
+}

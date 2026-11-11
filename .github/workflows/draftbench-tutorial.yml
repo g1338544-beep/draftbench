@@ -4,6 +4,10 @@ name: Draftbench tutorial
 
 on:
   workflow_dispatch:
+    inputs:
+      tutorial:
+        description: "joint (air cylinder, with voice) or clamp (toggle clamp, captions only)"
+        default: clamp
 
 permissions:
   contents: read
@@ -24,6 +28,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb ffmpeg mesa-vulkan-drivers libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 fonts-thai-tlwg fonts-dejavu-core libgtk-3-0
       - name: Thai voice-over
+        if: inputs.tutorial == 'joint'
         run: |
           pip install --quiet edge-tts gTTS
           sudo apt-get install -y -qq espeak-ng
@@ -36,12 +41,17 @@ jobs:
           SOLIDCRAFT_CONTROL_TOKEN: 6a1f3c9e8b7d2a4f5e6c7b8a9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a
         run: |
           mkdir -p out
-          target/release/solidcraft-cli run examples/motion/cylinder-parts.json --out out/cylinder-parts.draftnew
+          if [ "${{ inputs.tutorial }}" = clamp ]; then
+            PARTS=toggle-clamp-parts; export TUTORIAL=clamp_tutorial.py NAME=clamp-tutorial
+          else
+            PARTS=cylinder-parts
+          fi
+          target/release/solidcraft-cli run examples/motion/$PARTS.json --out out/$PARTS.draftnew
           Xvfb :99 -screen 0 1920x1080x24 &
           sleep 2
           DISPLAY=:99 target/release/solidcraft --control 7878 > out/app.log 2>&1 &
           for i in $(seq 1 120); do python3 -c "import sys;sys.path.insert(0,'examples/demo');from enclosure_mcp import control;r=control(7878,'ui.inspect');sys.exit(0 if r.get('ok') else 1)" 2>/dev/null && break; sleep 1; done
-          DISPLAY=:99 examples/demo/record_tutorial.sh :99 7878 out out/cylinder-parts.draftnew
+          DISPLAY=:99 examples/demo/record_tutorial.sh :99 7878 out out/$PARTS.draftnew
       - uses: actions/upload-artifact@v4
         if: always()
         with:
