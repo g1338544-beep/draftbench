@@ -1759,7 +1759,7 @@ fn the_toggle_clamp_moves_as_a_four_bar() {
             json!({"type": "revolute", "a": a, "b": b, "at": {"occurrence": 0, "point": at, "z": [0, 0, 1]}, "name": format!("J{}", i + 1)}),
         );
     }
-    let place = |s: &Session, name: &str| s.doc.assembly.occurrences.iter().find(|o| o.name.starts_with(name)).map(|o| o.transform).unwrap();
+    let place = |s: &Session, name: &str| s.doc.occurrences.iter().find(|o| o.name.starts_with(name)).map(|o| o.transform).unwrap();
     let (handle, arm) = (place(&s, "Handle"), place(&s, "Arm"));
     let r = run(&mut s, "joint.drive", json!({"joint": "J4", "value": "10 deg"}));
     assert_eq!(r["moved"], json!(true), "{r}");

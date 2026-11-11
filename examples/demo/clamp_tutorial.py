@@ -121,7 +121,7 @@ def run(d):
             d.mark(cursor=list(at), click=True)
 
         tap(play)
-        d.wait(9.0)
+        d.wait(22.0)
         tap(play)
         d.wait(0.5)
     else:
