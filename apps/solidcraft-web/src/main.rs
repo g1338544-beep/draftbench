@@ -563,6 +563,9 @@ mod web {
 
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
+        // The page computes on its own thread: a modelled thread (minutes of work) would freeze
+        // it until the browser closes it, so it shows as a cosmetic thread here (owner).
+        solidcraft_engine::doc::heavy_work::set_modelled_threads(false);
         wasm_bindgen_futures::spawn_local(async {
             let Some(window) = web_sys::window() else { return };
             ask_before_unload(&window);

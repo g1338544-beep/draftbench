@@ -387,37 +387,22 @@ fn a_modelled_thread_leaves_the_other_hole_round() {
     );
 }
 
-thread_local! {
-    static KERNEL_PANICS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-}
-
-/// Owner: the web app closed when a modelled thread was made. On the web a panic inside the
-/// kernel can't be caught (the desktop app turns it into an error), so threading the usual parts
-/// must not panic at all: a counterbored and a blind hole in a round part.
+/// Owner: the web app closed when a modelled thread was made (minutes of work on the page's own
+/// thread). With modelled threads off, as the browser build has them, the thread is kept as asked
+/// for but shown cosmetic, with a note saying so; nothing is cut and the page stays responsive.
 #[test]
-fn modelled_threads_on_a_round_part_never_panic_inside_the_kernel() {
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| KERNEL_PANICS.with(|c| c.set(c.get() + 1))));
-    let cases: Vec<(&str, Vec<(&str, Value)>, Value)> = vec![
-        (
-            "M6 in a counterbored hole",
-            vec![("solid.hole", json!({"position": [0, 0, 20], "type": "counterbore", "diameter": 5, "cb_diameter": 10, "cb_depth": 4, "depth": 15}))],
-            json!({"face": [2.5, 0, 10], "designation": "M6", "modeled": true}),
-        ),
-        ("blind M6 hole", vec![("solid.hole", json!({"position": [5, 0, 20], "diameter": 5, "depth": 10}))], json!({"face": [7.5, 0, 15], "designation": "M6", "modeled": true})),
-    ];
-    let mut report = Vec::new();
-    for (what, steps, thread) in cases {
-        let mut s = Session::default();
-        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 15, "height": 20}));
-        for (id, p) in steps {
-            run(&mut s, id, p);
-        }
-        KERNEL_PANICS.with(|c| c.set(0));
-        let r = s.execute("solid.thread", &thread);
-        let panics = KERNEL_PANICS.with(std::cell::Cell::get);
-        report.push(format!("{what}: {} panics, {:?}", panics, r.as_ref().map(|_| "ok").map_err(ToString::to_string)));
-    }
-    std::panic::set_hook(previous);
-    assert!(report.iter().all(|r| r.contains(": 0 panics, Ok")), "{report:#?}");
+fn a_modelled_thread_is_cosmetic_where_modelled_threads_are_off() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 15, "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [5, 0, 20], "diameter": 5, "depth": 10}));
+    let before = volume(&mut s, "Body1");
+    solidcraft_doc::heavy_work::set_modelled_threads(false);
+    let r = s.execute("solid.thread", &json!({"face": [7.5, 0, 15], "designation": "M6", "modeled": true}));
+    solidcraft_doc::heavy_work::set_modelled_threads(true);
+    assert!(r.is_ok(), "{r:?}");
+    assert!((volume(&mut s, "Body1") - before).abs() < 1e-6, "nothing is cut");
+    assert_eq!(s.model.state().threads.len(), 1, "shown as a cosmetic thread");
+    let id = s.doc.features.last().unwrap().id;
+    let said = s.model.result(id).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert!(said.contains("cosmetic thread in the browser"), "{said}");
 }

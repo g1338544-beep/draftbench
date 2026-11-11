@@ -5781,8 +5781,17 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 Some(e) => Some(val(vals, e, Kind::Length)?),
                 None => None,
             };
-            let t = thread_on(st, f.id, face.0, designation.as_deref(), l, *modeled)?;
-            if !*modeled {
+            // The browser computes on the page's own thread: there a modelled thread (minutes of
+            // work) is shown as a cosmetic one, so the page doesn't freeze and close (owner).
+            let cut = *modeled && crate::heavy_work::modelled_threads();
+            let t = thread_on(st, f.id, face.0, designation.as_deref(), l, cut)?;
+            if !cut {
+                if *modeled {
+                    append_warning(
+                        warning,
+                        format!("the modelled {} thread is shown as a cosmetic thread in the browser; the desktop app cuts it", t.designation),
+                    );
+                }
                 st.threads.push(t);
                 return Ok(());
             }
