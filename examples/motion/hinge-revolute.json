@@ -1,0 +1,116 @@
+{
+ "commands": [
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Base"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 120,
+    "width": 80,
+    "height": 6,
+    "corner": [
+     -60,
+     -40,
+     -12
+    ]
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Base:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 6,
+    "height": 30,
+    "corner": [
+     -50,
+     -3,
+     -6
+    ]
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Lid"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 60,
+    "height": 4,
+    "corner": [
+     -50,
+     0,
+     24
+    ]
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "name": "Hinge",
+    "a": {
+     "occurrence": "Lid:1",
+     "point": [
+      0,
+      0,
+      24
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "occurrence": "Base:1",
+     "point": [
+      0,
+      0,
+      24
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "flip": true
+   }
+  },
+  {
+   "command": "joint.limits",
+   "params": {
+    "joint": "Hinge",
+    "min": "0 deg",
+    "max": "110 deg"
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  }
+ ]
+}

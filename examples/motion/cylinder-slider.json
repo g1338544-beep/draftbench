@@ -1,0 +1,137 @@
+{
+ "commands": [
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Base"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 220,
+    "width": 60,
+    "height": 6,
+    "corner": [
+     -30,
+     -30,
+     -12
+    ]
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Base:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     15
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "radius": 15,
+    "height": 110
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Rod"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     20,
+     0,
+     15
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "radius": 6,
+    "height": 120
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 12,
+    "width": 30,
+    "height": 30,
+    "corner": [
+     140,
+     -15,
+     0
+    ]
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "slider",
+    "name": "Stroke",
+    "a": {
+     "occurrence": "Rod:1",
+     "point": [
+      0,
+      0,
+      15
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "occurrence": "Base:1",
+     "point": [
+      0,
+      0,
+      15
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "flip": true
+   }
+  },
+  {
+   "command": "joint.limits",
+   "params": {
+    "joint": "Stroke",
+    "min": "0 mm",
+    "max": "80 mm"
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  }
+ ]
+}

@@ -1,0 +1,17 @@
+{
+ "commands": [
+  {
+   "command": "motion.export_animation",
+   "params": {
+    "joint": "Hinge",
+    "from": "0 deg",
+    "to": "110 deg",
+    "samples": 60,
+    "fps": 24,
+    "width": 960,
+    "height": 600,
+    "path": "out/hinge-revolute.gif"
+   }
+  }
+ ]
+}

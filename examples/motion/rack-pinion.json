@@ -1,0 +1,179 @@
+{
+ "commands": [
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Base"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 180,
+    "width": 80,
+    "height": 6,
+    "corner": [
+     -90,
+     -40,
+     -12
+    ]
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Base:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Pinion"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "radius": 12,
+    "height": 6
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 12,
+    "width": 3,
+    "height": 2,
+    "corner": [
+     0,
+     -1.5,
+     6
+    ]
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "name": "Pinion turns",
+    "a": {
+     "occurrence": "Pinion:1",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "b": {
+     "occurrence": "Base:1",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "flip": true
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Rack"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 120,
+    "width": 8,
+    "height": 6,
+    "corner": [
+     -60,
+     -20,
+     0
+    ]
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "slider",
+    "name": "Rack slides",
+    "a": {
+     "occurrence": "Rack:1",
+     "point": [
+      0,
+      -16,
+      3
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "occurrence": "Base:1",
+     "point": [
+      0,
+      -16,
+      3
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "flip": true
+   }
+  },
+  {
+   "command": "joint.rack_pinion",
+   "params": {
+    "a": "Pinion turns",
+    "b": "Rack slides",
+    "radius": "12 mm"
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  }
+ ]
+}

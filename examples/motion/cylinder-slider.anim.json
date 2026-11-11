@@ -1,0 +1,17 @@
+{
+ "commands": [
+  {
+   "command": "motion.export_animation",
+   "params": {
+    "joint": "Stroke",
+    "from": "0 mm",
+    "to": "80 mm",
+    "samples": 60,
+    "fps": 24,
+    "width": 960,
+    "height": 600,
+    "path": "out/cylinder-slider.gif"
+   }
+  }
+ ]
+}

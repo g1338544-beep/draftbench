@@ -1,0 +1,17 @@
+{
+ "commands": [
+  {
+   "command": "motion.export_animation",
+   "params": {
+    "joint": "Gear A turns",
+    "from": "0 deg",
+    "to": "360 deg",
+    "samples": 90,
+    "fps": 24,
+    "width": 960,
+    "height": 600,
+    "path": "out/gears.gif"
+   }
+  }
+ ]
+}

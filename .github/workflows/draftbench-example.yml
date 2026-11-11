@@ -20,18 +20,21 @@ jobs:
           key: draftbench-example
       - name: Build the CLI
         run: cargo build --release -p solidcraft-cli
-      - name: Build the cam example and record it
+      - name: Build the motion examples and record them
         run: |
-          set -x
           mkdir -p out
-          CLI=target/release/solidcraft-cli
-          $CLI run examples/cam-follower.json --out out/cam-follower.draftnew --results > out/build.json || { cat out/build.json; exit 1; }
-          echo '{"commands":[{"command":"motion.export_animation","params":{"joint":"Cam turns","from":"0 deg","to":"360 deg","samples":90,"fps":24,"width":960,"height":600,"path":"out/cam-follower.gif"}}]}' > anim.json
-          $CLI run anim.json --in out/cam-follower.draftnew --results > out/anim.json || { cat out/anim.json; exit 1; }
-          cat out/anim.json
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-          ffmpeg -y -stream_loop 2 -i out/cam-follower.gif -movflags +faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" out/cam-follower.mp4
+          CLI=target/release/solidcraft-cli
+          for f in examples/motion/*.json; do
+            case "$f" in *.anim.json) continue;; esac
+            n=$(basename "$f" .json)
+            echo "== $n"
+            if ! $CLI run "$f" --out "out/$n.draftnew" --results > "out/$n.build.json" 2>&1; then cat "out/$n.build.json"; echo "FAILED $n" >> out/failed.txt; continue; fi
+            if ! $CLI run "examples/motion/$n.anim.json" --in "out/$n.draftnew" --results > "out/$n.anim.out.json" 2>&1; then cat "out/$n.anim.out.json"; echo "FAILED anim $n" >> out/failed.txt; continue; fi
+            ffmpeg -loglevel error -y -stream_loop 1 -i "out/$n.gif" -movflags +faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "out/$n.mp4"
+          done
           ls -la out
+          cat out/failed.txt 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -41,5 +44,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="example-cam-${GITHUB_SHA::7}"
-          gh release create "$tag" out/cam-follower.draftnew out/cam-follower.gif out/cam-follower.mp4 --prerelease --title "Cam example ($tag)" --notes "A cam turning a follower, built from examples/cam-follower.json. Open cam-follower.draftnew and drag the cam." --target "$GITHUB_SHA"
+          tag="examples-${GITHUB_SHA::7}"
+          ls out/*.draftnew out/*.gif out/*.mp4 >/dev/null 2>&1 || exit 1
+          gh release create "$tag" out/*.draftnew out/*.gif out/*.mp4 --prerelease --title "Motion examples ($tag)" --notes "Built from examples/motion/*.json: open a .draftnew file and drag the moving part." --target "$GITHUB_SHA"
