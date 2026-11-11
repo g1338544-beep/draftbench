@@ -534,8 +534,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let page = Container::new(ui.ctx(), Surface::Viewport).central();
     page.frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(t.panel).inner_margin(if crate::shell::is_phone(ui.ctx()) { egui::Margin::symmetric(12, 12) } else { egui::Margin::symmetric(36, 24) })).show(ui, |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            // The ways in as a block of coloured tiles: the name, New Design and Open, scripts,
-            // help, and the design opened last.
+            // A green banner with the ways in, and the help links under it.
             if let Some(a) = tiles(app, ui, &recent) {
                 action = Some(a);
             }
@@ -636,180 +635,146 @@ fn palette(role: &str, accent: &str) -> Color32 {
 /// The accent each sample card (and the name tile's stripes) is tinted with.
 const CARD_ACCENTS: [&str; 6] = ["", "surface", "sketch", "form", "constraint", "mesh"];
 
-/// The tile block: name, New Design, Open, Run script, help and the last design. Four columns
-/// when there is room, two on a narrow window, one on a phone.
-fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, recent: &[String]) -> Option<Act> {
+/// A rounded rectangle filled with a left-to-right gradient through `stops` (a fan of triangles
+/// from the centre, each corner point coloured by where it lies across the width).
+fn gradient_rect(painter: &egui::Painter, r: egui::Rect, radius: f32, stops: &[Color32]) {
+    let colour_at = |x: f32| -> Color32 {
+        let n = stops.len();
+        if n == 0 {
+            return Color32::TRANSPARENT;
+        }
+        let k = ((x - r.left()) / r.width().max(1.0)).clamp(0.0, 1.0) * (n.saturating_sub(1)) as f32;
+        let i = (k.floor() as usize).min(n.saturating_sub(1));
+        let (a, b) = (stops.get(i).copied().unwrap_or_default(), stops.get(i + 1).copied().unwrap_or_else(|| stops.get(i).copied().unwrap_or_default()));
+        a.lerp_to_gamma(b, k - i as f32)
+    };
+    let rad = radius.min(r.height() / 2.0).min(r.width() / 2.0);
+    let mut outline: Vec<egui::Pos2> = Vec::new();
+    // Corners clockwise from the top left, each a quarter circle.
+    for (c, start) in [(r.left_top() + vec2(rad, rad), 180.0_f32), (r.right_top() + vec2(-rad, rad), 270.0), (r.right_bottom() + vec2(-rad, -rad), 0.0), (r.left_bottom() + vec2(rad, -rad), 90.0)] {
+        for k in 0..=8 {
+            let a = (start + 90.0 * k as f32 / 8.0).to_radians();
+            outline.push(c + vec2(a.cos(), a.sin()) * rad);
+        }
+    }
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(r.center(), colour_at(r.center().x));
+    for p in &outline {
+        mesh.colored_vertex(*p, colour_at(p.x));
+    }
+    let n = outline.len() as u32;
+    for i in 0..n {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// The banner: the name and what it is for on a green gradient, with New Design, Open and Run
+/// script in it, and the help links as pills under it.
+fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, _recent: &[String]) -> Option<Act> {
     let t = Tokens::get();
-    let gap = t.space_14;
+    let phone = crate::shell::is_phone(ui.ctx());
     let w = ui.available_width();
-    let cols = if w >= 900.0 { 4 } else if w >= 460.0 { 2 } else { 1 };
-    let (row_a, row_b) = (150.0_f32, 112.0_f32);
-    // Column widths in the 1.3 : 1 : 1 : 1.2 of the layout.
-    let weights: &[f32] = match cols {
-        4 => &[1.3, 1.0, 1.0, 1.2],
-        2 => &[1.0, 1.0],
-        _ => &[1.0],
-    };
-    let sum: f32 = weights.iter().sum();
-    let inner = w - gap * (cols as f32 - 1.0);
-    let widths: Vec<f32> = weights.iter().map(|k| inner * k / sum).collect();
-    let height = match cols {
-        4 => row_a + gap + row_b,
-        2 => (row_a + gap + row_b) + gap + row_a + gap + row_b,
-        _ => 5.0 * (row_b + gap) + row_a,
-    };
-    let (area, _) = ui.allocate_exact_size(vec2(w, height), Sense::hover());
-    let x = |c: usize| area.left() + widths.iter().take(c).sum::<f32>() + gap * c as f32;
-    let cell = |c: usize, top: f32, h: f32| egui::Rect::from_min_size(egui::pos2(x(c), top), vec2(widths.get(c).copied().unwrap_or(w), h));
-    let top = area.top();
-    // Where each tile goes: name, new, open, script, help, last design.
-    let rects: [egui::Rect; 6] = match cols {
-        4 => [
-            cell(0, top, row_a + gap + row_b),
-            cell(1, top, row_a),
-            cell(2, top, row_a),
-            cell(1, top + row_a + gap, row_b),
-            cell(2, top + row_a + gap, row_b),
-            cell(3, top, row_a + gap + row_b),
-        ],
-        2 => {
-            let second = top + row_a + gap + row_b + gap;
-            [
-                cell(0, top, row_a + gap + row_b),
-                cell(1, top, row_a),
-                cell(1, top + row_a + gap, row_b),
-                cell(0, second + row_a + gap, row_b),
-                cell(1, second + row_a + gap, row_b),
-                egui::Rect::from_min_size(egui::pos2(area.left(), second), vec2(w, row_a)),
-            ]
-        }
-        _ => {
-            let r = |k: f32, h: f32| egui::Rect::from_min_size(egui::pos2(area.left(), top + k), vec2(w, h));
-            let s = row_b + gap;
-            [r(0.0, row_b), r(s, row_b), r(2.0 * s, row_b), r(3.0 * s, row_b), r(4.0 * s, row_b), r(5.0 * s, row_a)]
-        }
-    };
+    let height = if phone { 250.0 } else { 196.0 };
+    let (r, _) = ui.allocate_exact_size(vec2(w, height), Sense::hover());
     let painter = ui.painter().clone();
-    let radius = CornerRadius::same(18);
-    let font = |size: f32| egui::FontId::proportional(size);
-    let mut act: Option<Act> = None;
-    let tile = |ui: &mut egui::Ui, id: &str, r: egui::Rect, fill: Color32, edge: Option<Color32>| -> egui::Response {
-        let resp = ui.interact(r, ui.id().with(("home_tile", id)), Sense::click());
-        let lift = if resp.hovered() { 0.92 } else { 1.0 };
-        painter.rect(r, radius, fill.gamma_multiply(lift).to_opaque(), Stroke::new(1.0, edge.unwrap_or(Color32::TRANSPARENT)), egui::StrokeKind::Inside);
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        crate::scenario::publish_handle(&format!("home:{id}"), r.center());
-        resp
-    };
-    // The name: a dark tile with the product's colours as stripes.
-    let [name_r, new_r, open_r, script_r, help_r, last_r] = rects;
-    painter.rect_filled(name_r, radius, palette("ink", ""));
-    painter.text(name_r.left_top() + vec2(24.0, 22.0), egui::Align2::LEFT_TOP, "DraftNew", font(t.font_display * 1.25), Color32::WHITE);
+    // Dark green to light green, from the Sketch accent of the icon palette.
+    let (dark, mid) = (palette("active-3", "sketch"), palette("active-2", "sketch"));
+    let light = mid.lerp_to_gamma(palette("active-1", "sketch"), 0.5);
+    gradient_rect(&painter, r, 22.0, &[dark, mid, light]);
+    let white = Color32::WHITE;
+    painter.text(r.left_top() + vec2(34.0, 26.0), egui::Align2::LEFT_TOP, "DraftNew", egui::FontId::proportional(t.font_display * 1.35), white);
     let blurb = crate::i18n::tr_label("Parametric 3D design in your browser: sketch, extrude, assemble.");
-    let galley = painter.layout(blurb.to_string(), font(t.font_body), palette("passive-1", ""), name_r.width() - 48.0);
-    painter.galley(name_r.left_top() + vec2(24.0, 22.0 + t.font_display * 1.25 + 14.0), galley, Color32::WHITE);
-    for (k, accent) in CARD_ACCENTS.iter().take(5).enumerate() {
-        let at = egui::pos2(name_r.left() + 24.0 + k as f32 * 38.0, name_r.bottom() - 26.0);
-        painter.rect_filled(egui::Rect::from_min_size(at, vec2(30.0, 8.0)), CornerRadius::same(4), palette("active-2", accent));
-    }
-    // New Design and Open: the two big coloured tiles.
-    let big = |r: egui::Rect, icon: &str, label: &str, fill: Color32| {
-        crate::icons::paint_icon(&painter, egui::Rect::from_min_size(r.left_top() + vec2(22.0, 20.0), vec2(34.0, 34.0)), icon, 1.0);
-        let g = painter.layout(label.to_string(), font(t.font_subtitle * 1.3), Color32::WHITE, r.width() - 44.0);
-        painter.galley(egui::pos2(r.left() + 22.0, r.bottom() - 20.0 - g.size().y), g, fill);
-    };
-    let blue = palette("active-2", "");
-    if tile(ui, "new", new_r, blue, None).clicked() {
-        act = Some(Box::new(|app: &mut SolveApp| crate::documents::new_design(app)));
-    }
-    big(new_r, "new", app.tr("ui.new_design"), Color32::WHITE);
-    let orange = palette("active-2", "surface");
-    if tile(ui, "open", open_r, orange, None).clicked() {
-        act = Some(Box::new(|app: &mut SolveApp| {
-            app.pick_open(|app, path| {
-                if let Some(path) = path {
-                    app.home.open = false;
-                    app.open_path_async(&path);
-                }
-            });
-        }));
-    }
-    big(open_r, "open", app.tr("home.open"), Color32::WHITE);
-    // Run script and help: pale tiles with coloured text.
-    let small = |r: egui::Rect, icon: &str, label: &str, ink: Color32| {
-        crate::icons::paint_icon(&painter, egui::Rect::from_min_size(r.left_top() + vec2(20.0, 16.0), vec2(28.0, 28.0)), icon, 1.0);
-        let g = painter.layout(label.to_string(), font(t.font_subtitle), ink, r.width() - 40.0);
-        painter.galley(egui::pos2(r.left() + 20.0, r.bottom() - 16.0 - g.size().y), g, ink);
-    };
-    if tile(ui, "script", script_r, palette("active-1", "sketch"), None).clicked() {
-        act = Some(Box::new(|app: &mut SolveApp| crate::script_panel::open(app)));
-    }
-    small(script_r, "play", crate::i18n::tr_label("Run script"), palette("active-3", "sketch"));
-    // Help: documentation, shortcuts, what's new and settings, each its own link in the tile.
-    painter.rect_filled(help_r, radius, palette("active-1", "form"));
-    let ink = palette("active-3", "form");
-    let links: [(&str, u8); 4] = [(app.tr("home.documentation"), 0), (app.tr("ui.keyboard_shortcuts"), 1), (app.tr("home.whats_new"), 2), (app.tr("ui.preferences"), 3)];
-    let mut y = help_r.top() + 14.0;
-    let mut chosen: Option<u8> = None;
-    for (label, which) in links {
-        let g = painter.layout_no_wrap(label.to_string(), font(t.font_body), ink);
-        let r = egui::Rect::from_min_size(egui::pos2(help_r.left() + 20.0, y), g.size());
-        let resp = ui.interact(r.expand(2.0), ui.id().with(("home_help", which)), Sense::click());
+    let g = painter.layout(blurb.to_string(), egui::FontId::proportional(t.font_intro), white.gamma_multiply(0.92), w - 68.0);
+    let blurb_y = r.top() + 30.0 + t.font_display * 1.35 + 8.0;
+    let blurb_h = g.size().y;
+    painter.galley(egui::pos2(r.left() + 34.0, blurb_y), g, white);
+    // The buttons: New Design white with green text, the others see-through white.
+    let mut act: Option<Act> = None;
+    let mut x = r.left() + 34.0;
+    let mut y = blurb_y + blurb_h + 18.0;
+    let buttons: [(&str, &str, u8); 3] = [("new", app.tr("ui.new_design"), 0), ("open", app.tr("home.open"), 1), ("play", crate::i18n::tr_label("Run script"), 2)];
+    for (icon, label, which) in buttons {
+        let primary = which == 0;
+        let ink = if primary { dark } else { white };
+        let g = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_subtitle), ink);
+        let size = vec2(g.size().x + 64.0, 46.0);
+        if x + size.x > r.right() - 20.0 {
+            x = r.left() + 34.0;
+            y += size.y + 10.0;
+        }
+        let b = egui::Rect::from_min_size(egui::pos2(x, y), size);
+        let resp = ui.interact(b, ui.id().with(("home_button", which)), Sense::click());
+        let fill = match (primary, resp.hovered()) {
+            (true, false) => white,
+            (true, true) => white.gamma_multiply(0.9),
+            (false, false) => white.gamma_multiply(0.16),
+            (false, true) => white.gamma_multiply(0.28),
+        };
+        painter.rect(b, CornerRadius::same(12), fill, Stroke::new(1.0, if primary { white } else { white.gamma_multiply(0.45) }), egui::StrokeKind::Inside);
+        crate::icons::paint_icon(&painter, egui::Rect::from_center_size(b.left_center() + vec2(24.0, 0.0), vec2(22.0, 22.0)), icon, 1.0);
+        painter.galley(b.left_center() + vec2(44.0, -g.size().y / 2.0), g, ink);
+        crate::scenario::publish_handle(&format!("home:{icon}"), b.center());
         if resp.hovered() {
-            painter.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, ink));
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        painter.galley(r.min, g, ink);
         if resp.clicked() {
-            chosen = Some(which);
+            act = Some(match which {
+                0 => Box::new(|app: &mut SolveApp| crate::documents::new_design(app)) as Act,
+                1 => Box::new(|app: &mut SolveApp| {
+                    app.pick_open(|app, path| {
+                        if let Some(path) = path {
+                            app.home.open = false;
+                            app.open_path_async(&path);
+                        }
+                    });
+                }),
+                _ => Box::new(|app: &mut SolveApp| crate::script_panel::open(app)),
+            });
         }
-        y += (help_r.height() - 28.0) / 4.0;
+        x += size.x + 12.0;
     }
+    // The help links as pills.
+    ui.add_space(t.space_14);
+    let pills: [(&str, u8); 6] = [
+        (app.tr("home.documentation"), 0),
+        (app.tr("home.report_issue"), 1),
+        (app.tr("home.whats_new"), 2),
+        (crate::i18n::tr_label("Run script"), 3),
+        (app.tr("ui.keyboard_shortcuts"), 4),
+        (app.tr("ui.preferences"), 5),
+    ];
+    let mut chosen = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+        for (label, which) in pills {
+            let g = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_body), t.text_dim);
+            let (b, resp) = ui.allocate_exact_size(g.size() + vec2(28.0, 14.0), Sense::click());
+            let hover = resp.hovered();
+            ui.painter().rect(b, CornerRadius::same(255), t.field, Stroke::new(1.0, if hover { dark } else { t.border }), egui::StrokeKind::Inside);
+            ui.painter().galley(b.center() - g.size() / 2.0, g, if hover { dark } else { t.text_dim });
+            if hover {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if resp.clicked() {
+                chosen = Some(which);
+            }
+        }
+    });
     match chosen {
         Some(0) => ui.ctx().open_url(egui::OpenUrl::new_tab(crate::help::DOCS_URL)),
-        Some(1) => {
+        Some(1) => ui.ctx().open_url(egui::OpenUrl::new_tab("https://github.com/g1338544-beep/draftbench/issues/new")),
+        Some(2) => ui.ctx().open_url(egui::OpenUrl::new_tab("https://github.com/g1338544-beep/draftbench/releases")),
+        Some(3) => act = Some(Box::new(|app: &mut SolveApp| crate::script_panel::open(app))),
+        Some(4) => {
             act = Some(Box::new(|app: &mut SolveApp| {
                 app.keymap.open = true;
                 app.keymap.read_only = true;
             }))
         }
-        Some(2) => ui.ctx().open_url(egui::OpenUrl::new_tab("https://github.com/g1338544-beep/draftbench/releases")),
-        Some(3) => act = Some(Box::new(|app: &mut SolveApp| crate::prefs::open_at(app, 0))),
+        Some(5) => act = Some(Box::new(|app: &mut SolveApp| crate::prefs::open_at(app, 0))),
         _ => {}
     }
-    // The design opened last, large; or a word on where recent designs appear.
-    let last = recent.first().cloned();
-    let resp = tile(ui, "last", last_r, t.field, Some(t.border));
-    painter.text(last_r.left_top() + vec2(18.0, 14.0), egui::Align2::LEFT_TOP, app.tr("home.recent"), font(t.font_subtitle), t.text);
-    match &last {
-        Some(p) => {
-            let name = std::path::Path::new(p).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
-            let pic = egui::Rect::from_min_max(last_r.left_top() + vec2(18.0, 40.0), last_r.right_bottom() - vec2(18.0, 46.0));
-            if let Some(Some(tx)) = app.home.thumbs.get(p.as_str()) {
-                let [tw, th] = [THUMB[0] as f32, THUMB[1] as f32];
-                let k = (pic.width() / tw).min(pic.height() / th).max(0.1);
-                let fit = egui::Rect::from_center_size(pic.center(), vec2(tw * k, th * k));
-                painter.image(tx.id(), fit, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
-            }
-            let clip = painter.with_clip_rect(last_r.shrink(12.0));
-            clip.text(egui::pos2(last_r.left() + 18.0, last_r.bottom() - 40.0), egui::Align2::LEFT_TOP, name, font(t.font_heading), t.text);
-            if resp.clicked() {
-                let p = p.clone();
-                act = Some(Box::new(move |app: &mut SolveApp| open_recent(app, &p)));
-            }
-            resp.on_hover_text(p.as_str());
-        }
-        None => {
-            let g = painter.layout(crate::i18n::tr_label("Designs you open or save appear here.").to_string(), font(t.font_body), t.text_dim, last_r.width() - 36.0);
-            painter.galley(last_r.left_top() + vec2(18.0, 46.0), g, t.text_dim);
-        }
-    }
-    ui.add_space(t.space_8);
-    ui.horizontal_wrapped(|ui| {
-        ui.hyperlink_to(app.tr("home.report_issue"), "https://github.com/g1338544-beep/draftbench/issues/new");
-    });
     act
 }
 
