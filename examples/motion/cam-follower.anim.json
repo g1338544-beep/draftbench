@@ -6,7 +6,7 @@
     "joint": "Cam turns",
     "from": "0 deg",
     "to": "360 deg",
-    "samples": 90,
+    "samples": 72,
     "fps": 24,
     "width": 1280,
     "height": 720,
