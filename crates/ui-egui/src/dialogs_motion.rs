@@ -146,6 +146,23 @@ pub const SPEEDS: [f64; 7] = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
 /// Steps played per second at 1×.
 const STEPS_PER_S: f64 = 24.0;
 
+/// Back and forth: `by` steps on in the direction `forward`, turning round at either end. Returns
+/// the step and the direction now.
+pub fn bounce(step: f64, by: f64, total: u32, forward: bool) -> (f64, bool) {
+    let last = f64::from(total);
+    if last <= 0.0 || !by.is_finite() {
+        return (0.0, true);
+    }
+    let next = if forward { step + by.max(0.0) } else { step - by.max(0.0) };
+    if next > last {
+        ((2.0 * last - next).clamp(0.0, last), false)
+    } else if next < 0.0 {
+        ((-next).clamp(0.0, last), true)
+    } else {
+        (next, forward)
+    }
+}
+
 /// The next playback step: `by` steps on; at the end it starts over (looping) or stops there.
 /// Returns the step and whether it still plays.
 pub fn advance(step: f64, by: f64, total: u32, looping: bool) -> (f64, bool) {
@@ -629,6 +646,11 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
             }
             ui.add_space(t.space_6);
             crate::ui_kit::checkbox(ui, "Loop", looping);
+            // Back and forth: forward to the end, then backward to the start, over and over.
+            let bf = egui::Id::new("motion_back_and_forth");
+            let mut back_and_forth = ui.data(|d| d.get_temp::<bool>(bf)).unwrap_or(false);
+            crate::ui_kit::checkbox(ui, "Back and forth", &mut back_and_forth);
+            ui.data_mut(|d| d.insert_temp(bf, back_and_forth));
             let names: Vec<String> = SPEEDS.iter().map(|x| format!("{x}×")).collect();
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
             ui.allocate_ui(vec2(t.form_label_width, t.control_height), |ui| combo(ui, "ms_speed", &refs, speed));
@@ -655,7 +677,17 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         // At 1x and below at most one step a frame (a slow frame slows playback instead of skipping
         // steps); a faster speed chosen may move several steps a frame.
         let most = SPEEDS.get(*speed).copied().unwrap_or(1.0).max(1.0);
-        (*step, *playing) = advance(*step, (dt * fps).min(most), total, *looping);
+        let by = (dt * fps).min(most);
+        let bf = egui::Id::new("motion_back_and_forth");
+        if ui.data(|d| d.get_temp::<bool>(bf)).unwrap_or(false) {
+            let dir = egui::Id::new("motion_back_and_forth_dir");
+            let forward = ui.data(|d| d.get_temp::<bool>(dir)).unwrap_or(true);
+            let (next, forward) = bounce(*step, by, total, forward);
+            ui.data_mut(|d| d.insert_temp(dir, forward));
+            *step = next;
+        } else {
+            (*step, *playing) = advance(*step, by, total, *looping);
+        }
         ui.ctx().request_repaint();
     }
     // The chart and the collision check, by the timeline.
@@ -827,6 +859,19 @@ pub fn commands(app: &SolveApp, k: &Mo, inputs: &[SelInput]) -> Result<Vec<(Stri
         }
         Mo::Configurations { .. } => Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod bounce_tests {
+    use super::bounce;
+
+    #[test]
+    fn back_and_forth_turns_round_at_both_ends() {
+        assert_eq!(bounce(9.0, 2.0, 10, true), (9.0, false), "past the end it comes back");
+        assert_eq!(bounce(1.0, 2.0, 10, false), (1.0, true), "past the start it goes on again");
+        assert_eq!(bounce(4.0, 1.0, 10, true), (5.0, true));
+        assert_eq!(bounce(4.0, 1.0, 10, false), (3.0, false));
+    }
 }
 
 #[cfg(test)]
