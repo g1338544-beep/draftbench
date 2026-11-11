@@ -306,11 +306,20 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         Kind::Ext => crate::sketch_tools::on_click(app, &mut tool, proj, pos),
         Kind::Dimension => {
             let hits = pick(app, proj, pos);
-            let hit = hits.iter().find_map(|h| match h {
+            let mut hit = hits.iter().find_map(|h| match h {
                 Hit::SketchPoint { id, .. } => Some((id.clone(), false)),
                 Hit::SketchCurve { id, .. } => Some((id.clone(), true)),
                 _ => None,
             });
+            // A part's edge or corner (not in the sketch yet): projected into the sketch first,
+            // linked, then dimensioned like the sketch's own geometry, as in other CAD tools.
+            if hit.is_none() {
+                hit = hits.iter().find_map(|h| match h {
+                    Hit::Vertex { point, body } => project_for_dimension(app, json!({"vertex": [point.x, point.y, point.z], "body": body}), false),
+                    Hit::Edge { mid, body, .. } => project_for_dimension(app, json!({"edge": [mid.x, mid.y, mid.z], "body": body}), true),
+                    _ => None,
+                });
+            }
             let fresh = |tool: &Tool, id: &String| !tool.picks.contains(id) && tool.picks.len() < 2;
             if let Some(typed) = crate::dim_view::live() {
                 match hit {
@@ -358,6 +367,21 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     if !crate::sketch_text::editing(app) {
         app.tool = Some(tool);
     }
+}
+
+/// Project a model edge or vertex into the active sketch for the dimension tool: the new curve's
+/// (or point's) id, and whether it is a curve.
+fn project_for_dimension(app: &mut SolveApp, r: Value, curve: bool) -> Option<(String, bool)> {
+    let out = match app.run("sketch.project", json!({ "refs": [r] })) {
+        Ok(v) => v,
+        Err(e) => {
+            app.set_status(e, true);
+            return None;
+        }
+    };
+    let created = out.get("created")?;
+    let first = |k: &str| created.get(k).and_then(Value::as_array).and_then(|a| a.first()).and_then(Value::as_str).map(str::to_string);
+    if curve { first("curves").map(|c| (c, true)) } else { first("points").map(|p| (p, false)).or_else(|| first("curves").map(|c| (c, true))) }
 }
 
 /// Put down the next point of the shape being drawn; the last point runs the command (with
