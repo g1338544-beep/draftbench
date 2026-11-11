@@ -142,7 +142,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 // ---- pure mappings (tested) ----
 
 /// Playback speeds offered (times `STEPS_PER_S`).
-pub const SPEEDS: [f64; 5] = [0.25, 0.5, 1.0, 2.0, 4.0];
+pub const SPEEDS: [f64; 7] = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
 /// Steps played per second at 1×.
 const STEPS_PER_S: f64 = 24.0;
 
@@ -652,8 +652,10 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     if *playing {
         let dt = f64::from(ui.input(|i| i.stable_dt).min(0.1));
         let fps = STEPS_PER_S * SPEEDS.get(*speed).copied().unwrap_or(1.0);
-        // At most one step a frame: a slow frame slows playback instead of skipping steps.
-        (*step, *playing) = advance(*step, (dt * fps).min(1.0), total, *looping);
+        // At 1x and below at most one step a frame (a slow frame slows playback instead of skipping
+        // steps); a faster speed chosen may move several steps a frame.
+        let most = SPEEDS.get(*speed).copied().unwrap_or(1.0).max(1.0);
+        (*step, *playing) = advance(*step, (dt * fps).min(most), total, *looping);
         ui.ctx().request_repaint();
     }
     // The chart and the collision check, by the timeline.
