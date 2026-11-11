@@ -374,6 +374,11 @@ pub struct Services {
     pub secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
 }
 
+thread_local! {
+    /// Insert DXF or Insert SVG started with no sketch open: run once Create Sketch has opened one.
+    static PENDING_INSERT: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
 pub struct SolveApp {
     pub session: Session,
     pub ui: UiState,
@@ -1019,6 +1024,14 @@ impl SolveApp {
         self.tool = None;
         self.home.open = false;
         if let Some(ext) = id.strip_prefix("sketch.insert_").filter(|e| matches!(*e, "dxf" | "svg")) {
+            // No sketch open: the plane or flat face is picked first (Create Sketch), then the file
+            // goes into that sketch, which stays open so its lines can be moved and edited.
+            if self.session.active_sketch.is_none() {
+                PENDING_INSERT.with(|p| p.set(Some(if ext == "dxf" { "sketch.insert_dxf" } else { "sketch.insert_svg" })));
+                self.set_status(crate::i18n::tr_label("Pick the plane or flat face to put the drawing on").to_string(), false);
+                self.start("sketch.create");
+                return;
+            }
             self.pick_open_command(id, json!({}), &[ext]);
             return;
         }
@@ -1612,6 +1625,21 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         frame_watch::begin(self);
+        // Insert DXF / SVG waiting for its sketch: the file is asked for once the plane is picked;
+        // dropped when Create Sketch was cancelled.
+        if let Some(cmd) = PENDING_INSERT.with(std::cell::Cell::get) {
+            if self.session.active_sketch.is_some() {
+                PENDING_INSERT.with(|p| p.set(None));
+                let ext = if cmd.ends_with("dxf") { "dxf" } else { "svg" };
+                self.pick_open_command(cmd, json!({}), &[ext]);
+                self.set_status(
+                    crate::i18n::tr_label("The drawing goes into this open sketch: drag its lines and points to move or reshape them (Move/Copy moves all), then Finish Sketch").to_string(),
+                    false,
+                );
+            } else if self.tool.is_none() && self.dialog.is_none() {
+                PENDING_INSERT.with(|p| p.set(None));
+            }
+        }
         file_picker::tick(self, ctx);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);

@@ -323,6 +323,27 @@ mod tests {
         }
     }
 
+    /// Insert DXF with no sketch open asks for the plane first, then for the file.
+    #[test]
+    fn insert_dxf_without_a_sketch_asks_for_the_plane_first() {
+        let mut h = crate::scenario::Harness::new();
+        let asked: Rc<RefCell<Vec<Vec<String>>>> = Rc::default();
+        let log = asked.clone();
+        h.app.services.pick_open = Some(Box::new(move |extensions| {
+            log.borrow_mut().push(extensions.iter().map(|e| e.to_string()).collect());
+            Box::pin(std::future::ready(None))
+        }));
+        h.app.start("sketch.insert_dxf");
+        tick(&mut h.app, &h.ctx);
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Sketch)), "the plane is picked first");
+        assert!(asked.borrow().is_empty(), "no file yet");
+        h.app.dialog = None;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        tick(&mut h.app, &h.ctx);
+        tick(&mut h.app, &h.ctx);
+        assert_eq!(asked.borrow().last().cloned(), Some(vec!["dxf".to_string()]), "then the file");
+    }
+
     #[test]
     fn picker_holds_engine_requests_but_answers_window_resize_requests() {
         let mut h = crate::scenario::Harness::new();
