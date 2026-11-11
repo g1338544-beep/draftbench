@@ -738,7 +738,9 @@ impl BodyDraw {
         let helices: Vec<bool> = if shaded && edges { m.edges.iter().map(|e| helix_like(e)).collect() } else { Vec::new() };
         let thread_like = helices.iter().filter(|h| **h).count() >= 4;
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
-            if !m.edge_pickable(ei) || (shaded && !TANGENT_EDGES.load(std::sync::atomic::Ordering::Relaxed) && !m.shaded_edge_visible(ei)) {
+            // Smooth joins (and the seams between a faceted body's facets) are left out in wireframe
+            // too: there they would draw every facet of a modelled thread's body.
+            if !m.edge_pickable(ei) || (!TANGENT_EDGES.load(std::sync::atomic::Ordering::Relaxed) && !m.shaded_edge_visible(ei)) {
                 continue;
             }
             if thread_like && helices.get(ei).copied().unwrap_or(false) {

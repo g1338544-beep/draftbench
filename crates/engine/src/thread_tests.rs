@@ -348,3 +348,20 @@ fn fillet_beside_a_modelled_thread_finishes() {
     let volume_after = volume(&mut s, "Screw");
     assert!(volume_after < volume_before && volume_after > volume_before * 0.99, "{volume_before} -> {volume_after}");
 }
+
+/// A plate with two holes: after a modelled thread in one (which leaves the body faceted), the
+/// other hole still takes a thread (its round wall is fitted from its facets).
+#[test]
+fn a_second_hole_takes_a_thread_after_a_modelled_one() {
+    let mut s = Session::default();
+    let d1 = 8.376; // M10's minor diameter
+    run(&mut s, "solid.box", json!({"corner": [-30, -15, 0], "length": 60, "width": 30, "height": 10, "body_name": "Plate"}));
+    for x in [-15.0, 15.0] {
+        run(&mut s, "solid.cylinder", json!({"base": [x, 0, -1], "radius": d1 / 2.0, "height": 12, "body_name": "Bore"}));
+        run(&mut s, "solid.combine", json!({"target": "Plate", "tools": ["Bore"], "operation": "cut"}));
+    }
+    run(&mut s, "solid.thread", json!({"face": [-15.0 + d1 / 2.0, 0, 5], "designation": "M10", "modeled": true}));
+    let before = volume(&mut s, "Plate");
+    run(&mut s, "solid.thread", json!({"face": [15.0 + d1 / 2.0, 0, 5], "designation": "M10", "modeled": true}));
+    assert!(volume(&mut s, "Plate") < before - 1.0, "the second thread cut its groove too");
+}

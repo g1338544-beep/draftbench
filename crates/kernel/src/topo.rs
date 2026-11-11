@@ -680,7 +680,159 @@ pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
             best = Some((off, cyl));
         }
     }
-    best?.1
+    match best {
+        Some((_, Some(c))) => Some(c),
+        // A body cut faceted (a modelled thread's result) has its round faces as many flat
+        // facets: the cylinder is fitted to the facets round the point instead.
+        _ if b.face_count() >= FACETED_FACES => faceted_cylinder_at(&mesh, p, size),
+        _ => None,
+    }
+}
+
+/// So many faces that the body is likely faceted (see [`faceted_cylinder_at`]).
+const FACETED_FACES: usize = 200;
+
+/// The cylinder that the facets round `p` approximate: the facets joined to the one nearest `p`
+/// whose normals turn gently from one to the next, the axis square to their normals, a circle
+/// fitted to their corners across the axis, and the extent along it. `None` when they don't make a
+/// round face (a flat region, too few facets, a poor fit).
+fn faceted_cylinder_at(mesh: &Mesh, p: Vec3, size: f64) -> Option<CylinderFace> {
+    const MAX_TRIS: usize = 400_000;
+    const MAX_REGION: usize = 50_000;
+    let n_tris = mesh.triangles.len();
+    if n_tris == 0 || n_tris > MAX_TRIS || !(size.is_finite() && size > 0.0) {
+        return None;
+    }
+    let normal = |t: usize| -> Option<Vec3> {
+        let [a, b, c] = mesh.tri(mesh.triangles.get(t)?)?;
+        (b - a).cross(c - a).normalized()
+    };
+    // The seed: the triangle nearest the point.
+    let mut seed: Option<(usize, f64)> = None;
+    for (i, t) in mesh.triangles.iter().enumerate() {
+        let Some([a, b, c]) = mesh.tri(t) else { continue };
+        let d = crate::boolean_guard::point_triangle_dist(p, a, b, c);
+        if d.is_finite() && seed.is_none_or(|(_, bd)| d < bd) {
+            seed = Some((i, d));
+        }
+    }
+    let (seed, _) = seed?;
+    // Triangles by the corners they share (positions rounded to a fine grid).
+    let q = (size * 1e-7).max(1e-9);
+    let key = |v: Vec3| ((v.x / q).round() as i64, (v.y / q).round() as i64, (v.z / q).round() as i64);
+    let mut at: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
+    for (i, t) in mesh.triangles.iter().enumerate() {
+        if let Some(c) = mesh.tri(t) {
+            for v in c {
+                at.entry(key(v)).or_default().push(i);
+            }
+        }
+    }
+    // Grow over neighbours that turn by less than 25° from the facet they are reached from.
+    let cos = 25f64.to_radians().cos();
+    let mut seen = vec![false; n_tris];
+    let mut region = vec![seed];
+    *seen.get_mut(seed)? = true;
+    let mut k = 0;
+    while let Some(&t) = region.get(k) {
+        k += 1;
+        if region.len() >= MAX_REGION {
+            break;
+        }
+        let (Some(nt), Some(c)) = (normal(t), mesh.triangles.get(t).and_then(|t| mesh.tri(t))) else { continue };
+        for v in c {
+            for &u in at.get(&key(v)).map(Vec::as_slice).unwrap_or(&[]) {
+                if seen.get(u).copied().unwrap_or(true) {
+                    continue;
+                }
+                if let Some(nu) = normal(u)
+                    && nu.dot(nt) >= cos
+                {
+                    if let Some(s) = seen.get_mut(u) {
+                        *s = true;
+                    }
+                    region.push(u);
+                }
+            }
+        }
+    }
+    // The axis: square to the seed's normal and to the normal turned furthest from it.
+    let n0 = normal(seed)?;
+    let far = region.iter().filter_map(|&t| normal(t)).min_by(|a, b| a.dot(n0).abs().total_cmp(&b.dot(n0).abs()))?;
+    let axis = n0.cross(far).normalized()?;
+    if n0.dot(far) > 0.97 {
+        return None; // a flat (or nearly flat) region
+    }
+    let side: Vec<usize> = region.into_iter().filter(|&t| normal(t).is_some_and(|n| n.dot(axis).abs() < 0.15)).collect();
+    if side.len() < 6 {
+        return None;
+    }
+    // A circle through the corners, across the axis (an algebraic least-squares fit).
+    let u = if axis.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+    let u = axis.cross(u).normalized()?;
+    let w = axis.cross(u);
+    let corners: Vec<Vec3> = side.iter().filter_map(|&t| mesh.triangles.get(t).and_then(|t| mesh.tri(t))).flatten().collect();
+    let (mut sxx, mut sxy, mut syy, mut sx, mut sy, mut n, mut sxz, mut syz, mut sz) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    for c in &corners {
+        let (x, y) = ((*c - p).dot(u), (*c - p).dot(w));
+        let z = x * x + y * y;
+        sxx += x * x;
+        sxy += x * y;
+        syy += y * y;
+        sx += x;
+        sy += y;
+        n += 1.0;
+        sxz += x * z;
+        syz += y * z;
+        sz += z;
+    }
+    // x² + y² + D x + E y + F = 0: solve the normal equations for D, E, F.
+    let m = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]];
+    let rhs = [-sxz, -syz, -sz];
+    let det = |m: &[[f64; 3]; 3]| {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    };
+    let dm = det(&m);
+    if !(dm.abs() > 1e-30) || !dm.is_finite() {
+        return None;
+    }
+    let col = |i: usize| {
+        let mut c = m;
+        for (r, row) in c.iter_mut().enumerate() {
+            if let (Some(x), Some(v)) = (row.get_mut(i), rhs.get(r)) {
+                *x = *v;
+            }
+        }
+        det(&c) / dm
+    };
+    let (d, e, f) = (col(0), col(1), col(2));
+    let (cx, cy) = (-d / 2.0, -e / 2.0);
+    let r = (cx * cx + cy * cy - f).sqrt();
+    if !(r.is_finite() && r > size * 1e-6 && r < size) {
+        return None;
+    }
+    let axis_point = p + u * cx + w * cy;
+    // Every corner near the circle (a round face, not a fillet's quarter or a fan of planes).
+    let off = corners.iter().map(|c| {
+        let v = *c - axis_point;
+        ((v - axis * v.dot(axis)).len() - r).abs()
+    });
+    if off.fold(0.0, f64::max) > r * 0.05 {
+        return None;
+    }
+    let (mut lo, mut hi, mut inward) = (f64::INFINITY, f64::NEG_INFINITY, 0.0);
+    for &t in &side {
+        let Some(nt) = normal(t) else { continue };
+        let Some(c) = mesh.triangles.get(t).and_then(|t| mesh.tri(t)) else { continue };
+        for v in c {
+            let s = (v - axis_point).dot(axis);
+            lo = lo.min(s);
+            hi = hi.max(s);
+            inward += nt.dot(v - axis_point - axis * s);
+        }
+    }
+    Some(CylinderFace { axis_point, axis: UnitVec3::new(axis)?, radius: r, start: lo, end: hi, internal: inward < 0.0 })
 }
 
 /// Face `face` of a body as a cylinder: the axis and radius of its own surface, and its extent
