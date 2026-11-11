@@ -204,7 +204,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
         "joint.create" => (
             Asm::Joint(Box::new(JointForm::new(false))),
-            vec![SelInput::new("Component 1", SNAPS, false), SelInput::new("Component 2", SNAPS, false)],
+            vec![SelInput::new("Moving part", SNAPS, false), SelInput::new("Fixed part", SNAPS, false)],
         ),
         "joint.as_built" => {
             (Asm::Joint(Box::new(JointForm::new(true))), vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)])
@@ -500,7 +500,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
     // A short how-to on the dialogs people find hard to start (Joint, Cam, Drive Joints).
     let guide = match k {
         Asm::Joint(_) => Some(
-            "How to: 1. Component 1 = the part that moves: click a face, edge or circle on it where it joins. 2. Component 2 = the part it is joined to: click the matching place. 3. Pick the joint type (Revolute turns, Slider slides) and watch it move; Flip if it faces the wrong way. 4. OK.",
+            "How to: 1. Moving part: click the part that should move, where it joins (a face, an edge or a circle). 2. Fixed part: click the part that stays put, at the matching place. 3. Type: how it moves. 4. Range: how far it may go, then Play to check. 5. OK.",
         ),
         Asm::Cam(_) => Some(
             "How to: first make a Revolute joint for the cam and a Slider (or Revolute) joint for the follower. 1. Profile = click the cam's outline edges. 2. Pick the cam joint and the follower joint below. 3. Optional: a round Roller on the follower, or its Tip. 4. Animate to check, then OK.",
@@ -545,6 +545,18 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.label("");
             });
             choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
+            // The motion in plain words.
+            let says = match f.kind {
+                0 => "Locked together: no motion",
+                1 => "Turns about one axis (a hinge, a wheel, a cam)",
+                2 => "Slides along one axis (a cylinder rod, a rail)",
+                3 => "Slides and turns on one axis (a shaft in a bore)",
+                6 => "Turns every way about a point",
+                _ => "",
+            };
+            if !says.is_empty() {
+                crate::ui_kit::caption(ui, "Type", crate::i18n::tr_label(says));
+            }
             f.fit_limits();
             if !f.as_built {
                 enter |= expr_row(ui, "Angle", &mut f.angle);
@@ -567,15 +579,16 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         f.animate = !f.animate;
                     }
                 });
-                crate::ui_kit::section(ui, "joint_limits", "Limits", false, |ui| {
+                // How far it may go: open by default, in plain words.
+                crate::ui_kit::section(ui, "joint_limits", "Range", true, |ui| {
                     for (i, (on, lo, hi)) in f.limits.iter_mut().enumerate() {
                         let name = kind.dofs().get(i).copied().unwrap_or("value");
                         form_row(ui, &format!("{} limits", capital(name)), |ui| {
-                            crate::ui_kit::checkbox(ui, "", on);
+                            crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Keep within"), on);
                         });
                         if *on {
-                            enter |= expr_row(ui, "  Minimum", lo);
-                            enter |= expr_row(ui, "  Maximum", hi);
+                            enter |= expr_row(ui, "  From", lo);
+                            enter |= expr_row(ui, "  To (no further)", hi);
                         }
                     }
                 });
