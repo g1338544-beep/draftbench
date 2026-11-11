@@ -532,7 +532,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let mut action: Option<Box<dyn FnOnce(&mut SolveApp)>> = None;
     let page = Container::new(ui.ctx(), Surface::Viewport).central();
-    page.frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(t.panel).inner_margin(if crate::shell::is_phone(ui.ctx()) { egui::Margin::symmetric(12, 12) } else { egui::Margin::symmetric(36, 24) })).show(ui, |ui| {
+    page.frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(t.panel).inner_margin(if crate::shell::is_phone(ui.ctx()) {
+        egui::Margin::symmetric(12, 12)
+    } else {
+        egui::Margin::symmetric(36, 24)
+    }))
+    .show(ui, |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             // A green banner with the ways in, and the help links under it.
             if let Some(a) = tiles(app, ui, &recent) {
@@ -645,7 +650,8 @@ fn gradient_rect(painter: &egui::Painter, r: egui::Rect, radius: f32, stops: &[C
         }
         let k = ((x - r.left()) / r.width().max(1.0)).clamp(0.0, 1.0) * (n.saturating_sub(1)) as f32;
         let i = (k.floor() as usize).min(n.saturating_sub(1));
-        let (a, b) = (stops.get(i).copied().unwrap_or_default(), stops.get(i + 1).copied().unwrap_or_else(|| stops.get(i).copied().unwrap_or_default()));
+        let (a, b) =
+            (stops.get(i).copied().unwrap_or_default(), stops.get(i + 1).copied().unwrap_or_else(|| stops.get(i).copied().unwrap_or_default()));
         a.lerp_to_gamma(b, k - i as f32)
     };
     let rad = radius.min(r.height() / 2.0).min(r.width() / 2.0);
@@ -695,7 +701,8 @@ fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, _recent: &[String]) -> Option<Ac
     let mut act: Option<Act> = None;
     let mut x = r.left() + 34.0;
     let mut y = blurb_y + blurb_h + 18.0;
-    let buttons: [(&str, &str, u8); 3] = [("new", app.tr("ui.new_design"), 0), ("open", app.tr("home.open"), 1), ("play", crate::i18n::tr_label("Run script"), 2)];
+    let buttons: [(&str, &str, u8); 3] =
+        [("new", app.tr("ui.new_design"), 0), ("open", app.tr("home.open"), 1), ("play", crate::i18n::tr_label("Run script"), 2)];
     for (icon, label, which) in buttons {
         let primary = which == 0;
         let ink = if primary { dark } else { white };
@@ -713,7 +720,13 @@ fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, _recent: &[String]) -> Option<Ac
             (false, false) => white.gamma_multiply(0.16),
             (false, true) => white.gamma_multiply(0.28),
         };
-        painter.rect(b, CornerRadius::same(12), fill, Stroke::new(1.0, if primary { white } else { white.gamma_multiply(0.45) }), egui::StrokeKind::Inside);
+        painter.rect(
+            b,
+            CornerRadius::same(12),
+            fill,
+            Stroke::new(1.0, if primary { white } else { white.gamma_multiply(0.45) }),
+            egui::StrokeKind::Inside,
+        );
         crate::icons::paint_icon(&painter, egui::Rect::from_center_size(b.left_center() + vec2(24.0, 0.0), vec2(22.0, 22.0)), icon, 1.0);
         painter.galley(b.left_center() + vec2(44.0, -g.size().y / 2.0), g, ink);
         crate::scenario::publish_handle(&format!("home:{icon}"), b.center());
@@ -788,7 +801,13 @@ fn tinted_card(ui: &mut egui::Ui, pic: Pic, name: &str, name_en: &str, sub: &str
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
     let hover = resp.hovered();
     let edge = palette("active-2", accent);
-    ui.painter().rect(r, CornerRadius::same(16), t.field, Stroke::new(if hover { 2.0 } else { 1.0 }, if hover { edge } else { t.border }), egui::StrokeKind::Inside);
+    ui.painter().rect(
+        r,
+        CornerRadius::same(16),
+        t.field,
+        Stroke::new(if hover { 2.0 } else { 1.0 }, if hover { edge } else { t.border }),
+        egui::StrokeKind::Inside,
+    );
     let band = egui::Rect::from_min_size(r.min, vec2(r.width(), THUMB[1] as f32 + 16.0));
     ui.painter().rect_filled(band.shrink(1.0), CornerRadius { nw: 15, ne: 15, sw: 0, se: 0 }, palette("active-1", accent).gamma_multiply(0.45));
     let img = egui::Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2(THUMB[0] as f32, THUMB[1] as f32));
@@ -799,7 +818,11 @@ fn tinted_card(ui: &mut egui::Ui, pic: Pic, name: &str, name_en: &str, sub: &str
     p.text(egui::pos2(r.left() + 12.0, ty), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(t.font_heading), t.text);
     p.text(egui::pos2(r.left() + 12.0, ty + 20.0), egui::Align2::LEFT_TOP, sub, egui::FontId::proportional(t.font_caption), t.text_dim);
     // The kind of design as a small tag in the card's colour.
-    let tag = p.layout_no_wrap(crate::i18n::tr_label(sample_kind(name_en)).to_string(), egui::FontId::proportional(t.font_caption), palette("active-3", accent));
+    let tag = p.layout_no_wrap(
+        crate::i18n::tr_label(sample_kind(name_en)).to_string(),
+        egui::FontId::proportional(t.font_caption),
+        palette("active-3", accent),
+    );
     let tr = egui::Rect::from_min_size(egui::pos2(r.left() + 12.0, r.bottom() - 26.0), tag.size() + vec2(14.0, 6.0));
     p.rect_filled(tr, CornerRadius::same(8), palette("active-1", accent).gamma_multiply(0.6));
     p.galley(tr.min + vec2(7.0, 3.0), tag, palette("active-3", accent));
@@ -826,7 +849,13 @@ fn sample_art(p: &egui::Painter, r: egui::Rect, name: &str, col: Color32) {
     let s = (r.width() / 200.0).min(r.height() / 140.0);
     let c = r.center() + vec2(0.0, 6.0 * s);
     let iso = |x: f32, y: f32, z: f32| egui::pos2(c.x + (x - y) * 0.866 * s, c.y + (x + y) * 0.5 * s - z * s);
-    let shade = |k: f32| Color32::from_rgb((f32::from(col.r()) * k).min(255.0) as u8, (f32::from(col.g()) * k).min(255.0) as u8, (f32::from(col.b()) * k).min(255.0) as u8);
+    let shade = |k: f32| {
+        Color32::from_rgb(
+            (f32::from(col.r()) * k).min(255.0) as u8,
+            (f32::from(col.g()) * k).min(255.0) as u8,
+            (f32::from(col.b()) * k).min(255.0) as u8,
+        )
+    };
     let line = Stroke::new(1.0, Color32::from_black_alpha(70));
     let hole = Color32::from_rgb(32, 48, 74);
     let quad = |pts: [egui::Pos2; 4], fill: Color32| {
@@ -840,7 +869,10 @@ fn sample_art(p: &egui::Painter, r: egui::Rect, name: &str, col: Color32) {
     // An upright round: an ellipse on top, and the side between two half ellipses.
     let ellipse = |x: f32, y: f32, z: f32, rad: f32, fill: Color32| {
         let o = iso(x, y, z);
-        let pts: Vec<egui::Pos2> = (0..36).map(|i| (i as f32) * std::f32::consts::TAU / 36.0).map(|a| o + vec2(a.cos() * rad * 1.22 * s, a.sin() * rad * 0.71 * s)).collect();
+        let pts: Vec<egui::Pos2> = (0..36)
+            .map(|i| (i as f32) * std::f32::consts::TAU / 36.0)
+            .map(|a| o + vec2(a.cos() * rad * 1.22 * s, a.sin() * rad * 0.71 * s))
+            .collect();
         p.add(egui::Shape::convex_polygon(pts, fill, line));
     };
     let round = |x: f32, y: f32, z: f32, rad: f32, h: f32, k: f32| {

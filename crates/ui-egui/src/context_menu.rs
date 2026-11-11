@@ -449,7 +449,8 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         };
         item.children.push(original);
         if ["bodies", "components", "faces"].iter().any(|key| targets.get(key).and_then(Value::as_array).is_some_and(|v| !v.is_empty())) {
-            for (label, opacity) in [("Transparent 75%", 0.75), ("Transparent 50%", 0.5), ("Transparent 25%", 0.25), ("Solid (not transparent)", 1.0)] {
+            for (label, opacity) in [("Transparent 75%", 0.75), ("Transparent 50%", 0.5), ("Transparent 25%", 0.25), ("Solid (not transparent)", 1.0)]
+            {
                 let mut params = targets.clone();
                 params["opacity"] = json!(opacity);
                 item.children.push(cmd(app, "appearance.opacity", label).with(params));
@@ -1251,7 +1252,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing" => {
             if let Some(workspace) = p.get("workspace").and_then(Value::as_str) {
-                let r = if workspace == "drawing" { crate::drawing_workspace::enter(app) } else { crate::render_workspace::enter(app, workspace == "render") };
+                let r = if workspace == "drawing" {
+                    crate::drawing_workspace::enter(app)
+                } else {
+                    crate::render_workspace::enter(app, workspace == "render")
+                };
                 if let Err(e) = r {
                     app.set_status(e, true);
                 }

@@ -577,10 +577,8 @@ fn cylinder_side_lines(m: &solidcraft_engine::geom::Mesh) -> Vec<(Vec3, Vec3)> {
     for verts in by_face.values_mut().take(MAX_FACES) {
         verts.sort_unstable();
         verts.dedup();
-        let pts: Vec<(Vec3, Vec3)> = verts
-            .iter()
-            .filter_map(|&i| Some((*m.positions.get(i as usize)?, m.normals.get(i as usize)?.normalized()?)))
-            .collect();
+        let pts: Vec<(Vec3, Vec3)> =
+            verts.iter().filter_map(|&i| Some((*m.positions.get(i as usize)?, m.normals.get(i as usize)?.normalized()?))).collect();
         let Some(&(p0, n0)) = pts.first() else { continue };
         // The axis: square to every normal, so the cross product of two that differ.
         let Some((n1, d)) = pts.iter().find_map(|(_, n)| n0.cross(*n).normalized().map(|d| (*n, d))) else { continue };
@@ -691,7 +689,19 @@ impl BodyDraw {
     fn key(&self, shaded: bool, edges: bool, hidden_edges: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (std::sync::Arc::as_ptr(&self.mesh) as usize).hash(&mut h);
-        (self.col, self.faded, self.opacity.to_bits(), self.on_gpu, shaded, edges, hidden_edges, edge_col, hidden_col, TANGENT_EDGES.load(std::sync::atomic::Ordering::Relaxed)).hash(&mut h);
+        (
+            self.col,
+            self.faded,
+            self.opacity.to_bits(),
+            self.on_gpu,
+            shaded,
+            edges,
+            hidden_edges,
+            edge_col,
+            hidden_col,
+            TANGENT_EDGES.load(std::sync::atomic::Ordering::Relaxed),
+        )
+            .hash(&mut h);
         let mut looks: Vec<_> = self.face_looks.iter().map(|(f, l)| (*f, l.color, l.opacity.to_bits())).collect();
         looks.sort_unstable();
         looks.hash(&mut h);
@@ -985,7 +995,11 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // Closed profiles are shaded (lifted off a face they may lie on).
         let lift = ss.plane.normal() * 0.01;
         // A Project Curve result is curves only: no shaded region comes with it.
-        let profiles = if app.ui.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile || ss.sketch.view.role == "curve" { &[][..] } else { &ss.profiles[..] };
+        let profiles = if app.ui.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile || ss.sketch.view.role == "curve" {
+            &[][..]
+        } else {
+            &ss.profiles[..]
+        };
         for (index, _) in profiles.iter().enumerate() {
             let display = crate::sketch_display::profile_region(app, sid, index, &ss.plane, proj);
             for tri in display.as_ref().as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut fill_budget)) {
@@ -1699,7 +1713,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         }
         let lp = ss.plane.to_local(o + d * t);
         // Show Profile off: the sketch being edited offers no profiles.
-        let profiles = if (ss.sketch.view.hide_profile && s.active_sketch == Some(sid)) || ss.sketch.view.role == "curve" { &[][..] } else { &ss.profiles[..] };
+        let profiles =
+            if (ss.sketch.view.hide_profile && s.active_sketch == Some(sid)) || ss.sketch.view.role == "curve" { &[][..] } else { &ss.profiles[..] };
         for (pi, p) in profiles.iter().enumerate() {
             if !p.region.contains(lp) {
                 continue;

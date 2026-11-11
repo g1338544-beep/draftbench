@@ -69,29 +69,32 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, area: Rect) {
     let at = anchor(selection_key(app), pointer, area, width);
     let t = Tokens::get();
     let mut clicked: Option<Item> = None;
-    Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new("sc_relation_bar")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-        Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(4, 4)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                for item in &list {
-                    let (r, resp) = ui.allocate_exact_size(vec2(BUTTON, BUTTON), egui::Sense::click());
-                    if resp.hovered() {
-                        ui.painter().rect_filled(r, 4.0, t.hover);
+    Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new("sc_relation_bar")).fixed_pos(at).order(egui::Order::Foreground).show(
+        ui.ctx(),
+        |ui| {
+            Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(4, 4)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    for item in &list {
+                        let (r, resp) = ui.allocate_exact_size(vec2(BUTTON, BUTTON), egui::Sense::click());
+                        if resp.hovered() {
+                            ui.painter().rect_filled(r, 4.0, t.hover);
+                        }
+                        if item.icon.is_empty() {
+                            let short: String = item.label.chars().take(2).collect();
+                            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, short, egui::FontId::proportional(12.0), t.text);
+                        } else {
+                            crate::icons::paint_icon(ui.painter(), r.shrink(4.0), &item.icon, 1.0);
+                        }
+                        let label = crate::i18n::tr_label(&item.label);
+                        if resp.on_hover_text(label).clicked() {
+                            clicked = Some(item.clone());
+                        }
                     }
-                    if item.icon.is_empty() {
-                        let short: String = item.label.chars().take(2).collect();
-                        ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, short, egui::FontId::proportional(12.0), t.text);
-                    } else {
-                        crate::icons::paint_icon(ui.painter(), r.shrink(4.0), &item.icon, 1.0);
-                    }
-                    let label = crate::i18n::tr_label(&item.label);
-                    if resp.on_hover_text(label).clicked() {
-                        clicked = Some(item.clone());
-                    }
-                }
+                });
             });
-        });
-    });
+        },
+    );
     if let Some(item) = clicked {
         crate::context_menu::run_item(app, &item, at);
         ANCHOR.with(|a| *a.borrow_mut() = None);

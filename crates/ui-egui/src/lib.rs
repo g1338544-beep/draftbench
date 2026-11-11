@@ -13,7 +13,6 @@ pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
 pub mod bom_panel;
-pub mod script_panel;
 pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
@@ -26,14 +25,11 @@ pub mod command_help;
 pub mod context_menu;
 pub mod control;
 pub mod control_job;
+pub mod copy_drag;
 pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
-pub mod layer_window;
-pub mod relation_bar;
-pub mod reveal;
-pub mod wcs_rotate;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -83,9 +79,9 @@ pub mod icons;
 pub mod inference;
 pub mod install;
 pub mod issue_report;
-pub mod copy_drag;
 pub mod joint_drag;
 pub mod keymap;
+pub mod layer_window;
 mod linked_source;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
@@ -94,6 +90,10 @@ mod look_at_tests;
 #[cfg(test)]
 mod manage_dialogs_tests;
 mod material_card_review;
+pub mod relation_bar;
+pub mod reveal;
+pub mod script_panel;
+pub mod wcs_rotate;
 
 #[cfg(test)]
 mod measurement_ui_tests;
@@ -158,6 +158,7 @@ mod blend_dialog_tests;
 #[cfg(test)]
 mod boundary_dialog_tests;
 pub(crate) mod display_lod;
+pub mod drawing_workspace;
 #[cfg(test)]
 mod file_load_ui_tests;
 #[cfg(test)]
@@ -166,9 +167,9 @@ pub mod mouse_gesture;
 pub(crate) mod navigation;
 pub(crate) mod open_meshing;
 pub mod params_dialog;
+pub(crate) mod path_plane;
 pub(crate) mod pick_buffer;
 pub(crate) mod pick_index;
-pub(crate) mod path_plane;
 pub(crate) mod plugins;
 pub mod prefs;
 pub mod prefs_notice;
@@ -179,7 +180,6 @@ pub mod preview;
 mod primitive_units_tests;
 pub mod recovery_ui;
 pub mod ref_images;
-pub mod drawing_workspace;
 pub mod render_workspace;
 #[cfg(test)]
 mod revolve_edit_tests;
@@ -1099,7 +1099,9 @@ impl SolveApp {
         }
         if id == "wcs.origin" {
             // With nothing picked, show the triad and take the next click as the new origin.
-            let picked = self.session.selection.iter().any(|x| matches!(x, solidcraft_engine::Sel::Vertex { .. } | solidcraft_engine::Sel::Edge { .. } | solidcraft_engine::Sel::Face { .. }));
+            let picked = self.session.selection.iter().any(|x| {
+                matches!(x, solidcraft_engine::Sel::Vertex { .. } | solidcraft_engine::Sel::Edge { .. } | solidcraft_engine::Sel::Face { .. })
+            });
             if !picked {
                 wcs_triad::pick_origin();
             }
@@ -1208,9 +1210,13 @@ impl SolveApp {
             self.dialog = Some(d);
             // The prompt line says what to click, the way a mate asks for its two faces.
             let prompt = match id {
-                "solid.align" => Some("Mate: click the body to move, then the face (or edge/point) to move from, then the face to meet; pick Distance for a gap"),
+                "solid.align" => {
+                    Some("Mate: click the body to move, then the face (or edge/point) to move from, then the face to meet; pick Distance for a gap")
+                }
                 "sketch.project_to_surface" => Some("Project Curve: click curves of other sketches, then the face to project onto"),
-                "solid.sweep" => Some("Sweep: click the profile (a closed shape), then click the path curve(s); the path goes in another sketch, then press OK"),
+                "solid.sweep" => {
+                    Some("Sweep: click the profile (a closed shape), then click the path curve(s); the path goes in another sketch, then press OK")
+                }
                 "solid.hole" => Some("Hole: click a face where the hole goes (or a sketch point), choose the size, then press OK"),
                 _ => None,
             };
@@ -1844,7 +1850,11 @@ impl SolveApp {
         }
         let full = ui.available_rect_before_wrap();
         if floating {
-            let cards = shell::Cards::new(full, self.ui.layout, toolbar::ribbon_height_rows(self.preferences.ribbon_labels, self.preferences.ribbon_icon_rows));
+            let cards = shell::Cards::new(
+                full,
+                self.ui.layout,
+                toolbar::ribbon_height_rows(self.preferences.ribbon_labels, self.preferences.ribbon_icon_rows),
+            );
             self.shell.cards = vec![cards.workspace, cards.ribbon];
             self.shell.history = if left_timeline {
                 let below_ribbon = egui::Rect::from_min_max(egui::pos2(full.left(), cards.bottom), full.max);

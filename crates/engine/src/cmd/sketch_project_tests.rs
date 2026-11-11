@@ -689,7 +689,11 @@ fn project_curve_onto_every_face_of_a_body() {
     run(&mut s, "sketch.finish", json!({}));
     let src = s.doc.features.last().unwrap().id;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
-    let r = run(&mut s, "sketch.project_to_surface", json!({"curves": [{"sketch": src, "curve": l}], "body": body, "all_faces": true, "direction": "normal"}));
+    let r = run(
+        &mut s,
+        "sketch.project_to_surface",
+        json!({"curves": [{"sketch": src, "curve": l}], "body": body, "all_faces": true, "direction": "normal"}),
+    );
     let wid = r["links"][0]["wires"][0].as_str().unwrap().to_string();
     let st = s.model.state();
     let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
@@ -710,10 +714,9 @@ fn a_projected_curve_sketch_has_a_role_that_is_saved_and_listed_apart() {
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plain"}));
     run(&mut s, "sketch.finish", json!({}));
     assert!(s.execute("sketch.create", &json!({"plane": "XY", "role": "bogus"})).is_err());
-    let roles = |s: &Session| {
-        s.model.state().sketches.iter().map(|x| (x.name.clone(), x.sketch.view.role.clone())).collect::<Vec<_>>()
-    };
-    let expect = [("Source".to_string(), "helper".to_string()), ("Projected curves".to_string(), "curve".to_string()), ("Plain".to_string(), String::new())];
+    let roles = |s: &Session| s.model.state().sketches.iter().map(|x| (x.name.clone(), x.sketch.view.role.clone())).collect::<Vec<_>>();
+    let expect =
+        [("Source".to_string(), "helper".to_string()), ("Projected curves".to_string(), "curve".to_string()), ("Plain".to_string(), String::new())];
     assert_eq!(roles(&s), expect);
     // The role survives saving and reopening.
     let text = s.doc.to_json();
@@ -758,7 +761,8 @@ fn project_curve_onto_several_faces_skips_the_ones_it_misses() {
     // The end face runs along the projection direction: a line cannot land on it alone…
     assert!(s.execute("sketch.project_to_surface", &json!({"curves": curves, "face": [0, 15, 10], "body": "B", "direction": "sketch"})).is_err());
     // …but with the top face too, the top gets the line and the end face is skipped.
-    let r = run(&mut s, "sketch.project_to_surface", json!({"curves": curves, "faces": [[20, 15, 20], [0, 15, 10]], "body": "B", "direction": "sketch"}));
+    let r =
+        run(&mut s, "sketch.project_to_surface", json!({"curves": curves, "faces": [[20, 15, 20], [0, 15, 10]], "body": "B", "direction": "sketch"}));
     assert_eq!(r["links"].as_array().map(Vec::len), Some(1), "{r}");
 }
 
@@ -776,7 +780,10 @@ fn project_edge_follows_a_curved_face_in_3d() {
     assert!(r["links"].as_array().is_some_and(|l| !l.is_empty()), "{r}");
     // An edge that is not there is an error, not a panic.
     assert!(
-        s.execute("sketch.project_to_surface", &json!({"edges": [{"edge": [900, 900, 900], "body": "Flange"}], "body": "Dome", "all_faces": true, "direction": "normal"}))
-            .is_err()
+        s.execute(
+            "sketch.project_to_surface",
+            &json!({"edges": [{"edge": [900, 900, 900], "body": "Flange"}], "body": "Dome", "all_faces": true, "direction": "normal"})
+        )
+        .is_err()
     );
 }

@@ -213,8 +213,16 @@ pub const PAGES: [&str; 9] = ["General", "Navigation", "Keyboard Shortcuts", "De
 // Keep every existing page and its scenario identity; only their presentation is shared.
 const WINDOW_PAGES: [ui_kit::WindowPage<SolveApp>; 9] = [
     ui_kit::WindowPage { group: "", icon: "settings", label: "ui.general", handle: "prefs:page:General", scroll: true, draw: window_page::<0> },
-    ui_kit::WindowPage { group: "INPUT", icon: "orbit", label: "ui.navigation", handle: "prefs:page:Navigation", scroll: true, draw: window_page::<1> },
-    ui_kit::WindowPage { group: "INPUT",
+    ui_kit::WindowPage {
+        group: "INPUT",
+        icon: "orbit",
+        label: "ui.navigation",
+        handle: "prefs:page:Navigation",
+        scroll: true,
+        draw: window_page::<1>,
+    },
+    ui_kit::WindowPage {
+        group: "INPUT",
         icon: "settings",
         label: "ui.keyboard_shortcuts",
         handle: "prefs:page:Keyboard Shortcuts",
@@ -1505,7 +1513,9 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             });
             ui_kit::checkbox(ui, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
             ui_kit::row(ui, app.tr_label("Background"), |ui| {
-                for (label, hex) in [("Theme", ""), ("Slate", "#2e3440"), ("Black", "#101214"), ("Grey", "#9aa3ad"), ("Light", "#e6e9ee"), ("White", "#ffffff")] {
+                for (label, hex) in
+                    [("Theme", ""), ("Slate", "#2e3440"), ("Black", "#101214"), ("Grey", "#9aa3ad"), ("Light", "#e6e9ee"), ("White", "#ffffff")]
+                {
                     let on = app.preferences.viewport_bg == hex;
                     if ui.selectable_label(on, crate::i18n::tr_label(label)).clicked() {
                         app.preferences.viewport_bg = hex.to_string();
@@ -1537,7 +1547,12 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             }
             ui_kit::row(ui, app.tr_label("Edge thickness"), |ui| {
-                ui_kit::slider(ui, &mut app.preferences.edge_width, 0.5..=5.0, ui_kit::Slider { step: Some(0.1), format: |v| format!("{v:.1} px"), ..Default::default() });
+                ui_kit::slider(
+                    ui,
+                    &mut app.preferences.edge_width,
+                    0.5..=5.0,
+                    ui_kit::Slider { step: Some(0.1), format: |v| format!("{v:.1} px"), ..Default::default() },
+                );
             });
             ui_kit::checkbox(ui, crate::i18n::tr_label("Enter previews first (press Enter twice to apply)"), &mut app.preferences.enter_previews);
             for (label, which) in [("Part colour", 0), ("Selection colour", 1)] {
@@ -1554,13 +1569,28 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             }
             ui_kit::row(ui, app.tr_label("Theme tone: hue"), |ui| {
-                ui_kit::slider(ui, &mut app.preferences.tone_hue, -180.0..=180.0, ui_kit::Slider { step: Some(5.0), format: |v| format!("{v:.0}°"), ..Default::default() })
+                ui_kit::slider(
+                    ui,
+                    &mut app.preferences.tone_hue,
+                    -180.0..=180.0,
+                    ui_kit::Slider { step: Some(5.0), format: |v| format!("{v:.0}°"), ..Default::default() },
+                )
             });
             ui_kit::row(ui, app.tr_label("Theme tone: saturation"), |ui| {
-                ui_kit::slider(ui, &mut app.preferences.tone_saturation, 0.0..=1.6, ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() })
+                ui_kit::slider(
+                    ui,
+                    &mut app.preferences.tone_saturation,
+                    0.0..=1.6,
+                    ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+                )
             });
             ui_kit::row(ui, app.tr_label("Theme tone: lightness"), |ui| {
-                ui_kit::slider(ui, &mut app.preferences.tone_light, -0.3..=0.3, ui_kit::Slider { step: Some(0.02), format: |v| format!("{:+.0} %", v * 100.0), ..Default::default() })
+                ui_kit::slider(
+                    ui,
+                    &mut app.preferences.tone_light,
+                    -0.3..=0.3,
+                    ui_kit::Slider { step: Some(0.02), format: |v| format!("{:+.0} %", v * 100.0), ..Default::default() },
+                )
             });
             if ui_kit::button(ui, app.tr_label("Reset tone"), ui_kit::Button::Small).clicked() {
                 (app.preferences.tone_hue, app.preferences.tone_saturation, app.preferences.tone_light) = (0.0, 1.0, 0.0);
@@ -1680,8 +1710,12 @@ fn display_quality_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             p.add(egui::Shape::closed_line(corners.to_vec(), egui::Stroke::new(if on || response.hovered() { 2.0 } else { 1.0 }, edge)));
             let c = rect.center() - egui::vec2(0.0, 8.0);
             let r = 24.0;
-            let ring: Vec<egui::Pos2> =
-                (0..sides).map(|k| { let a = std::f32::consts::TAU * k as f32 / sides as f32 - std::f32::consts::FRAC_PI_2; c + egui::vec2(a.cos(), a.sin()) * r }).collect();
+            let ring: Vec<egui::Pos2> = (0..sides)
+                .map(|k| {
+                    let a = std::f32::consts::TAU * k as f32 / sides as f32 - std::f32::consts::FRAC_PI_2;
+                    c + egui::vec2(a.cos(), a.sin()) * r
+                })
+                .collect();
             p.add(egui::Shape::closed_line(ring, egui::Stroke::new(1.8, t.accent)));
             p.text(
                 egui::pos2(rect.center().x, rect.bottom() - 12.0),
@@ -1707,7 +1741,10 @@ fn orientation_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let p = ui.painter_at(rect);
             p.rect_filled(rect, 6.0, t.viewport_top);
             let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
-            p.add(egui::Shape::closed_line(corners.to_vec(), egui::Stroke::new(if on || response.hovered() { 2.0 } else { 1.0 }, if on { t.accent } else { t.origin_plane_edge })));
+            p.add(egui::Shape::closed_line(
+                corners.to_vec(),
+                egui::Stroke::new(if on || response.hovered() { 2.0 } else { 1.0 }, if on { t.accent } else { t.origin_plane_edge }),
+            ));
             let o = rect.center() + egui::vec2(0.0, 4.0);
             let len = 34.0;
             // Up, the axis to the right and the one coming toward the viewer, in the colours of the view triad.
@@ -1718,7 +1755,13 @@ fn orientation_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 p.line_segment([o, o + d], egui::Stroke::new(2.0, col));
                 p.text(o + d * 1.25, egui::Align2::CENTER_CENTER, ["X", "Y", "Z"][axis.min(2)], egui::FontId::proportional(11.0), col);
             }
-            p.text(egui::pos2(rect.center().x, rect.bottom() - 12.0), egui::Align2::CENTER_CENTER, crate::i18n::tr_label(name), egui::FontId::proportional(13.0), ui.visuals().text_color());
+            p.text(
+                egui::pos2(rect.center().x, rect.bottom() - 12.0),
+                egui::Align2::CENTER_CENTER,
+                crate::i18n::tr_label(name),
+                egui::FontId::proportional(13.0),
+                ui.visuals().text_color(),
+            );
             if response.clicked() {
                 app.preferences.up_axis = if is_y { "y" } else { "z" }.into();
             }
@@ -1735,7 +1778,8 @@ fn graphics_preset_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
         "quality" => 1,
         _ => 2,
     };
-    let labels = [app.tr("ui.graphics_performance").to_string(), app.tr("ui.graphics_quality").to_string(), crate::i18n::tr_label("Custom").to_string()];
+    let labels =
+        [app.tr("ui.graphics_performance").to_string(), app.tr("ui.graphics_quality").to_string(), crate::i18n::tr_label("Custom").to_string()];
     let names: Vec<&str> = labels.iter().map(String::as_str).collect();
     let changed = ui_kit::segmented(ui, &mut selected, &names, Default::default());
     crate::scenario::publish_handle("view:graphics_preset", ui.min_rect().center());
@@ -1772,14 +1816,28 @@ fn msaa_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 let x0 = area.left() + area.width() * k as f32 / steps as f32;
                 let top = area.top() + area.height() * (k as f32 + 0.5) / steps as f32;
                 let col = if ok { t.accent } else { t.text_dim };
-                p.rect_filled(egui::Rect::from_min_max(egui::pos2(x0, top), egui::pos2(x0 + area.width() / steps as f32 + 0.5, area.bottom())), 0.0, col);
+                p.rect_filled(
+                    egui::Rect::from_min_max(egui::pos2(x0, top), egui::pos2(x0 + area.width() / steps as f32 + 0.5, area.bottom())),
+                    0.0,
+                    col,
+                );
                 if m > 1 {
                     // The smoothing: a half-tone cell on each step's corner.
-                    p.rect_filled(egui::Rect::from_min_max(egui::pos2(x0, top - 3.0), egui::pos2(x0 + area.width() / steps as f32 + 0.5, top)), 0.0, col.gamma_multiply(0.45));
+                    p.rect_filled(
+                        egui::Rect::from_min_max(egui::pos2(x0, top - 3.0), egui::pos2(x0 + area.width() / steps as f32 + 0.5, top)),
+                        0.0,
+                        col.gamma_multiply(0.45),
+                    );
                 }
             }
             let label = if m == 1 { crate::i18n::tr_label("Off").to_string() } else { format!("{m}×") };
-            p.text(egui::pos2(rect.center().x, rect.bottom() - 12.0), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.0), ui.visuals().text_color());
+            p.text(
+                egui::pos2(rect.center().x, rect.bottom() - 12.0),
+                egui::Align2::CENTER_CENTER,
+                label,
+                egui::FontId::proportional(13.0),
+                ui.visuals().text_color(),
+            );
             if ok && response.clicked() {
                 app.preferences.msaa = m;
             }
@@ -1799,8 +1857,12 @@ fn orbit_around_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let (rect, response, p) = tile(ui, t, egui::vec2(124.0, 98.0), on, true);
             let c = rect.center() + egui::vec2(6.0, -8.0);
             let r = 20.0;
-            let hex: Vec<egui::Pos2> =
-                (0..6).map(|k| { let a = std::f32::consts::FRAC_PI_3 * k as f32 - std::f32::consts::FRAC_PI_2; c + egui::vec2(a.cos(), a.sin()) * r }).collect();
+            let hex: Vec<egui::Pos2> = (0..6)
+                .map(|k| {
+                    let a = std::f32::consts::FRAC_PI_3 * k as f32 - std::f32::consts::FRAC_PI_2;
+                    c + egui::vec2(a.cos(), a.sin()) * r
+                })
+                .collect();
             let ink = egui::Stroke::new(1.6, t.text_dim);
             p.add(egui::Shape::closed_line(hex.clone(), ink));
             for k in [1usize, 3, 5] {
@@ -1815,7 +1877,10 @@ fn orbit_around_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 _ => c + egui::vec2(r + 6.0, 8.0),
             };
             let arc: Vec<egui::Pos2> = (0..=16)
-                .map(|k| { let a = std::f32::consts::PI * (0.1 + 0.8 * k as f32 / 16.0); pivot + egui::vec2(a.cos() * 13.0, a.sin() * 6.0) })
+                .map(|k| {
+                    let a = std::f32::consts::PI * (0.1 + 0.8 * k as f32 / 16.0);
+                    pivot + egui::vec2(a.cos() * 13.0, a.sin() * 6.0)
+                })
                 .collect();
             p.add(egui::Shape::line(arc, egui::Stroke::new(1.8, t.accent)));
             p.circle_filled(pivot, 3.0, t.accent);
@@ -1824,7 +1889,13 @@ fn orbit_around_tiles(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 OrbitAround::ViewCentre => "View centre",
                 _ => name,
             };
-            p.text(egui::pos2(rect.center().x, rect.bottom() - 12.0), egui::Align2::CENTER_CENTER, crate::i18n::tr_label(label), egui::FontId::proportional(13.0), ui.visuals().text_color());
+            p.text(
+                egui::pos2(rect.center().x, rect.bottom() - 12.0),
+                egui::Align2::CENTER_CENTER,
+                crate::i18n::tr_label(label),
+                egui::FontId::proportional(13.0),
+                ui.visuals().text_color(),
+            );
             if response.clicked() {
                 app.preferences.orbit_around = mode;
             }
@@ -2772,7 +2843,12 @@ mod tests {
         app.keymap.custom.insert("solid.extrude".into(), "Shift+E".into());
         let v = control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(v["dialog"], serde_json::Value::Null);
-        assert!(!app.ui.dark && app.preferences.theme == "light" && app.preferences.ui_scale == Prefs::default().ui_scale && app.preferences.zoom_to_cursor);
+        assert!(
+            !app.ui.dark
+                && app.preferences.theme == "light"
+                && app.preferences.ui_scale == Prefs::default().ui_scale
+                && app.preferences.zoom_to_cursor
+        );
         assert!(app.keymap.custom.is_empty(), "a rebinding made while the dialog was open is undone too");
 
         control(&mut app, &json!({"open": "Navigation", "nav": "alias", "look_at_anim": false})).unwrap();

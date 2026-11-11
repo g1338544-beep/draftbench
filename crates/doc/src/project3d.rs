@@ -139,7 +139,8 @@ pub(crate) fn onto_face_nearest(m: &Mesh, f: Option<u32>, pts: &[Vec3]) -> Vec<V
         let mut best: Option<(f64, Vec3, usize)> = None;
         for (i, (t, (lo, hi))) in ts.iter().zip(&boxes).enumerate() {
             if let Some((bd, _, _)) = best {
-                let d = Vec3::new((lo.x - p.x).max(p.x - hi.x).max(0.0), (lo.y - p.y).max(p.y - hi.y).max(0.0), (lo.z - p.z).max(p.z - hi.z).max(0.0));
+                let d =
+                    Vec3::new((lo.x - p.x).max(p.x - hi.x).max(0.0), (lo.y - p.y).max(p.y - hi.y).max(0.0), (lo.z - p.z).max(p.z - hi.z).max(0.0));
                 if d.x * d.x + d.y * d.y + d.z * d.z >= bd * bd {
                     continue;
                 }
@@ -661,7 +662,8 @@ mod tests {
     fn a_curve_projected_normal_to_a_dome_does_not_zigzag_along_the_facets() {
         let m = dome();
         // A circle well above the dome: each point belongs on the dome straight below it towards the centre.
-        let ring: Vec<Vec3> = (0..=90).map(|i| std::f64::consts::TAU * i as f64 / 90.0).map(|t| Vec3::new(9.0 * t.cos(), 9.0 * t.sin(), 30.0)).collect();
+        let ring: Vec<Vec3> =
+            (0..=90).map(|i| std::f64::consts::TAU * i as f64 / 90.0).map(|t| Vec3::new(9.0 * t.cos(), 9.0 * t.sin(), 30.0)).collect();
         let wires = onto_face_nearest(&m, None, &ring);
         assert_eq!(wires.len(), 1, "one unbroken curve");
         let want = Vec3::new(9.0, 0.0, 30.0).normalized().unwrap().z;
