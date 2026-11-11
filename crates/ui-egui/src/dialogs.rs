@@ -405,6 +405,40 @@ impl Default for HoleOpts {
     }
 }
 
+thread_local! {
+    /// Each command's values at its last OK (by dialog kind, and command for primitives).
+    static LAST_VALUES: std::cell::RefCell<std::collections::HashMap<String, Kind>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Which remembered values a dialog kind shares: its variant, plus the command for primitives
+/// (Box, Cylinder… share one kind). None: kinds whose state is not plain values.
+fn values_key(k: &Kind) -> Option<String> {
+    match k {
+        Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. } | Kind::Assembly(_) | Kind::Text(_) | Kind::SketchModify(_) => None,
+        Kind::Primitive { cmd, .. } => Some(format!("Primitive:{cmd}")),
+        _ => {
+            let dbg = format!("{k:?}");
+            let end = dbg.find([' ', '{', '(']).unwrap_or(dbg.len());
+            Some(dbg.get(..end).unwrap_or_default().to_string())
+        }
+    }
+}
+
+fn remember_values(k: &Kind) {
+    if let Some(key) = values_key(k) {
+        let mut k = k.clone();
+        if let Kind::Primitive { at, .. } = &mut k {
+            *at = None;
+        }
+        LAST_VALUES.with(|m| m.borrow_mut().insert(key, k));
+    }
+}
+
+fn remembered_values(k: &Kind) -> Option<Kind> {
+    let key = values_key(k)?;
+    LAST_VALUES.with(|m| m.borrow().get(&key).cloned())
+}
+
 #[derive(Clone, Debug)]
 pub struct Dialog {
     pub kind: Kind,
@@ -830,6 +864,11 @@ impl Dialog {
                 Dialog::new(kind, inputs)
             }
         };
+        // The values the last OK of this command left (owner's request: every command keeps its
+        // last settings); picks are not kept.
+        if let Some(k) = remembered_values(&d.kind) {
+            d.kind = k;
+        }
         if id == "solid.trim_body" {
             d.extra.insert("trim".into(), json!(true));
         }
@@ -2563,8 +2602,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let panel =
         panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
     let window = panel.window(ctx);
-    let repeatable =
-        matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
+    // Apply (owner's request): make the feature and keep the command open for the next one, its
+    // values kept and its picks cleared. Not when editing, nor for the dialogs that open
+    // something else or only inspect.
+    let repeatable = d.editing.is_none()
+        && !d.extra.contains_key("pattern")
+        && match &d.kind {
+            Kind::SketchModify(k) => crate::sketch_modify_ui::repeatable(k),
+            Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. } | Kind::Assembly(_) | Kind::Text(_) => false,
+            _ => true,
+        };
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
         let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", dialog_title(&d.kind, &d.extra))), "delete", &heading)
@@ -2773,6 +2820,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 Err(e) => d.refuse(app, e),
             },
         }
+    }
+    if applied && d.editing.is_none() {
+        remember_values(&d.kind);
     }
     if applied && apply_again {
         for input in &mut d.inputs {
