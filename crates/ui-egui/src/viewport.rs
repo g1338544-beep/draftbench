@@ -1854,6 +1854,10 @@ pub fn selection_bounds(app: &SolveApp) -> Option<solidcraft_engine::geom::Aabb3
                     for p in ss.sketch.polyline(i) {
                         b.add(ss.plane.to_world(p));
                     }
+                } else if let Some(w) = st.sketch(*sketch).and_then(|ss| ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i))) {
+                    for p in &w.pts {
+                        b.add(*p);
+                    }
                 }
             }
             Sel::SketchCurve { id } => {
@@ -2365,6 +2369,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
                             feedback.line(a.to_f32(), b.to_f32(), c4(t.sel_edge), 3.5, true);
                         }
+                    }
+                } else if let Some(w) = st.sketch(*sketch).and_then(|ss| ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i))) {
+                    // A picked 3D curve of a finished sketch (a projected curve) shows as selected.
+                    for q in w.pts.windows(2) {
+                        feedback.line(q[0].to_f32(), q[1].to_f32(), c4(t.sel_edge), 3.5, true);
                     }
                 }
             }
@@ -3874,6 +3883,9 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                     let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                     crate::tools::paint_sketch_path(part, mode, painter, proj, Stroke::new(3.0, col));
                 }
+            } else if let Some(w) = st.sketch(*sketch).and_then(|ss| ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i))) {
+                // A 3D curve (projected onto a face, an intersection): it lights up like any other.
+                crate::tools::paint_sketch_path(&w.pts, 0, painter, proj, Stroke::new(3.0, col));
             }
         }
         Some(Hit::SketchPoint { sketch, at, .. }) => {
