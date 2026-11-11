@@ -146,7 +146,14 @@ pub fn paint(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &
             let n = vec2(-u.y, u.x);
             painter.add(egui::Shape::convex_polygon(vec![b, b - u * 10.0 + n * 4.5, b - u * 10.0 - n * 4.5], colour, Stroke::NONE));
         }
-        let mid: Pos2 = a + v * 0.5 + vec2(8.0, -12.0);
+        // Owner: clicking the dimension line puts the typing into its distance box.
+        if line_clicked(ui, r.slot, a, b) {
+            focus_value(ui.ctx(), r.slot);
+        }
+        // The box sits on the dimension line's middle, beside the line (not by the hole).
+        let side = if v.length() > 1.0 { vec2(-v.y, v.x) / v.length() } else { vec2(0.0, -1.0) };
+        let side = if side.x < 0.0 { -side } else { side };
+        let mid: Pos2 = a + v * 0.5 + side * 14.0;
         if let Some(t) = text.get_mut(r.slot) {
             edge_box(ui, r.slot, t, mid);
         }
@@ -156,18 +163,71 @@ pub fn paint(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &
     }
 }
 
+fn value_id(slot: usize) -> egui::Id {
+    egui::Id::new(("sc_hole_edge_value", slot))
+}
+
+/// The distance box of `slot` takes the keyboard with its text selected, ready to type over.
+fn focus_value(ctx: &egui::Context, slot: usize) {
+    let id = value_id(slot);
+    ctx.memory_mut(|m| m.request_focus(id));
+    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(usize::MAX / 2))));
+        state.store(ctx, id);
+    }
+}
+
+/// Points along the line `a`–`b` where a click counts as a click on the line (about every 10 px).
+pub(crate) fn line_targets(a: Pos2, b: Pos2) -> Vec<Pos2> {
+    let len = (b - a).length();
+    let n = ((len / 10.0).ceil() as usize).clamp(1, 200);
+    (0..=n).map(|i| a + (b - a) * (i as f32 / n as f32)).collect()
+}
+
+/// Was the dimension line clicked? Small click targets along it, on top of the viewport, so the
+/// click is not also a pick on the model.
+fn line_clicked(ui: &egui::Ui, slot: usize, a: Pos2, b: Pos2) -> bool {
+    let mut clicked = false;
+    for (i, p) in line_targets(a, b).into_iter().enumerate() {
+        let r = egui::Rect::from_center_size(p, vec2(12.0, 12.0));
+        let resp = ui.interact(r, egui::Id::new(("sc_hole_edge_line", slot, i)), egui::Sense::click());
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        clicked |= resp.clicked();
+    }
+    clicked
+}
+
 fn edge_box(ui: &mut egui::Ui, slot: usize, value: &mut String, at: Pos2) {
     use crate::ui_kit::{Container, Surface};
     let t = crate::theme::Tokens::get();
-    Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new(("sc_hole_edge_area", slot))).fixed_pos(at).order(egui::Order::Foreground).show(
+    Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new(("sc_hole_edge_area", slot))).fixed_pos(at).pivot(egui::Align2::LEFT_CENTER).order(egui::Order::Foreground).show(
         ui.ctx(),
         |ui| {
             Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(format!("Edge {}", slot + 1)).color(t.text_dim).size(t.font_caption));
-                    crate::ui_kit::canvas_value_field(ui, egui::Id::new(("sc_hole_edge_value", slot)), value);
+                    crate::ui_kit::canvas_value_field(ui, value_id(slot), value);
                 });
             });
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::pos2;
+
+    #[test]
+    fn the_dimension_line_is_clickable_end_to_end() {
+        let t = line_targets(pos2(0.0, 0.0), pos2(0.0, 45.0));
+        assert_eq!(t.first(), Some(&pos2(0.0, 0.0)));
+        assert_eq!(t.last(), Some(&pos2(0.0, 45.0)));
+        // No gap wider than a target (12 px) between neighbours.
+        assert!(t.windows(2).all(|w| (w[1] - w[0]).length() <= 12.0), "{t:?}");
+        // A line too short to see still has a target.
+        assert!(!line_targets(pos2(5.0, 5.0), pos2(5.0, 5.0)).is_empty());
+    }
 }
