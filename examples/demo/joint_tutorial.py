@@ -40,7 +40,7 @@ def handle_like(d, *words):
         handles = d.ui("ui.handles")
         for h in handles:
             if all(w in h["name"] for w in words):
-                return (h["x"], h["y"])
+                return d.at(handle=h["name"])  # the app's own click point for the handle
         card = next((h for h in handles if h["name"] == "dialog:card"), None) or next((h for h in handles if h["name"] == "dialog:Type"), None)
         if card is None:
             break
