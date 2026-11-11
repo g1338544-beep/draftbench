@@ -283,7 +283,8 @@ pub struct UiState {
     pub perspective: bool,
     pub show_sketches: bool,
     pub palette_open: bool,
-    /// Dark theme (the default); a preference kept between runs.
+    /// Dark theme; a preference kept between runs. The light theme (grey-to-white graphics area,
+    /// as in established CAD tools) is the default.
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
     pub pick_off: Vec<String>,
@@ -319,7 +320,7 @@ impl Default for UiState {
             perspective: false,
             show_sketches: true,
             palette_open: false,
-            dark: true,
+            dark: false,
             pick_off: Vec::new(),
             pick_bodies: false,
             visual_style: 0,

@@ -611,7 +611,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some(t) => Pic::Ready(t.as_ref()),
                     None => Pic::Icon("box"),
                 };
-                if tinted_card(ui, tex, app.tr_label(s.name), sub, i).on_hover_text(about).clicked() {
+                if tinted_card(ui, tex, app.tr_label(s.name), s.name, sub, i).on_hover_text(about).clicked() {
                     action = Some(Box::new(move |app: &mut SolveApp| open_sample(app, i)));
                 }
             });
@@ -680,13 +680,14 @@ fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, _recent: &[String]) -> Option<Ac
     let painter = ui.painter().clone();
     // Dark green to light green, from the Sketch accent of the icon palette.
     let (dark, mid) = (palette("active-3", "sketch"), palette("active-2", "sketch"));
-    let light = mid.lerp_to_gamma(palette("active-1", "sketch"), 0.5);
-    gradient_rect(&painter, r, 22.0, &[dark, mid, light]);
+    let deep = dark.lerp_to_gamma(Color32::BLACK, 0.18);
+    let light = mid.lerp_to_gamma(palette("active-1", "sketch"), 0.7);
+    gradient_rect(&painter, r, 22.0, &[deep, dark, mid, light]);
     let white = Color32::WHITE;
-    painter.text(r.left_top() + vec2(34.0, 26.0), egui::Align2::LEFT_TOP, "DraftNew", egui::FontId::proportional(t.font_display * 1.35), white);
+    painter.text(r.left_top() + vec2(34.0, 26.0), egui::Align2::LEFT_TOP, "DraftNew", crate::fonts::bold(t.font_display * 1.5), white);
     let blurb = crate::i18n::tr_label("Parametric 3D design in your browser: sketch, extrude, assemble.");
     let g = painter.layout(blurb.to_string(), egui::FontId::proportional(t.font_intro), white.gamma_multiply(0.92), w - 68.0);
-    let blurb_y = r.top() + 30.0 + t.font_display * 1.35 + 8.0;
+    let blurb_y = r.top() + 30.0 + t.font_display * 1.5 + 10.0;
     let blurb_h = g.size().y;
     painter.galley(egui::pos2(r.left() + 34.0, blurb_y), g, white);
     // The buttons: New Design white with green text, the others see-through white.
@@ -779,7 +780,7 @@ fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, _recent: &[String]) -> Option<Ac
 }
 
 /// A sample card on a pale ground of its own colour, with its name and a line under it.
-fn tinted_card(ui: &mut egui::Ui, pic: Pic, name: &str, sub: &str, i: usize) -> egui::Response {
+fn tinted_card(ui: &mut egui::Ui, pic: Pic, name: &str, name_en: &str, sub: &str, i: usize) -> egui::Response {
     let accent = CARD_ACCENTS.get(i % CARD_ACCENTS.len()).copied().unwrap_or("");
     let t = Tokens::get();
     let size = vec2(THUMB[0] as f32 + 16.0, THUMB[1] as f32 + 80.0);
@@ -788,28 +789,108 @@ fn tinted_card(ui: &mut egui::Ui, pic: Pic, name: &str, sub: &str, i: usize) -> 
     let edge = palette("active-2", accent);
     ui.painter().rect(r, CornerRadius::same(16), t.field, Stroke::new(if hover { 2.0 } else { 1.0 }, if hover { edge } else { t.border }), egui::StrokeKind::Inside);
     let band = egui::Rect::from_min_size(r.min, vec2(r.width(), THUMB[1] as f32 + 16.0));
-    ui.painter().rect_filled(band.shrink(1.0), CornerRadius { nw: 15, ne: 15, sw: 0, se: 0 }, palette("active-1", accent).gamma_multiply(0.55));
+    ui.painter().rect_filled(band.shrink(1.0), CornerRadius { nw: 15, ne: 15, sw: 0, se: 0 }, palette("active-1", accent).gamma_multiply(0.45));
     let img = egui::Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2(THUMB[0] as f32, THUMB[1] as f32));
-    match pic {
-        Pic::Ready(Some(tx)) => {
-            ui.painter().image(tx.id(), img, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
-        }
-        Pic::Ready(None) => {
-            egui::Spinner::new().size(18.0).paint_at(ui, egui::Rect::from_center_size(img.center(), vec2(18.0, 18.0)));
-        }
-        Pic::Icon(icon) => {
-            crate::icons::paint_icon(ui.painter(), egui::Rect::from_center_size(img.center(), vec2(56.0, 56.0)), icon, 1.0);
-        }
-    }
+    let _ = pic;
+    sample_art(ui.painter(), img.shrink(6.0), name_en, palette("active-2", accent));
     let ty = band.bottom() + 8.0;
     let p = ui.painter().with_clip_rect(egui::Rect::from_min_max(egui::pos2(r.left() + 8.0, ty), egui::pos2(r.right() - 8.0, r.bottom())));
     p.text(egui::pos2(r.left() + 12.0, ty), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(t.font_heading), t.text);
     p.text(egui::pos2(r.left() + 12.0, ty + 20.0), egui::Align2::LEFT_TOP, sub, egui::FontId::proportional(t.font_caption), t.text_dim);
-    p.rect_filled(egui::Rect::from_min_size(egui::pos2(r.left() + 12.0, r.bottom() - 18.0), vec2(36.0, 5.0)), CornerRadius::same(3), edge);
+    // The kind of design as a small tag in the card's colour.
+    let tag = p.layout_no_wrap(crate::i18n::tr_label(sample_kind(name_en)).to_string(), egui::FontId::proportional(t.font_caption), palette("active-3", accent));
+    let tr = egui::Rect::from_min_size(egui::pos2(r.left() + 12.0, r.bottom() - 26.0), tag.size() + vec2(14.0, 6.0));
+    p.rect_filled(tr, CornerRadius::same(8), palette("active-1", accent).gamma_multiply(0.6));
+    p.galley(tr.min + vec2(7.0, 3.0), tag, palette("active-3", accent));
     if hover {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     resp
+}
+
+/// What kind of design a sample is, shown as a small tag on its card.
+fn sample_kind(name: &str) -> &'static str {
+    match name {
+        n if n.contains("Sheet") => "Sheet Metal",
+        n if n.contains("Hinge") || n.contains("Assembly") => "Assembly",
+        n if n.contains("Plastic") => "Plastic",
+        n if n.contains("Vent") => "Pattern",
+        _ => "Part",
+    }
+}
+
+/// A small isometric drawing of a sample in one colour (shaded faces, dark holes): the card's
+/// picture, drawn rather than read from a file so it takes the theme's colours.
+fn sample_art(p: &egui::Painter, r: egui::Rect, name: &str, col: Color32) {
+    let s = (r.width() / 200.0).min(r.height() / 140.0);
+    let c = r.center() + vec2(0.0, 6.0 * s);
+    let iso = |x: f32, y: f32, z: f32| egui::pos2(c.x + (x - y) * 0.866 * s, c.y + (x + y) * 0.5 * s - z * s);
+    let shade = |k: f32| Color32::from_rgb((f32::from(col.r()) * k).min(255.0) as u8, (f32::from(col.g()) * k).min(255.0) as u8, (f32::from(col.b()) * k).min(255.0) as u8);
+    let line = Stroke::new(1.0, Color32::from_black_alpha(70));
+    let hole = Color32::from_rgb(32, 48, 74);
+    let quad = |pts: [egui::Pos2; 4], fill: Color32| {
+        p.add(egui::Shape::convex_polygon(pts.to_vec(), fill, line));
+    };
+    let block = |x: f32, y: f32, z: f32, dx: f32, dy: f32, dz: f32, k: f32| {
+        quad([iso(x, y + dy, z), iso(x + dx, y + dy, z), iso(x + dx, y + dy, z + dz), iso(x, y + dy, z + dz)], shade(0.78 * k));
+        quad([iso(x + dx, y, z), iso(x + dx, y + dy, z), iso(x + dx, y + dy, z + dz), iso(x + dx, y, z + dz)], shade(0.62 * k));
+        quad([iso(x, y, z + dz), iso(x + dx, y, z + dz), iso(x + dx, y + dy, z + dz), iso(x, y + dy, z + dz)], shade(k));
+    };
+    // An upright round: an ellipse on top, and the side between two half ellipses.
+    let ellipse = |x: f32, y: f32, z: f32, rad: f32, fill: Color32| {
+        let o = iso(x, y, z);
+        let pts: Vec<egui::Pos2> = (0..36).map(|i| (i as f32) * std::f32::consts::TAU / 36.0).map(|a| o + vec2(a.cos() * rad * 1.22 * s, a.sin() * rad * 0.71 * s)).collect();
+        p.add(egui::Shape::convex_polygon(pts, fill, line));
+    };
+    let round = |x: f32, y: f32, z: f32, rad: f32, h: f32, k: f32| {
+        let (lo, hi) = (iso(x, y, z), iso(x, y, z + h));
+        let (rx, ry) = (rad * 1.22 * s, rad * 0.71 * s);
+        let mut side: Vec<egui::Pos2> = vec![hi + vec2(-rx, 0.0)];
+        side.extend((0..=18).map(|i| std::f32::consts::PI * (1.0 - i as f32 / 18.0)).map(|a| lo + vec2(a.cos() * rx, a.sin() * ry)));
+        side.push(hi + vec2(rx, 0.0));
+        p.add(egui::Shape::convex_polygon(side, shade(0.7 * k), line));
+        ellipse(x, y, z + h, rad, shade(k));
+    };
+    match name {
+        n if n.contains("Sheet") => {
+            block(-50.0, -30.0, 0.0, 100.0, 60.0, 6.0, 1.0);
+            block(-50.0, -30.0, 6.0, 100.0, 6.0, 40.0, 1.0);
+            block(-50.0, 24.0, 6.0, 100.0, 6.0, 40.0, 1.0);
+        }
+        n if n.contains("Hinge") || n.contains("Assembly") => {
+            block(-55.0, -40.0, 0.0, 55.0, 80.0, 6.0, 1.0);
+            block(5.0, -30.0, 8.0, 50.0, 60.0, 6.0, 1.12);
+            round(0.0, -40.0, 6.0, 6.0, 4.0, 1.0);
+        }
+        n if n.contains("Plastic") || n.contains("Enclosure") => {
+            block(-45.0, -35.0, 0.0, 90.0, 70.0, 40.0, 1.0);
+            block(-38.0, -28.0, 40.0, 76.0, 56.0, 2.0, 0.85);
+        }
+        n if n.contains("Flange") => {
+            round(0.0, 0.0, 0.0, 45.0, 10.0, 1.0);
+            for k in 0..6 {
+                let a = k as f32 * std::f32::consts::TAU / 6.0;
+                ellipse(33.0 * a.cos(), 33.0 * a.sin(), 10.0, 5.0, hole);
+            }
+            round(0.0, 0.0, 10.0, 22.0, 24.0, 1.1);
+            ellipse(0.0, 0.0, 34.0, 11.0, hole);
+        }
+        n if n.contains("Vent") => {
+            block(-50.0, -38.0, 0.0, 100.0, 76.0, 8.0, 1.0);
+            for i in 0..4 {
+                for j in 0..4 {
+                    ellipse(-30.0 + 20.0 * i as f32, -22.0 + 15.0 * j as f32, 8.0, 5.5, hole);
+                }
+            }
+        }
+        _ => {
+            block(-50.0, -35.0, 0.0, 100.0, 70.0, 10.0, 1.0);
+            ellipse(-35.0, -20.0, 10.0, 6.0, hole);
+            ellipse(35.0, 20.0, 10.0, 6.0, hole);
+            round(0.0, 0.0, 10.0, 18.0, 22.0, 1.08);
+            ellipse(0.0, 0.0, 32.0, 9.0, hole);
+        }
+    }
 }
 
 fn section(ui: &mut egui::Ui, title: &str) {

@@ -456,7 +456,7 @@ preference_settings! {
     angle_decimals: u8 = 1, 0 => number("ui.angle_decimals", 0..=6);
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
-    theme: String = "dark".into(), 0;
+    theme: String = "light".into(), 0;
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
     /// Interface language (a registered locale ID).
@@ -2764,12 +2764,12 @@ mod tests {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         control(&mut app, &json!({"open": "general"})).unwrap();
         assert!(app.prefs_window.open && app.prefs_window.section == 0);
-        control(&mut app, &json!({"theme": "light", "ui_scale": 1.25, "zoom_to_cursor": false})).unwrap();
-        assert!(!app.ui.dark, "light applies at once");
+        control(&mut app, &json!({"theme": "dark", "ui_scale": 1.25, "zoom_to_cursor": false})).unwrap();
+        assert!(app.ui.dark, "dark applies at once");
         app.keymap.custom.insert("solid.extrude".into(), "Shift+E".into());
         let v = control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(v["dialog"], serde_json::Value::Null);
-        assert!(app.ui.dark && app.preferences.theme == "dark" && app.preferences.ui_scale == Prefs::default().ui_scale && app.preferences.zoom_to_cursor);
+        assert!(!app.ui.dark && app.preferences.theme == "light" && app.preferences.ui_scale == Prefs::default().ui_scale && app.preferences.zoom_to_cursor);
         assert!(app.keymap.custom.is_empty(), "a rebinding made while the dialog was open is undone too");
 
         control(&mut app, &json!({"open": "Navigation", "nav": "alias", "look_at_anim": false})).unwrap();
