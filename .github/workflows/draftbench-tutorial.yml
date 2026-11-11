@@ -26,7 +26,7 @@ jobs:
         run: cargo build --release -p solidcraft -p solidcraft-cli
       - name: Record
         env:
-          SOLIDCRAFT_CONTROL_TOKEN: tutorial-token
+          SOLIDCRAFT_CONTROL_TOKEN: 6a1f3c9e8b7d2a4f5e6c7b8a9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a
         run: |
           mkdir -p out
           target/release/solidcraft-cli run examples/motion/cylinder-parts.json --out out/cylinder-parts.draftnew
