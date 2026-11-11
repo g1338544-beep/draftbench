@@ -649,22 +649,23 @@ fn gradient_rect(painter: &egui::Painter, r: egui::Rect, radius: f32, stops: &[C
         a.lerp_to_gamma(b, k - i as f32)
     };
     let rad = radius.min(r.height() / 2.0).min(r.width() / 2.0);
-    let mut outline: Vec<egui::Pos2> = Vec::new();
-    // Corners clockwise from the top left, each a quarter circle.
-    for (c, start) in [(r.left_top() + vec2(rad, rad), 180.0_f32), (r.right_top() + vec2(-rad, rad), 270.0), (r.right_bottom() + vec2(-rad, -rad), 0.0), (r.left_bottom() + vec2(rad, -rad), 90.0)] {
-        for k in 0..=8 {
-            let a = (start + 90.0 * k as f32 / 8.0).to_radians();
-            outline.push(c + vec2(a.cos(), a.sin()) * rad);
-        }
-    }
+    // Thin upright strips across the width, each as tall as the rounded shape is there: the colour
+    // changes smoothly along x with no seams from a centre fan.
     let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(r.center(), colour_at(r.center().x));
-    for p in &outline {
-        mesh.colored_vertex(*p, colour_at(p.x));
-    }
-    let n = outline.len() as u32;
-    for i in 0..n {
-        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    let steps = (r.width() / 3.0).ceil().clamp(16.0, 800.0) as usize;
+    for i in 0..=steps {
+        let x = r.left() + r.width() * i as f32 / steps as f32;
+        // How far the corner rounding pulls the top and bottom in at this x.
+        let from_edge = (x - r.left()).min(r.right() - x);
+        let inset = if from_edge < rad { rad - (rad * rad - (rad - from_edge).powi(2)).max(0.0).sqrt() } else { 0.0 };
+        let c = colour_at(x);
+        mesh.colored_vertex(egui::pos2(x, r.top() + inset), c);
+        mesh.colored_vertex(egui::pos2(x, r.bottom() - inset), c);
+        if i > 0 {
+            let k = (2 * i) as u32;
+            mesh.add_triangle(k - 2, k - 1, k);
+            mesh.add_triangle(k - 1, k + 1, k);
+        }
     }
     painter.add(egui::Shape::mesh(mesh));
 }
@@ -783,7 +784,7 @@ fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, _recent: &[String]) -> Option<Ac
 fn tinted_card(ui: &mut egui::Ui, pic: Pic, name: &str, name_en: &str, sub: &str, i: usize) -> egui::Response {
     let accent = CARD_ACCENTS.get(i % CARD_ACCENTS.len()).copied().unwrap_or("");
     let t = Tokens::get();
-    let size = vec2(THUMB[0] as f32 + 16.0, THUMB[1] as f32 + 80.0);
+    let size = vec2(THUMB[0] as f32 + 16.0, THUMB[1] as f32 + 96.0);
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
     let hover = resp.hovered();
     let edge = palette("active-2", accent);
