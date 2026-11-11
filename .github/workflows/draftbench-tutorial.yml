@@ -24,12 +24,24 @@ jobs:
           key: draftbench-tutorial
           cache-on-failure: true
       - name: System packages
-        timeout-minutes: 20
+        timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq
-          sudo apt-get install -y -qq xvfb ffmpeg mesa-vulkan-drivers libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 fonts-thai-tlwg fonts-dejavu-core libgtk-3-0
+          # The runners' apt mirrors sometimes don't resolve: try for a while, then fall back to
+          # what the image has, a static ffmpeg build and a Thai font fetched from GitHub.
+          sudo timeout 420 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 update -qq || echo "apt update failed"
+          sudo timeout 600 apt-get install -y -qq xvfb ffmpeg mesa-vulkan-drivers libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 fonts-thai-tlwg fonts-dejavu-core libgtk-3-0 || echo "apt install failed"
+          if ! command -v ffmpeg; then
+            curl -sSL https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz | tar xJ
+            sudo cp ffmpeg-master-latest-linux64-gpl/bin/ffmpeg ffmpeg-master-latest-linux64-gpl/bin/ffprobe /usr/local/bin/
+          fi
+          if ! fc-list | grep -qiE "thai|sarabun|loma|garuda"; then
+            mkdir -p ~/.fonts
+            for w in Regular Bold; do curl -sSL -o ~/.fonts/Sarabun-$w.ttf https://github.com/google/fonts/raw/main/ofl/sarabun/Sarabun-$w.ttf; done
+            fc-cache -f
+          fi
+          command -v Xvfb ffmpeg
       - name: Thai voice-over
         if: inputs.tutorial == 'joint'
         run: |
