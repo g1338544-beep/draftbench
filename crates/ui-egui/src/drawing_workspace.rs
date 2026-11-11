@@ -8215,7 +8215,7 @@ mod hand_drawn_tests {
 
 #[cfg(test)]
 mod picture_size_tests {
-    use super::picture_size;
+    use super::{PdfPage, Picture, pdf_document, picture_size};
 
     #[test]
     fn a_long_thin_view_keeps_its_shape() {
