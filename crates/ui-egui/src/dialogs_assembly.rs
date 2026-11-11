@@ -204,7 +204,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
         "joint.create" => (
             Asm::Joint(Box::new(JointForm::new(false))),
-            vec![SelInput::new("Moving part", SNAPS, false), SelInput::new("Fixed part", SNAPS, false)],
+            vec![SelInput::new("Fixed part", SNAPS, false), SelInput::new("Moving part", SNAPS, false)],
         ),
         "joint.as_built" => {
             (Asm::Joint(Box::new(JointForm::new(true))), vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)])
@@ -500,7 +500,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
     // A short how-to on the dialogs people find hard to start (Joint, Cam, Drive Joints).
     let guide = match k {
         Asm::Joint(_) => Some(
-            "How to: 1. Moving part: click the part that should move, where it joins (a face, an edge or a circle). 2. Fixed part: click the part that stays put, at the matching place. 3. Type: how it moves. 4. Range: how far it may go, then Play to check. 5. OK.",
+            "How to: 1. Fixed part: click the part that stays put, where it joins (a face, an edge or a circle). 2. Moving part: click the part that should move, at the matching place; it jumps onto the fixed part. 3. Type: how it moves. 4. Range: how far it may go, then Play to check. 5. OK.",
         ),
         Asm::Cam(_) => Some(
             "How to: first make a Revolute joint for the cam and a Slider (or Revolute) joint for the follower. 1. Profile = click the cam's outline edges. 2. Pick the cam joint and the follower joint below. 3. Optional: a round Roller on the follower, or its Tip. 4. Animate to check, then OK.",
@@ -964,7 +964,9 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 }
                 return Ok(cmd("joint.as_built", p));
             }
-            let (a, b) = (snap(0, "component 1's joint origin")?, snap(1, "component 2's joint origin")?);
+            // The first pick is the part that stays (`a`), the second the part that moves: the engine
+            // places `b` against `a`.
+            let (a, b) = (snap(0, "the fixed part's joint origin")?, snap(1, "the moving part's joint origin")?);
             if a.param.get("occurrence").is_some() && a.param.get("occurrence") == b.param.get("occurrence") {
                 return Err("the two origins are on the same component".into());
             }
@@ -1178,7 +1180,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .filter_map(|(n, i)| i.items.first().and_then(|x| snap_of(&app.session, x)).map(|s| (s, if n == 0 { t.accent } else { t.warning })))
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
-        let tag = format!("Component {}", n + 1);
+        let tag = if n == 0 { "Fixed part".to_string() } else { "Moving part".to_string() };
         glyph(painter, proj, s, *c, app.cam.half_height(), two.then_some(tag.as_str()));
     }
     // The snap under the cursor (found again only when the hovered item changes).
