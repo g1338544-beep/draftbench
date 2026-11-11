@@ -31,7 +31,7 @@ jobs:
             echo "== $n"
             if ! $CLI run "$f" --out "out/$n.draftnew" --results > "out/$n.build.json" 2>&1; then cat "out/$n.build.json"; echo "FAILED $n" >> out/failed.txt; continue; fi
             if ! $CLI run "examples/motion/$n.anim.json" --in "out/$n.draftnew" --results > "out/$n.anim.out.json" 2>&1; then cat "out/$n.anim.out.json"; echo "FAILED anim $n" >> out/failed.txt; continue; fi
-            ffmpeg -loglevel error -y -stream_loop 1 -i "out/$n.gif" -movflags +faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "out/$n.mp4"
+            ffmpeg -loglevel error -y -i "out/$n.gif" -filter_complex "[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1,loop=2:size=32767" -movflags +faststart -pix_fmt yuv420p "out/$n.mp4"
           done
           ls -la out
           cat out/failed.txt 2>/dev/null || true
