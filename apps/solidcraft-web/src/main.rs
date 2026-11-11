@@ -243,8 +243,8 @@ mod web {
                         {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
-                        if ui_kit::button(ui, tr("Add a part to this design…"), ui_kit::Button::Normal)
-                            .on_hover_text(tr("A STEP, 3MF or STL file goes into the design that is open"))
+                        if ui_kit::button(ui, tr("Add a part or drawing (DXF) to this design…"), ui_kit::Button::Normal)
+                            .on_hover_text(tr("A STEP, 3MF or STL file goes into the design that is open; a DXF or SVG drawing goes onto a plane or face you pick"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);

@@ -1,10 +1,10 @@
 {
-  "A STEP, 3MF or STL file goes into the design that is open": "นำไฟล์ STEP, 3MF หรือ STL เข้ามาในงานที่เปิดอยู่",
+  "A STEP, 3MF or STL file goes into the design that is open; a DXF or SVG drawing goes onto a plane or face you pick": "ไฟล์ STEP, 3MF, STL เข้ามาในงานที่เปิดอยู่ ส่วนไฟล์ DXF หรือ SVG จะวางบนระนาบหรือหน้าที่เลือก",
   "ARRANGE": "จัดวาง",
   "Actions": "การกระทำ",
   "Active": "ใช้งานอยู่",
   "Add": "เพิ่ม",
-  "Add a part to this design…": "เพิ่มชิ้นส่วนเข้างานนี้…",
+  "Add a part or drawing (DXF) to this design…": "เพิ่มชิ้นส่วนหรือแบบ 2D (DXF) เข้างานนี้…",
   "Alignment": "การจัดแนว",
   "Angle 2": "มุม 2",
   "Animate": "เคลื่อนไหว",

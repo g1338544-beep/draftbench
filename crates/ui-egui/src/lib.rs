@@ -379,6 +379,9 @@ pub struct Services {
 thread_local! {
     /// Insert DXF or Insert SVG started with no sketch open: run once Create Sketch has opened one.
     static PENDING_INSERT: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+    /// A DXF or SVG file already picked (dropped, or added from the web files window) waiting for
+    /// a sketch to go into: the command and the file.
+    static PENDING_INSERT_FILE: std::cell::RefCell<Option<(&'static str, String)>> = const { std::cell::RefCell::new(None) };
 }
 
 pub struct SolveApp {
@@ -1408,6 +1411,22 @@ impl SolveApp {
     /// A dropped file: a STEP or mesh file (3MF, STL, OBJ, glTF) joins a design that has features, anything else
     /// opens.
     pub fn drop_path(&mut self, path: &str) {
+        // A 2D drawing (DXF, SVG) goes into a sketch: the open one, or one on the plane or flat
+        // face picked next (owner's request: "Add a part" with a DXF brought nothing in).
+        let lower = path.to_ascii_lowercase();
+        if lower.ends_with(".dxf") || lower.ends_with(".svg") {
+            let cmd = if lower.ends_with(".dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" };
+            if self.session.active_sketch.is_some() {
+                if let Err(e) = self.run(cmd, json!({ "path": path })) {
+                    self.set_status(e, true);
+                }
+            } else {
+                PENDING_INSERT_FILE.with(|p| *p.borrow_mut() = Some((cmd, path.to_string())));
+                self.set_status(crate::i18n::tr_label("Pick the plane or flat face to put the drawing on").to_string(), false);
+                self.start("sketch.create");
+            }
+            return;
+        }
         let import = solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path);
         if import && !self.session.doc.features.is_empty() {
             self.insert_path_async(path);
@@ -1647,6 +1666,14 @@ impl SolveApp {
             } else if self.tool.is_none() && self.dialog.is_none() {
                 PENDING_INSERT.with(|p| p.set(None));
             }
+        }
+        if self.session.active_sketch.is_some()
+            && let Some((cmd, path)) = PENDING_INSERT_FILE.with(|p| p.borrow_mut().take())
+            && let Err(e) = self.run(cmd, json!({ "path": path }))
+        {
+            self.set_status(e, true);
+        } else if self.session.active_sketch.is_none() && self.tool.is_none() && self.dialog.is_none() {
+            PENDING_INSERT_FILE.with(|p| p.borrow_mut().take());
         }
         file_picker::tick(self, ctx);
         render_workspace::sync_backend(self);
