@@ -89,7 +89,7 @@ fn relate_to_edge(app: &mut SolveApp, item: &Item) -> Result<(), String> {
     let p = item.params.as_ref().ok_or("no parameters")?;
     let edge = p.get("edge").cloned().ok_or("no edge")?;
     let a = p.get("a").and_then(serde_json::Value::as_str).ok_or("no line")?.to_string();
-    let r = app.run("sketch.project", serde_json::json!({"refs": [edge]}))?;
+    let r = app.run("sketch.project", serde_json::json!({"refs": [edge], "hidden": true}))?;
     let b = r
         .get("created")
         .and_then(|c| c.get("curves"))

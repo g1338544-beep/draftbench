@@ -1963,6 +1963,24 @@ fn a_box_stands_out_of_a_face_that_faces_down_an_axis() {
 }
 
 #[test]
+fn a_cylinders_second_input_takes_the_body_after_the_point() {
+    // Owner: Cylinder has two inputs, the point and then the body; once the point is picked a
+    // click on the part selects the whole body into the second input.
+    let mut app = boxed();
+    let mut d = start(&mut app, vec![], "solid.cylinder");
+    assert_eq!(d.inputs.len(), 2);
+    let top = picked(&app, Vec3::new(20.0, 15.0, 20.0), Vec3::new(8.0, 10.0, 20.0));
+    d.pick(&app.session, top);
+    assert_eq!(d.active, 1, "the body input is next");
+    let hit = crate::viewport::Hit::Face { body: "Body1".into(), index: 0, point: Vec3::new(8.0, 10.0, 20.0) };
+    let sel = d.inputs[1].accepts(&hit, |_, _| true);
+    assert!(matches!(&sel, Some(Sel::Body { name }) if name == "Body1"), "{sel:?}");
+    d.pick(&app.session, sel.unwrap());
+    let (_, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(p["targets"], json!(["Body1"]), "{p}");
+}
+
+#[test]
 fn a_primitive_without_a_pick_or_with_its_position_cleared_stays_at_the_origin() {
     let mut app = boxed();
     let (p, c) = primitive_on(&mut app, vec![], "solid.sphere", |_| {});

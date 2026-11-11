@@ -395,7 +395,7 @@ fn model_centre_point(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Option<(Str
 /// Project a model edge or vertex into the active sketch for the dimension tool: the new curve's
 /// (or point's) id, and whether it is a curve.
 fn project_for_dimension(app: &mut SolveApp, r: Value, curve: bool) -> Option<(String, bool)> {
-    let out = match app.run("sketch.project", json!({ "refs": [r] })) {
+    let out = match app.run("sketch.project", json!({ "refs": [r], "hidden": true })) {
         Ok(v) => v,
         Err(e) => {
             app.set_status(e, true);

@@ -20,7 +20,7 @@ macro_rules! refs_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.project", "Project", project_cmd).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).params(concat!(refs_doc!(), created_doc!())),
+    CommandSpec::new("sketch.project", "Project", project_cmd).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).params(concat!(refs_doc!(), " | hidden?: bool (a reference kept out of sight, for a dimension or relation)", created_doc!())),
     CommandSpec::new("sketch.intersect", "Intersect", intersect_cmd).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).params(
         concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane, linked", created_doc!()),
     ),
@@ -254,6 +254,7 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind) -> Result<Va
         return Err(bad(cmd, "`refs` is empty"));
     }
     let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let hidden = p.get("hidden").and_then(Value::as_bool).unwrap_or(false);
     let sources: Vec<LinkSource> = refs.iter().map(|v| source(s, v, cmd)).collect::<Result<_>>()?;
     let mut doc = (*s.doc).clone();
     let mut sk = doc.sketch(id)?.clone();
@@ -262,6 +263,10 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind) -> Result<Va
     for src in sources {
         let what = src.describe();
         let l = add_link(s, &doc, id, &mut sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+        // `hidden`: a reference only for a dimension or relation, kept out of sight.
+        if hidden && let Some(link) = sk.links.iter_mut().find(|x| x.id == l) {
+            link.hidden = true;
+        }
         out.push(link_json(&sk, &l));
     }
     *doc.sketch_mut(id)? = sk;

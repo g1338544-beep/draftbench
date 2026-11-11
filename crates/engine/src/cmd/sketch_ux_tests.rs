@@ -1657,8 +1657,19 @@ fn a_point_dimensions_to_a_projected_part_edge() {
     s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10})).unwrap();
     s.execute("sketch.create", &json!({"plane": {"face": [20, 15, 10]}})).unwrap();
     let p = s.execute("sketch.point", &json!({"point": [10, 10]})).unwrap()["created"]["points"][0].as_str().unwrap().to_string();
-    let r = s.execute("sketch.project", &json!({"refs": [{"edge": [20, 30, 10]}]})).unwrap();
+    // As the Dimension tool does it: the edge is a hidden reference (owner: no purple lines).
+    let r = s.execute("sketch.project", &json!({"refs": [{"edge": [20, 30, 10]}], "hidden": true})).unwrap();
     let c = r["created"]["curves"][0].as_str().unwrap().to_string();
-    let d = s.execute("sketch.dimension", &json!({"entities": [p, c]}));
+    let d = s.execute("sketch.dimension", &json!({"entities": [p, c.clone()]}));
     assert!(d.is_ok(), "{d:?}");
+    let id = s.active_sketch.unwrap();
+    let sk = s.doc.sketch(id).unwrap();
+    let i = sk.curve_index(&c).unwrap();
+    assert!(!crate::view::sketch_curve_visible(sk, i), "the projected edge is not drawn");
+    let ends = sk.curves[i].kind.ends().unwrap();
+    let shown = crate::view::SketchPointVisibility::new(sk);
+    assert!(!shown.takes(&sk.points[ends.0]) && !shown.takes(&sk.points[ends.1]), "nor its end points");
+    // The design keeps it hidden after saving and opening again.
+    let text = s.doc.to_json();
+    assert!(text.contains("\"hidden\": true") || text.contains("\"hidden\":true"), "saved");
 }

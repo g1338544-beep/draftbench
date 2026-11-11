@@ -321,6 +321,9 @@ pub fn parse_hex_color(text: &str) -> Option<Rgb> {
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
+    if sk.is_hidden_link(c.link.as_deref()) {
+        return false;
+    }
     if c.link.is_some() && !sk.is_text_curve(i) {
         return !sk.view.hide_projected;
     }
@@ -343,7 +346,7 @@ impl<'a> SketchPointVisibility<'a> {
             .links
             .iter()
             .filter(|l| seen.insert(l.id.as_str()))
-            .filter(|l| l.kind == solidcraft_sketch::LinkKind::Text)
+            .filter(|l| l.kind == solidcraft_sketch::LinkKind::Text || l.hidden)
             .map(|l| l.id.as_str())
             .collect();
         let mut hidden: std::collections::HashSet<&str> =

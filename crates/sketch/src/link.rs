@@ -220,6 +220,10 @@ pub struct Link {
     /// Automatically projected borders owned by a durable sketch face attachment.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_face: bool,
+    /// A reference made only to dimension or relate to a part edge: its curves and points stay
+    /// out of sight (no purple projected lines); the dimension or relation still holds to it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
     /// The reference could not be found on the last recompute; the geometry is the last good one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lost: bool,
@@ -584,6 +588,11 @@ impl Sketch {
         self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.kind == LinkKind::Text)
     }
 
+    /// Is this curve (or point, by its link id) part of a hidden reference link?
+    pub fn is_hidden_link(&self, link: Option<&str>) -> bool {
+        link.and_then(|l| self.link(l)).is_some_and(|l| l.hidden)
+    }
+
     /// Is the curve's link lost (its reference no longer found)?
     pub fn is_lost_curve(&self, ci: usize) -> bool {
         self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.lost)
@@ -628,7 +637,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("j")?;
-        self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, auto_face: false, lost: false });
+        self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, auto_face: false, hidden: false, lost: false });
         self.build_link(&id, &lay)?;
         Ok(id)
     }
