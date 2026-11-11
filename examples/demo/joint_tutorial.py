@@ -19,10 +19,19 @@ from enclosure_ui_mcp import Demo  # noqa: E402
 
 
 def handle_like(d, *words):
-    """The first handle drawn whose name holds all `words`."""
-    for h in d.ui("ui.handles"):
-        if all(w in h["name"] for w in words):
-            return (h["x"], h["y"])
+    """The first handle drawn whose name holds all `words`; the dialog is scrolled down (a few
+    times) to bring a row below its fold into view."""
+    for attempt in range(6):
+        handles = d.ui("ui.handles")
+        for h in handles:
+            if all(w in h["name"] for w in words):
+                return (h["x"], h["y"])
+        card = next((h for h in handles if h["name"] == "dialog:card"), None) or next((h for h in handles if h["name"] == "dialog:Type"), None)
+        if card is None:
+            break
+        d.ui("ui.scroll", {"x": card["x"], "y": card["y"] + 120, "delta": -200})
+        d.wait(0.3)
+        d.settle_camera()
     raise RuntimeError(f"no handle with {words}: {[h['name'] for h in d.ui('ui.handles') if h['name'].startswith('dialog')]}")
 
 
