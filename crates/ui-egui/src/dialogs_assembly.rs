@@ -1200,6 +1200,35 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     }
 }
 
+thread_local! {
+    /// The last hovered pick and where it snaps, for point inputs outside joints (found again only
+    /// when the hovered item changes: a hole's centre is fitted from its facets).
+    static POINT_HOVER: std::cell::RefCell<Option<(Sel, Option<SnapPt>)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// For a dialog whose active input takes points (it accepts vertices): the snap under the cursor
+/// with its name, so a hole's centre or an edge's middle shows before the click (sel_point uses
+/// the same snap on the click).
+pub fn point_hover(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &Dialog) {
+    let takes_points = d.inputs.get(d.active).is_some_and(|i| i.accept & crate::selection::VERTICES != 0);
+    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| takes_points && app.session.active_sketch.is_none());
+    let Some(sel) = under else {
+        POINT_HOVER.with(|h| *h.borrow_mut() = None);
+        return;
+    };
+    let snap = POINT_HOVER.with(|h| {
+        let mut h = h.borrow_mut();
+        if !matches!(h.as_ref(), Some((s, _)) if *s == sel) {
+            *h = Some((sel.clone(), snap_of(&app.session, &sel)));
+        }
+        h.as_ref().and_then(|(_, s)| s.clone())
+    });
+    if let Some(s) = snap {
+        let t = Tokens::get();
+        glyph(painter, proj, &s, t.hover_profile_edge, app.cam.half_height(), Some(snap_name(s.kind)));
+    }
+}
+
 /// A snap: its kind's marker at the point and the z axis as an arrow.
 fn glyph(painter: &egui::Painter, proj: &Proj, s: &SnapPt, col: Color32, half_height: f64, tag: Option<&str>) {
     let Some(c) = proj.to_screen(s.at) else { return };

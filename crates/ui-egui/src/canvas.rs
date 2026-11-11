@@ -473,6 +473,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    // A point input (Specify Point, From/To…): show where a pick snaps — a hole's centre, an edge's
+    // middle, a face's centre or a corner — before the click, as the joint inputs do.
+    crate::dialogs_assembly::point_hover(app, painter, proj, &d);
     if crate::dialogs_sheet::overlay(app, painter, proj.rect, &d) {
         app.dialog = Some(d);
         return;
