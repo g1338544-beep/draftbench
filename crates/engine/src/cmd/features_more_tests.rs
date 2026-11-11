@@ -197,7 +197,7 @@ fn rib_along_the_sketch_normal_reaches_the_body() {
 fn emboss_and_deboss_on_a_face() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
-    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 10]}, "name": "Logo"}));
+    run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [20, 15, 10]}, "name": "Logo"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 2}));
@@ -214,7 +214,7 @@ fn emboss_face_off_the_part_says_how_far() {
     // body surface", which didn't say the point was off the face.
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "A"}));
-    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 10]}, "name": "Logo"}));
+    run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [20, 15, 10]}, "name": "Logo"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]}));
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.emboss", &json!({"sketch": "Logo", "depth": 1, "face": [20, 15, 11.25]})).unwrap_err().to_string();
@@ -1429,7 +1429,7 @@ fn a_ring_cut_round_a_hole_takes_in_the_hole_it_is_drawn_round() {
             ("solid.extrude", json!({"distance":10})),
             ("solid.hole", hole),
             ("solid.chamfer", json!({"edges":[[40,0,10]],"distance":1})),
-            ("sketch.create", json!({"plane":{"face":[0,0,10]}})),
+            ("sketch.create", json!({"project_edges": true, "plane":{"face":[0,0,10]}})),
             ("sketch.circle.center", json!({"center":[20,0],"radius":3})),
             ("sketch.circle.center", json!({"center":[20,0],"radius":6})),
             ("sketch.finish", json!({})),
@@ -1470,7 +1470,7 @@ fn a_cut_flush_with_a_hole_never_grows_the_part() {
         ("solid.extrude", json!({"distance":10})),
         ("solid.hole", json!({"position":[20,0,10],"diameter":6})),
         ("solid.chamfer", json!({"edges":[[40,0,10]],"distance":1})),
-        ("sketch.create", json!({"plane":{"face":[0,0,10]}})),
+        ("sketch.create", json!({"project_edges": true, "plane":{"face":[0,0,10]}})),
         ("sketch.circle.center", json!({"center":[20,0],"radius":3})),
         ("sketch.circle.center", json!({"center":[20,0],"radius":6})),
         ("sketch.finish", json!({})),
@@ -1501,7 +1501,7 @@ fn a_line_of_text_is_cut_in_one_exact_boolean() {
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"distance":40}));
         let before = volume(&mut s);
-        run(&mut s, "sketch.create", json!({"plane":{"face":[50,13,40]}}));
+        run(&mut s, "sketch.create", json!({"project_edges": true, "plane":{"face":[50,13,40]}}));
         run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":at,"height":7.81}));
         run(&mut s, "sketch.finish", json!({}));
         let id = run(&mut s, "solid.extrude", json!({"distance":-depth,"operation":"cut"}))["feature"].as_u64().unwrap();
@@ -1530,7 +1530,7 @@ fn a_line_of_text_cut_through_or_joined_in_relief_is_one_boolean() {
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"distance":40}));
         let before = volume(&mut s);
-        run(&mut s, "sketch.create", json!({"plane":{"face":[50,13,40]}}));
+        run(&mut s, "sketch.create", json!({"project_edges": true, "plane":{"face":[50,13,40]}}));
         run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":[3,9],"height":6.5}));
         run(&mut s, "sketch.finish", json!({}));
         let id = run(&mut s, "solid.extrude", json!({"distance":distance,"operation":op}))["feature"].as_u64().unwrap();

@@ -277,7 +277,7 @@ fn projections_and_3d_curves_return_the_ids_they_create() {
 fn a_new_sketch_reports_its_projected_face_edges() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 20, "height": 10}));
-    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 10]}}));
+    let r = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [10, 10, 10]}}));
     let c = check(&mut s, "sketch.create", &r, &Sketch::new());
     assert_eq!(strs(&c["curves"]).len(), 4, "{c}");
 }

@@ -185,9 +185,11 @@ fn tri_normals(m: &Mesh, face: Option<u32>) -> Vec<[Vec3; 3]> {
 
 /// The foot point of `p` on the smooth surface the triangles stand for. The nearest point `q` of the
 /// flat triangles sticks to their edges and corners (a far point is nearest to an edge over a wide
-/// range), which makes a projected curve zigzag. So the surface normal there, blended from the
-/// corner normals, is followed from `p` back to the triangles a few times: the result moves evenly
-/// as `p` does.
+/// range), which makes a projected curve zigzag. The smooth foot is where the surface normal,
+/// blended from the corner normals, points straight at `p`. From `q` the search slides along the
+/// surface by the part of `p - q` that lies in the tangent plane, halving the slide while it does
+/// not get closer (a point farther away than the surface's radius would otherwise overshoot), and
+/// drops each try back onto the triangles along the normal.
 fn smooth_foot(p: Vec3, q: Vec3, tri: usize, ts: &[[Vec3; 3]], boxes: &[(Vec3, Vec3)], normals: &[[Vec3; 3]], step: f64) -> Vec3 {
     let far = p.dist(q);
     if !far.is_finite() || far < 1e-9 {
@@ -205,37 +207,60 @@ fn smooth_foot(p: Vec3, q: Vec3, tri: usize, ts: &[[Vec3; 3]], boxes: &[(Vec3, V
         .map(|(i, _)| i)
         .take(20_000)
         .collect();
-    let (mut q, mut tri) = (q, tri);
-    for _ in 0..4 {
-        let (Some(t), Some(ns)) = (ts.get(tri), normals.get(tri)) else { break };
-        // The blended normal at q (its weights in the triangle).
+    // The blended normal at a point of triangle `tri`.
+    let normal_at = |q: Vec3, tri: usize| -> Option<Vec3> {
+        let (t, ns) = (ts.get(tri)?, normals.get(tri)?);
         let (e0, e1, e2) = (t[1] - t[0], t[2] - t[0], q - t[0]);
         let (d00, d01, d11, d20, d21) = (e0.dot(e0), e0.dot(e1), e1.dot(e1), e2.dot(e0), e2.dot(e1));
         let den = d00 * d11 - d01 * d01;
         if den.abs() < 1e-18 {
-            break;
+            return None;
         }
         let v = ((d11 * d20 - d01 * d21) / den).clamp(0.0, 1.0);
         let w = ((d00 * d21 - d01 * d20) / den).clamp(0.0, 1.0);
         let u = (1.0 - v - w).clamp(0.0, 1.0);
-        let Some(n) = (ns[0] * u + ns[1] * v + ns[2] * w).normalized() else { break };
-        // Where the line through p along that normal meets the triangles, nearest the point so far.
+        (ns[0] * u + ns[1] * v + ns[2] * w).normalized()
+    };
+    // How far `p - q` leans off the normal at q (zero at the smooth foot).
+    let lean = |q: Vec3, n: Vec3| -> Vec3 {
+        let d = p - q;
+        d - n * d.dot(n)
+    };
+    // A point dropped onto the triangles along `n`, the hit nearest to it.
+    let drop = |x: Vec3, n: Vec3| -> Option<(Vec3, usize)> {
         let mut best: Option<(f64, Vec3, usize)> = None;
         for &i in &near {
             let Some(t) = ts.get(i) else { continue };
-            if let Some(k) = ray_hit(p, n, t) {
-                let hit = p + n * k;
-                let d = hit.dist(q);
-                if d.is_finite() && best.is_none_or(|(bd, _, _)| d < bd) {
-                    best = Some((d, hit, i));
+            if let Some(k) = ray_hit(x, n, t) {
+                if k.is_finite() && best.is_none_or(|(bk, _, _)| k.abs() < bk) {
+                    best = Some((k.abs(), x + n * k, i));
                 }
             }
         }
-        let Some((moved, hit, i)) = best else { break };
-        q = hit;
-        tri = i;
-        if moved < step * 1e-3 {
+        best.map(|(_, h, i)| (h, i))
+    };
+    let mut q = q;
+    let Some(mut n) = normal_at(q, tri) else { return q };
+    let mut g = lean(q, n);
+    let mut slide = 1.0;
+    for _ in 0..40 {
+        if g.len() < step * 1e-4 {
             break;
+        }
+        let Some((q2, t2)) = drop(q + g * slide, n) else {
+            slide *= 0.5;
+            continue;
+        };
+        let Some(n2) = normal_at(q2, t2) else { break };
+        let g2 = lean(q2, n2);
+        if g2.len() < g.len() {
+            (q, n, g) = (q2, n2, g2);
+            slide = (slide * 1.5).min(1.0);
+        } else {
+            slide *= 0.5;
+            if slide < 1e-4 {
+                break;
+            }
         }
     }
     q

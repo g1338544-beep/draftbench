@@ -897,6 +897,12 @@ fn explode_text(app: &SolveApp) -> Option<Item> {
 
 /// Sketch entity items: construction, fix, delete, dimension and the constraints the selection
 /// can take.
+/// The sketch context menu for the current selection (the quick relations bar reads its
+/// "Constraints" section).
+pub(crate) fn sketch_items_for_selection(app: &SolveApp) -> Vec<Item> {
+    sketch_entity_items(app)
+}
+
 fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     use solidcraft_engine::sketch::CurveKind;
     let Some(sid) = app.session.active_sketch else { return Vec::new() };

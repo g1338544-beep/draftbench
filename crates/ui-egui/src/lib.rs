@@ -31,6 +31,7 @@ pub mod deferred;
 pub mod delete;
 pub mod design_properties;
 pub mod layer_window;
+pub mod relation_bar;
 pub mod reveal;
 pub mod wcs_rotate;
 mod dialog_descriptor;

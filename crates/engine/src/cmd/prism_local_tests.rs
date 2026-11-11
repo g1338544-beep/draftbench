@@ -79,7 +79,7 @@ fn a_ring_cut_round_a_counterbored_hole_in_a_chamfered_disc() {
         if chamfer {
             run(&mut s, "solid.chamfer", json!({"edges":[[40,0,10]],"distance":1}));
         }
-        run(&mut s, "sketch.create", json!({"plane":{"face":[0,0,10]}}));
+        run(&mut s, "sketch.create", json!({"project_edges": true, "plane":{"face":[0,0,10]}}));
         run(&mut s, "sketch.circle.center", json!({"center":[20,0],"radius":3}));
         run(&mut s, "sketch.circle.center", json!({"center":[20,0],"radius":6}));
         run(&mut s, "sketch.finish", json!({}));

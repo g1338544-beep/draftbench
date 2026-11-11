@@ -105,7 +105,7 @@ fn linked_curves(si: &Value) -> Vec<Value> {
 fn sketch_on_face_projects_its_edges_and_follows_edits() {
     let mut s = Session::default();
     box_part(&mut s);
-    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
+    let r = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [20, 15, 20]}}));
     assert!(r["projected"].is_string(), "{r}");
     let si = inspect(&mut s);
     let lc = linked_curves(&si);
@@ -144,7 +144,7 @@ fn auto_project_can_be_turned_off() {
     assert!(r["projected"].is_null());
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sketch.auto_project", json!({"value": false}));
-    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
+    let r = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [20, 15, 20]}}));
     assert!(r["projected"].is_null());
 }
 
@@ -164,7 +164,7 @@ fn auto_project_off_holds_for_designs_started_and_opened() {
     assert!(!s.auto_project, "file.new");
     run(&mut s, "doc.open", json!({"path": file.to_string_lossy()}));
     assert!(!s.auto_project, "doc.open");
-    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
+    let r = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [20, 15, 20]}}));
     assert!(r["projected"].is_null(), "{r}");
     run(&mut s, "sketch.auto_project", json!({"value": true}));
     run(&mut s, "file.new", json!({}));
@@ -234,7 +234,7 @@ fn intersect_cuts_a_body_with_the_sketch_plane() {
 fn break_link_makes_normal_geometry() {
     let mut s = Session::default();
     box_part(&mut s);
-    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
+    let r = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [20, 15, 20]}}));
     let link = r["projected"].as_str().unwrap().to_string();
     run(&mut s, "sketch.break_link", json!({"link": link}));
     let si = inspect(&mut s);
@@ -624,7 +624,7 @@ fn a_face_engraved_with_text_projects_its_letters_exactly_and_extrudes() {
         run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"distance":40}));
-        run(&mut s, "sketch.create", json!({"plane":{"face":[50,13,40]}}));
+        run(&mut s, "sketch.create", json!({"project_edges": true, "plane":{"face":[50,13,40]}}));
         run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":[3,9],"height":6.5}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"distance":-1,"operation":"cut"}));

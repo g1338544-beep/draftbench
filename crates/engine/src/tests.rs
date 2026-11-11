@@ -79,7 +79,7 @@ fn join_extrude_from_a_chamfered_top_face() {
     let source = run(&mut s, "solid.extrude", json!({"distance": "height","name":"Stem"}))["feature"].as_u64().unwrap();
     run(&mut s, "solid.chamfer", json!({"edges": [[10, 0, 20]], "distance": "bevel"}));
     let base = volume(&mut s);
-    let id = run(&mut s, "sketch.create", json!({"plane": {"face": [0, 0, 20]}}))["sketch"].as_u64().unwrap();
+    let id = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [0, 0, 20]}}))["sketch"].as_u64().unwrap();
     let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { anchor: Some(anchor), .. }, sketch } =
         &s.doc.feature(id).unwrap().kind
     else {
@@ -528,7 +528,7 @@ fn revolved_planar_faces_come_out_whole() {
         // Picks at 170°, in the last patch, which 240° covers whichever way it turns.
         let at = |r: f64, z: f64| json!([r * 170f64.to_radians().cos(), r * 170f64.to_radians().sin(), z]);
         // The flange's top annulus (z = 6, r 18…30), well inside it.
-        let sk = run(&mut s, "sketch.create", json!({"plane": {"face": at(24.0, 6.0)}}));
+        let sk = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": at(24.0, 6.0)}}));
         assert_eq!(sk["attachment"], "exact_face", "{angle}°: {sk}");
         run(&mut s, "sketch.finish", json!({}));
         // The bottom annulus (z = 0, r 8…30).
@@ -1153,7 +1153,7 @@ fn step_open_then_model_on_it() {
     assert!(rel(volume(&mut s), want) < 5e-4, "{} vs {want}", volume(&mut s));
     // Modified imported faces no longer have an immutable construction certificate; the top
     // attaches by its exact history name instead.
-    let top = run(&mut s, "sketch.create", json!({"plane": {"face": at(10.0, 15.0, 20.0)}}))["sketch"].as_u64().unwrap();
+    let top = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": at(10.0, 15.0, 20.0)}}))["sketch"].as_u64().unwrap();
     assert!(matches!(
         s.placed_document().sketch_face_attachment(top, &s.model),
         doc::FaceAttachmentStatus::Healthy {
@@ -1665,7 +1665,7 @@ fn threemf_export_open_insert() {
 fn holes_at_sketch_points_threads_and_components() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10, "name": "Plate"}));
-    run(&mut s, "sketch.create", json!({"plane": {"face": [30, 20, 10]}, "name": "HolePoints"}));
+    run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [30, 20, 10]}, "name": "HolePoints"}));
     let mut ids = Vec::new();
     for (k, (x, y)) in [(10.0, 10.0), (50.0, 10.0), (50.0, 30.0), (10.0, 30.0)].into_iter().enumerate() {
         let id = format!("h{k}");
@@ -2486,7 +2486,7 @@ mod naming {
         run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"distance": 10, "name": "Block"}));
-        run(&mut s, "sketch.create", json!({"plane": {"face": [30, 15, 10]}, "name": "Top"}));
+        run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [30, 15, 10]}, "name": "Top"}));
         run(&mut s, "sketch.circle.center", json!({"center": [30, 15], "radius": 3}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"sketch": "Top", "distance": 5, "operation": "join", "name": "Peg"}));
@@ -3091,7 +3091,7 @@ fn hole_to_object_and_at_sketch_points() {
     // Every point of a sketch: three points (the rectangle's corners are not hole points).
     let mut t = Session::default();
     run(&mut t, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
-    run(&mut t, "sketch.create", json!({"plane": {"face": [20, 15, 10]}, "name": "Spots"}));
+    run(&mut t, "sketch.create", json!({"project_edges": true, "plane": {"face": [20, 15, 10]}, "name": "Spots"}));
     for x in [10, 20, 30] {
         run(&mut t, "sketch.point", json!({"point": [x, 15]}));
     }
@@ -3835,7 +3835,7 @@ fn a_side_drawn_in_two_collinear_pieces_extrudes_into_one_face() {
     let (at, _) = solidcraft_doc::naming::find_edge(body, &edge, geom::Vec3::new(15.0, 0.0, 5.0)).unwrap();
     assert!(at.y.abs() < 1e-9 && (at.z - 5.0).abs() < 1e-9, "{edge} at {at:?}");
     // A sketch attaches to the joined side as to any side.
-    assert_eq!(run(&mut s, "sketch.create", json!({"plane": {"face": [15, 0, 2.5]}}))["attachment"], "exact_face");
+    assert_eq!(run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [15, 0, 2.5]}}))["attachment"], "exact_face");
     run(&mut s, "sketch.finish", json!({}));
 }
 
@@ -3851,7 +3851,7 @@ fn a_sketch_on_one_piece_stays_attached_when_the_side_joins() {
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     let faces = |s: &mut Session| run(s, "model.faces", json!({"body": "Body1"}))["faces"].as_array().map(Vec::len).unwrap_or(0);
     assert_eq!(faces(&mut s), 7);
-    assert_eq!(run(&mut s, "sketch.create", json!({"plane": {"face": [15, -1, 2.5]}}))["attachment"], "exact_face");
+    assert_eq!(run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [15, -1, 2.5]}}))["attachment"], "exact_face");
     run(&mut s, "sketch.circle.center", json!({"center": [5, 2.5], "radius": 1}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sketch.edit", json!({"sketch": "Sketch1"}));

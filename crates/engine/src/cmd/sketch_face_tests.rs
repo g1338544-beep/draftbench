@@ -556,7 +556,7 @@ fn offset_rectangle_pocket_has_one_logical_outer_wall_and_closed_face_projection
         .unwrap();
     assert_eq!(body.body.faces(0.01).unwrap().len(), 11, "actual pocket topology has no outer floor-height strips");
     assert_eq!(display.surface_patch(face.index).len(), 1);
-    let attached = run(&mut s, "sketch.create", json!({"plane":{"body":"Stock","index":face.index,"face":[30,0,0.5]}}))["sketch"].as_u64().unwrap();
+    let attached = run(&mut s, "sketch.create", json!({"project_edges": true, "plane":{"body":"Stock","index":face.index,"face":[30,0,0.5]}}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.finish", json!({}));
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     for session in [&s, &reopened] {
@@ -695,7 +695,7 @@ fn a_face_next_to_plane_is_refused_not_ignored() {
     }
     assert_eq!(s.doc.features.len(), features);
     assert!(s.active_sketch.is_none());
-    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 10]}}));
+    let r = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [10, 10, 10]}}));
     assert_eq!(r["attachment"], "exact_face", "{r}");
 }
 

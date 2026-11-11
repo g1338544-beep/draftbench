@@ -42,7 +42,7 @@ fn moved_part() -> Session {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 10}));
-    run(&mut s, "sketch.create", json!({"plane": {"face": [15, 10, 10]}, "name": "Top"}));
+    run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [15, 10, 10]}, "name": "Top"}));
     run(&mut s, "sketch.circle.center", json!({"center": [15, 10], "radius": 3}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Shelf"}));
@@ -77,7 +77,7 @@ fn world_picks_map_into_the_component() {
     assert!(volume(&mut s) < v0 - 1.0, "the fillet cut material");
     // The modified face has no certified lineage; explicitly freeze its picked plane.
     // Its world pick still maps into the moved component exactly once.
-    run(&mut s, "sketch.create", json!({"plane": {"face": [70, 10, 10],"fixed":true}, "name": "Pad"}));
+    run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [70, 10, 10],"fixed":true}, "name": "Pad"}));
     run(&mut s, "sketch.circle.center", json!({"center": [20, 10], "radius": 2, "id": "PadCircle"}));
     let sketch = run(&mut s, "sketch.inspect", json!({"sketch": "Pad"}));
     let center = sketch["curves"].as_array().unwrap().iter().find(|c| c["id"] == "PadCircle").unwrap()["center"].as_str().unwrap().to_string();
@@ -139,7 +139,7 @@ fn moving_bodies_between_components_keeps_their_place() {
 fn sketch_on_a_face_follows_a_moved_body() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10}));
-    run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 10]}, "name": "OnTop"}));
+    run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [10, 10, 10]}, "name": "OnTop"}));
     run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 2}));
     run(&mut s, "sketch.finish", json!({}));
     // The move goes before the sketch in the timeline: the face the sketch is on moves up.
@@ -224,7 +224,7 @@ fn block_in_component() -> Session {
 fn root_sketch_on_a_moved_components_face() {
     let mut s = block_in_component();
     run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "translate": [100, 0, 0]}));
-    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [120, 15, 20]}, "name": "Top"}));
+    let r = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [120, 15, 20]}, "name": "Top"}));
     assert!(!r["projected"].is_null(), "the face's edges are projected: {r}");
     run(&mut s, "sketch.finish", json!({}));
     let pts = sketch_world_points(&mut s, "Top");
@@ -241,7 +241,7 @@ fn root_sketch_on_a_moved_components_face() {
     // Turned 90 degrees about Z (around the world origin): the top face is now x -30..0, y 0..40.
     let mut s = block_in_component();
     run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
-    run(&mut s, "sketch.create", json!({"plane": {"face": [-15, 20, 20]}, "name": "Top"}));
+    run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [-15, 20, 20]}, "name": "Top"}));
     run(&mut s, "sketch.finish", json!({}));
     let pts = sketch_world_points(&mut s, "Top");
     for corner in [Vec3::new(0.0, 0.0, 20.0), Vec3::new(-30.0, 40.0, 20.0)] {
