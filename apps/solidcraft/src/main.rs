@@ -172,6 +172,8 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     Services {
+        // No printer hook on the desktop yet: Print falls back to saving the PDF.
+        print_pdf: None,
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The file type the command reads comes first, so the picker opens on it (#1801).
             let mut dialog = open_parent.clone();

@@ -19,26 +19,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install WiX
-        shell: pwsh
-        run: |
-          dotnet tool install --global wix --version 5.0.2
-          wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
-      - name: Build and package (installer, portable zip, plain exe)
-        shell: pwsh
+      - name: Build
+        shell: bash
         # The commit goes into the app (top right, next to the version), so which build is running is plain to see.
-        run: |
-          $env:DRAFTBENCH_BUILD = $env:GITHUB_SHA.Substring(0, 7)
-          ./packaging/windows/package.ps1 -Arch x64
-      - name: Name the files
+        run: DRAFTBENCH_BUILD="${GITHUB_SHA::7}" cargo build --profile release-pc -p solidcraft
+      - name: Package (no install)
         shell: pwsh
         run: |
           # The commit is in the file names, so a new download never has the same name as an old one.
           $sha = $env:GITHUB_SHA.Substring(0, 7)
-          New-Item -ItemType Directory -Path pack | Out-Null
-          Copy-Item dist/release/*.msi "pack/DraftNew-$sha-installer.msi"
-          Copy-Item dist/release/*-portable.zip "pack/DraftNew-$sha-portable.zip"
-          Copy-Item dist/release/*.exe "pack/DraftNew-$sha.exe"
+          New-Item -ItemType Directory -Path pack, portable | Out-Null
+          Copy-Item target/release-pc/solidcraft.exe "portable/DraftNew-$sha.exe"
+          Compress-Archive -Path portable/* -DestinationPath "pack/DraftNew-$sha-portable.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: draftbench-windows
@@ -49,4 +41,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="windows-${GITHUB_SHA::7}"
-          gh release create "$tag" pack/* --prerelease --title "DraftNew for Windows ($tag)" --notes "Desktop build of ${GITHUB_SHA::7}. Installer: DraftNew-${GITHUB_SHA::7}-installer.msi. No install: unzip DraftNew-${GITHUB_SHA::7}-portable.zip, or run DraftNew-${GITHUB_SHA::7}.exe alone." --target "$GITHUB_SHA"
+          gh release create "$tag" pack/* --prerelease --title "DraftNew for Windows ($tag)" --notes "Desktop build of ${GITHUB_SHA::7}. No install: unzip DraftNew-${GITHUB_SHA::7}-portable.zip and run DraftNew-${GITHUB_SHA::7}.exe. An installer (.msi) is added here too when it builds." --target "$GITHUB_SHA"
+      # The installer comes after the no-install download is out, and its failure does not take that away.
+      - name: Install WiX
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+      - name: Installer (MSI)
+        id: msi
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:DRAFTBENCH_BUILD = $env:GITHUB_SHA.Substring(0, 7)
+          ./packaging/windows/package.ps1 -Arch x64
+          Copy-Item dist/release/*.msi "DraftNew-$($env:DRAFTBENCH_BUILD)-installer.msi"
+      - name: Add the installer to the release
+        if: steps.msi.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "windows-${GITHUB_SHA::7}" "DraftNew-${GITHUB_SHA::7}-installer.msi"
