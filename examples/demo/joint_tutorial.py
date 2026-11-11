@@ -121,9 +121,16 @@ def run(d):
     except RuntimeError:
         play = None
     if play:
-        d.click(play, settle=0.3)
+        # A playing joint keeps the view moving, so these clicks do not wait for it to settle.
+        def tap(at):
+            d.glide(at, 0.3)
+            d.ui("ui.click", {"x": at[0], "y": at[1]})
+            d.mark(cursor=list(at), click=True)
+
+        tap(play)
         d.wait(7.0)
-        d.click(play, settle=0.3)
+        tap(play)
+        d.wait(0.5)
     else:
         d.wait(3.0)
     d.caption("7. กด OK เสร็จ ข้อต่อจะอยู่ใน Browser หัวข้อ Joints", "")
