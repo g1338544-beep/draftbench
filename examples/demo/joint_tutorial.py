@@ -34,20 +34,25 @@ NARRATION = {
 
 
 def handle_like(d, *words):
-    """The first handle drawn whose name holds all `words`; the dialog is scrolled down (a few
-    times) to bring a row below its fold into view."""
-    for attempt in range(6):
+    """The click point of the first dialog handle whose name holds all `words`, scrolled into
+    view: a row below the dialog's fold still has a handle (outside the visible part), so the
+    dialog is scrolled until the row sits above the OK button."""
+    for attempt in range(10):
         handles = d.ui("ui.handles")
+        ok = next((h for h in handles if h["name"] == "dialog:OK"), None)
+        card = next((h for h in handles if h["name"] in ("dialog:card", "dialog:Type")), None)
         for h in handles:
             if all(w in h["name"] for w in words):
-                return d.at(handle=h["name"])  # the app's own click point for the handle
-        card = next((h for h in handles if h["name"] == "dialog:card"), None) or next((h for h in handles if h["name"] == "dialog:Type"), None)
+                at = d.at(handle=h["name"])
+                if ok is None or at[1] < ok["y"] - 30:
+                    return at
+                break
         if card is None:
             break
-        d.ui("ui.scroll", {"x": card["x"], "y": card["y"] + 120, "delta": -200})
-        d.wait(0.3)
+        d.ui("ui.scroll", {"x": card["x"], "y": card["y"] + 60, "delta": -120})
+        d.wait(0.4)
         d.settle_camera()
-    raise RuntimeError(f"no handle with {words}: {[h['name'] for h in d.ui('ui.handles') if h['name'].startswith('dialog')]}")
+    raise RuntimeError(f"no visible handle with {words}: {[(h['name'], round(h['y'])) for h in d.ui('ui.handles') if h['name'].startswith('dialog')]}")
 
 
 def has(d, word):
