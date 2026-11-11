@@ -125,7 +125,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, designation: &mut String, suggested: &mut 
     crate::ui_kit::section(ui, "thread_options", "Options", true, |ui| {
         crate::ui_kit::checkbox_grid(ui, &mut [("Modeled", modeled), ("Full Length", full)], 2);
         if *modeled && !solidcraft_engine::doc::heavy_work::modelled_threads() {
-            crate::ui_kit::caption(ui, "Modeled", tr("In the browser a modelled thread shows as a cosmetic thread; the desktop app cuts it."));
+            crate::ui_kit::caption(ui, "Modeled", crate::i18n::tr_label("In the browser a modelled thread shows as a cosmetic thread; the desktop app cuts it."));
         }
         ui.add_enabled_ui(!designation.trim().is_empty(), |ui| crate::ui_kit::checkbox_grid(ui, &mut [("Automatic size", &mut automatic)], 2));
     });
