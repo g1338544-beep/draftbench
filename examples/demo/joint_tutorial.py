@@ -41,6 +41,10 @@ def has(d, word):
 
 def tick_range(d):
     """Tick the Range check box: its handle first, then along its row, until From shows."""
+    # The Range section open first (it remembers being folded).
+    if not has(d, "limits"):
+        d.click(d.at(handle="dialog:section:Range"), settle=0.5)
+        d.settle_camera()
     box = handle_like(d, "dialog:", "limits")
     row = handle_like(d, "dialog:row:", "limits")
     for at in [box, (row[0] + 60, row[1]), (row[0] + 110, row[1]), (row[0] - 40, row[1])]:
@@ -109,6 +113,12 @@ def main():
     d = Demo(a.port, None, open(a.log, "w") if a.log else None, a.speed, 2.2)
     d.ui("ui.prefs", {"language": "en", "theme": "light", "ui_scale": 1, "button": "apply"})
     d.ui("ui.resize", {"width": 1920, "height": 1080})
+    # The whole screen, and a larger interface so the video reads well.
+    try:
+        d.ui("ui.window", {"action": "maximize"})
+    except RuntimeError:
+        pass
+    d.ui("ui.prefs", {"ui_scale": 1.15, "button": "apply"})
     d.ui("ui.home", {"open": False})
     d.ui("ui.file", {"path": os.path.abspath(a.design)})
     for _ in range(1200):
