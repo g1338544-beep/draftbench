@@ -35,6 +35,22 @@ def handle_like(d, *words):
     raise RuntimeError(f"no handle with {words}: {[h['name'] for h in d.ui('ui.handles') if h['name'].startswith('dialog')]}")
 
 
+def has(d, word):
+    return any(word in h["name"] for h in d.ui("ui.handles") if h["name"].startswith("dialog"))
+
+
+def tick_range(d):
+    """Tick the Range check box: its handle first, then along its row, until From shows."""
+    box = handle_like(d, "dialog:", "limits")
+    row = handle_like(d, "dialog:row:", "limits")
+    for at in [box, (row[0] + 60, row[1]), (row[0] + 110, row[1]), (row[0] - 40, row[1])]:
+        d.click(at, settle=0.5)
+        d.settle_camera()
+        if has(d, "From"):
+            return
+    raise RuntimeError("the Range check box did not tick")
+
+
 def fill(d, at, text):
     d.click(at, settle=0.2)
     d.ui("ui.key", {"key": "A", "cmd": True})
@@ -60,7 +76,7 @@ def run(d):
     d.click(d.at(handle="dialog:Type:Slider"), settle=0.8)
     d.wait(0.8)
     d.caption("5. Range: ติ๊ก Keep within ใส่ระยะชัก From -80 mm To 0 mm", "")
-    d.click(handle_like(d, "dialog:", "limits"), settle=0.4)
+    tick_range(d)
     fill(d, handle_like(d, "dialog:", "From"), "-80 mm")
     fill(d, handle_like(d, "dialog:", "To"), "0 mm")
     d.wait(0.8)
