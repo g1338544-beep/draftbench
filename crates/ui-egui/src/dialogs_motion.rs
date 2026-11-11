@@ -652,7 +652,8 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     if *playing {
         let dt = f64::from(ui.input(|i| i.stable_dt).min(0.1));
         let fps = STEPS_PER_S * SPEEDS.get(*speed).copied().unwrap_or(1.0);
-        (*step, *playing) = advance(*step, dt * fps, total, *looping);
+        // At most one step a frame: a slow frame slows playback instead of skipping steps.
+        (*step, *playing) = advance(*step, (dt * fps).min(1.0), total, *looping);
         ui.ctx().request_repaint();
     }
     // The chart and the collision check, by the timeline.

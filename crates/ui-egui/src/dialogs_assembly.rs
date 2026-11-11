@@ -596,10 +596,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 f.animate = false;
             }
             if f.animate {
-                let now = ui.input(|i| i.time);
-                // 48 steps over 3 s: each one a preview.
-                f.phase = ((now / 3.0).fract() * 48.0).floor() / 48.0;
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
+                // One small step a frame (120 over a cycle), never a jump: a slow preview slows the
+                // motion down instead of skipping ahead, so it can be followed by eye.
+                f.phase = (f.phase + 1.0 / 120.0).fract();
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(40));
             }
         }
         Asm::JointOrigin { name, .. } => {
