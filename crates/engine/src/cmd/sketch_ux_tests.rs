@@ -1647,3 +1647,18 @@ fn a_new_sketch_starts_with_the_last_sketchs_display_options() {
     let o = s.execute("sketch.options", &json!({})).unwrap()["options"].clone();
     assert_eq!(o["grid"], json!(false), "kept across designs: {o}");
 }
+
+/// A sketch point and a part's edge projected into the sketch (the dimension tool projects the
+/// edge on a click): the distance between them can be dimensioned (owner: "cannot dimension that
+/// combination of entities").
+#[test]
+fn a_point_dimensions_to_a_projected_part_edge() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10})).unwrap();
+    s.execute("sketch.create", &json!({"plane": {"face": [20, 15, 10]}})).unwrap();
+    let p = s.execute("sketch.point", &json!({"point": [10, 10]})).unwrap()["created"]["points"][0].as_str().unwrap().to_string();
+    let r = s.execute("sketch.project", &json!({"refs": [{"edge": [20, 30, 10]}]})).unwrap();
+    let c = r["created"]["curves"][0].as_str().unwrap().to_string();
+    let d = s.execute("sketch.dimension", &json!({"entities": [p, c]}));
+    assert!(d.is_ok(), "{d:?}");
+}
