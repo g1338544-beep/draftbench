@@ -115,7 +115,7 @@ fn default_certified_borders_follow_width_and_height_with_stable_entities() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":10,"width":8,"height":10,"body_name":"Base","name":"BaseFeature"}));
     let pick = top_pick(&s, "Base");
-    let id = run(&mut s, "sketch.create", json!({"plane":pick}))["sketch"].as_u64().unwrap();
+    let id = run(&mut s, "sketch.create", json!({"plane":pick,"project_edges":true}))["sketch"].as_u64().unwrap();
     assert!(s.doc.sketch(id).unwrap().links.iter().any(|link| link.auto_face));
     let old_ids: Vec<_> = s.doc.sketch(id).unwrap().curves.iter().map(|curve| curve.id.clone()).collect();
     run(&mut s, "sketch.finish", json!({}));
@@ -354,7 +354,7 @@ fn freezing_rebuilt_arc_borders_keeps_authored_dimension_entity_indices() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch":profile,"distance":10,"operation":"new","body_name":"Sector"}));
     let pick = top_pick(&s, "Sector");
-    let id = run(&mut s, "sketch.create", json!({"plane":pick}))["sketch"].as_u64().unwrap();
+    let id = run(&mut s, "sketch.create", json!({"plane":pick,"project_edges":true}))["sketch"].as_u64().unwrap();
     let circle = run(&mut s, "sketch.circle.center", json!({"center":[20,20],"radius":2}))["curves"][0].as_str().unwrap().to_owned();
     run(&mut s, "sketch.dimension", json!({"entities":[circle],"type":"radius","value":"2 mm"}));
     run(&mut s, "sketch.finish", json!({}));
@@ -529,7 +529,7 @@ fn offset_rectangle_pocket_has_one_logical_outer_wall_and_closed_face_projection
     let untouched = s.model.state().body("Control").unwrap().body.clone();
     let before_control = solidcraft_kernel::step_export(&[&untouched], "control snapshot").unwrap();
     let pick = top_pick(&s, "Stock");
-    let pocket = run(&mut s, "sketch.create", json!({"plane":pick}))["sketch"].as_u64().unwrap();
+    let pocket = run(&mut s, "sketch.create", json!({"plane":pick,"project_edges":true}))["sketch"].as_u64().unwrap();
     let side = {
         let state = s.model.state();
         let sk = &state.sketch(pocket).unwrap().sketch;
@@ -733,7 +733,7 @@ fn a_sketch_on_a_face_meshes_its_body_once() {
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base","name":"BaseFeature"}));
     assert!(s.model.state().body("Base").unwrap().cached_mesh().is_none());
     let pick = top_pick(&s, "Base");
-    run(&mut s, "sketch.create", json!({"name":"Attached","plane":pick}));
+    run(&mut s, "sketch.create", json!({"name":"Attached","plane":pick,"project_edges":true}));
     run(&mut s, "sketch.finish", json!({}));
     assert!(s.model.state().body("Base").unwrap().cached_mesh().is_some(), "the sketch's projection meshed a copy of the body");
 }

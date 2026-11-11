@@ -534,79 +534,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let page = Container::new(ui.ctx(), Surface::Viewport).central();
     page.frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(t.panel).inner_margin(if crate::shell::is_phone(ui.ctx()) { egui::Margin::symmetric(12, 12) } else { egui::Margin::symmetric(36, 24) })).show(ui, |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            // A banner: the name, what it is for, and the two ways in just below.
-            egui::Frame::new().fill(t.accent_soft).corner_radius(t.radius_md).inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new("DraftNew").size(crate::theme::Tokens::get().font_display * 1.25).semibold().color(t.text));
-                ui.add_space(t.space_8);
-                ui.label(
-                    RichText::new(crate::i18n::tr_label("Parametric 3D design in your browser: sketch, extrude, assemble."))
-                        .size(crate::theme::Tokens::get().font_intro)
-                        .color(t.text_dim),
-                );
-            });
-            ui.add_space(t.space_16);
-            ui.horizontal_wrapped(|ui| {
-                let big = |ui: &mut egui::Ui, icon: &str, label: &str, primary: bool| -> bool {
-                    // The label sets the width: a translation longer than the English one widens
-                    // the button instead of running past its edge.
-                    let ink_text = if primary { t.on_accent } else { t.text };
-                    let galley = ui.painter().layout_no_wrap(
-                        label.to_owned(),
-                        egui::FontId::proportional(crate::theme::Tokens::get().font_subtitle),
-                        ink_text,
-                    );
-                    let width = (56.0 + galley.size().x + 20.0).max(170.0);
-                    let (r, resp) = ui.allocate_exact_size(vec2(width, 64.0), Sense::click());
-                    let fill = if primary {
-                        t.accent
-                    } else if resp.hovered() {
-                        t.hover
-                    } else {
-                        t.field
-                    };
-                    ui.painter().rect(r, t.radius_md, fill, Stroke::new(1.0, if primary { t.accent } else { t.border }), egui::StrokeKind::Inside);
-                    let ink = if primary { t.on_accent } else { t.icon };
-                    crate::icons::paint_icon(
-                        ui.painter(),
-                        egui::Rect::from_center_size(r.left_center() + vec2(30.0, 0.0), vec2(30.0, 30.0)),
-                        icon,
-                        f32::from(ink.a()) / 255.0,
-                    );
-                    ui.painter().galley(r.left_center() + vec2(56.0, -galley.size().y / 2.0), galley, ink_text);
-                    resp.clicked()
-                };
-                if big(ui, "new", app.tr("ui.new_design"), true) {
-                    action = Some(Box::new(|app: &mut SolveApp| crate::documents::new_design(app)));
-                }
-                ui.add_space(t.space_10);
-                if big(ui, "open", app.tr("home.open"), false) {
-                    action = Some(Box::new(|app: &mut SolveApp| {
-                        app.pick_open(|app, path| {
-                            if let Some(path) = path {
-                                app.home.open = false;
-                                app.open_path_async(&path);
-                            }
-                        });
-                    }));
-                }
-            });
-            ui.add_space(t.space_24);
-            ui.horizontal_wrapped(|ui| {
-                ui.hyperlink_to(app.tr("home.documentation"), crate::help::DOCS_URL);
-                ui.hyperlink_to(app.tr("home.report_issue"), "https://github.com/g1338544-beep/draftbench/issues/new");
-                ui.hyperlink_to(app.tr("home.whats_new"), "https://github.com/g1338544-beep/draftbench/releases");
-                if ui.link(crate::i18n::tr_label("Run script")).clicked() {
-                    crate::script_panel::open(app);
-                }
-                if ui.link(app.tr("ui.keyboard_shortcuts")).clicked() {
-                    app.keymap.open = true;
-                    app.keymap.read_only = true;
-                }
-                if ui.link(app.tr("ui.preferences")).clicked() {
-                    crate::prefs::open_at(app, 0);
-                }
-            });
+            // The ways in as a block of coloured tiles: the name, New Design and Open, scripts,
+            // help, and the design opened last.
+            if let Some(a) = tiles(app, ui, &recent) {
+                action = Some(a);
+            }
             ui.add_space(t.space_16);
             section(ui, app.tr("home.recent"));
             if recent.is_empty() {
@@ -680,7 +612,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some(t) => Pic::Ready(t.as_ref()),
                     None => Pic::Icon("box"),
                 };
-                if card(ui, tex, app.tr_label(s.name), sub, false).on_hover_text(about).clicked() {
+                if tinted_card(ui, tex, app.tr_label(s.name), sub, i).on_hover_text(about).clicked() {
                     action = Some(Box::new(move |app: &mut SolveApp| open_sample(app, i)));
                 }
             });
@@ -689,6 +621,230 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(f) = action {
         f(app);
     }
+}
+
+/// A deferred change to the app, run after the page is drawn.
+type Act = Box<dyn FnOnce(&mut SolveApp)>;
+
+/// A colour from the icon palette (`palette.toml`, the single colour authority): `role` of
+/// `accent` (`""`: the base accent) in the current theme.
+fn palette(role: &str, accent: &str) -> Color32 {
+    let look = crate::icon_svg::Look { dark: crate::theme::is_dark(), accent: crate::icon_svg::accent_index(accent), vision: crate::theme::vision() };
+    crate::icon_svg::role_colour(role, look)
+}
+
+/// The accent each sample card (and the name tile's stripes) is tinted with.
+const CARD_ACCENTS: [&str; 6] = ["", "surface", "sketch", "form", "constraint", "mesh"];
+
+/// The tile block: name, New Design, Open, Run script, help and the last design. Four columns
+/// when there is room, two on a narrow window, one on a phone.
+fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, recent: &[String]) -> Option<Act> {
+    let t = Tokens::get();
+    let gap = t.space_14;
+    let w = ui.available_width();
+    let cols = if w >= 900.0 { 4 } else if w >= 460.0 { 2 } else { 1 };
+    let (row_a, row_b) = (150.0_f32, 112.0_f32);
+    // Column widths in the 1.3 : 1 : 1 : 1.2 of the layout.
+    let weights: &[f32] = match cols {
+        4 => &[1.3, 1.0, 1.0, 1.2],
+        2 => &[1.0, 1.0],
+        _ => &[1.0],
+    };
+    let sum: f32 = weights.iter().sum();
+    let inner = w - gap * (cols as f32 - 1.0);
+    let widths: Vec<f32> = weights.iter().map(|k| inner * k / sum).collect();
+    let height = match cols {
+        4 => row_a + gap + row_b,
+        2 => (row_a + gap + row_b) + gap + row_a + gap + row_b,
+        _ => 5.0 * (row_b + gap) + row_a,
+    };
+    let (area, _) = ui.allocate_exact_size(vec2(w, height), Sense::hover());
+    let x = |c: usize| area.left() + widths.iter().take(c).sum::<f32>() + gap * c as f32;
+    let cell = |c: usize, top: f32, h: f32| egui::Rect::from_min_size(egui::pos2(x(c), top), vec2(widths.get(c).copied().unwrap_or(w), h));
+    let top = area.top();
+    // Where each tile goes: name, new, open, script, help, last design.
+    let rects: [egui::Rect; 6] = match cols {
+        4 => [
+            cell(0, top, row_a + gap + row_b),
+            cell(1, top, row_a),
+            cell(2, top, row_a),
+            cell(1, top + row_a + gap, row_b),
+            cell(2, top + row_a + gap, row_b),
+            cell(3, top, row_a + gap + row_b),
+        ],
+        2 => {
+            let second = top + row_a + gap + row_b + gap;
+            [
+                cell(0, top, row_a + gap + row_b),
+                cell(1, top, row_a),
+                cell(1, top + row_a + gap, row_b),
+                cell(0, second + row_a + gap, row_b),
+                cell(1, second + row_a + gap, row_b),
+                egui::Rect::from_min_size(egui::pos2(area.left(), second), vec2(w, row_a)),
+            ]
+        }
+        _ => {
+            let r = |k: f32, h: f32| egui::Rect::from_min_size(egui::pos2(area.left(), top + k), vec2(w, h));
+            let s = row_b + gap;
+            [r(0.0, row_b), r(s, row_b), r(2.0 * s, row_b), r(3.0 * s, row_b), r(4.0 * s, row_b), r(5.0 * s, row_a)]
+        }
+    };
+    let painter = ui.painter().clone();
+    let radius = CornerRadius::same(18);
+    let font = |size: f32| egui::FontId::proportional(size);
+    let mut act: Option<Act> = None;
+    let tile = |ui: &mut egui::Ui, id: &str, r: egui::Rect, fill: Color32, edge: Option<Color32>| -> egui::Response {
+        let resp = ui.interact(r, ui.id().with(("home_tile", id)), Sense::click());
+        let lift = if resp.hovered() { 0.92 } else { 1.0 };
+        painter.rect(r, radius, fill.gamma_multiply(lift).to_opaque(), Stroke::new(1.0, edge.unwrap_or(Color32::TRANSPARENT)), egui::StrokeKind::Inside);
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        crate::scenario::publish_handle(&format!("home:{id}"), r.center());
+        resp
+    };
+    // The name: a dark tile with the product's colours as stripes.
+    let [name_r, new_r, open_r, script_r, help_r, last_r] = rects;
+    painter.rect_filled(name_r, radius, palette("ink", ""));
+    painter.text(name_r.left_top() + vec2(24.0, 22.0), egui::Align2::LEFT_TOP, "DraftNew", font(t.font_display * 1.25), Color32::WHITE);
+    let blurb = crate::i18n::tr_label("Parametric 3D design in your browser: sketch, extrude, assemble.");
+    let galley = painter.layout(blurb.to_string(), font(t.font_body), palette("passive-1", ""), name_r.width() - 48.0);
+    painter.galley(name_r.left_top() + vec2(24.0, 22.0 + t.font_display * 1.25 + 14.0), galley, Color32::WHITE);
+    for (k, accent) in CARD_ACCENTS.iter().take(5).enumerate() {
+        let at = egui::pos2(name_r.left() + 24.0 + k as f32 * 38.0, name_r.bottom() - 26.0);
+        painter.rect_filled(egui::Rect::from_min_size(at, vec2(30.0, 8.0)), CornerRadius::same(4), palette("active-2", accent));
+    }
+    // New Design and Open: the two big coloured tiles.
+    let big = |r: egui::Rect, icon: &str, label: &str, fill: Color32| {
+        crate::icons::paint_icon(&painter, egui::Rect::from_min_size(r.left_top() + vec2(22.0, 20.0), vec2(34.0, 34.0)), icon, 1.0);
+        let g = painter.layout(label.to_string(), font(t.font_subtitle * 1.3), Color32::WHITE, r.width() - 44.0);
+        painter.galley(egui::pos2(r.left() + 22.0, r.bottom() - 20.0 - g.size().y), g, fill);
+    };
+    let blue = palette("active-2", "");
+    if tile(ui, "new", new_r, blue, None).clicked() {
+        act = Some(Box::new(|app: &mut SolveApp| crate::documents::new_design(app)));
+    }
+    big(new_r, "new", app.tr("ui.new_design"), Color32::WHITE);
+    let orange = palette("active-2", "surface");
+    if tile(ui, "open", open_r, orange, None).clicked() {
+        act = Some(Box::new(|app: &mut SolveApp| {
+            app.pick_open(|app, path| {
+                if let Some(path) = path {
+                    app.home.open = false;
+                    app.open_path_async(&path);
+                }
+            });
+        }));
+    }
+    big(open_r, "open", app.tr("home.open"), Color32::WHITE);
+    // Run script and help: pale tiles with coloured text.
+    let small = |r: egui::Rect, icon: &str, label: &str, ink: Color32| {
+        crate::icons::paint_icon(&painter, egui::Rect::from_min_size(r.left_top() + vec2(20.0, 16.0), vec2(28.0, 28.0)), icon, 1.0);
+        let g = painter.layout(label.to_string(), font(t.font_subtitle), ink, r.width() - 40.0);
+        painter.galley(egui::pos2(r.left() + 20.0, r.bottom() - 16.0 - g.size().y), g, ink);
+    };
+    if tile(ui, "script", script_r, palette("active-1", "sketch"), None).clicked() {
+        act = Some(Box::new(|app: &mut SolveApp| crate::script_panel::open(app)));
+    }
+    small(script_r, "play", crate::i18n::tr_label("Run script"), palette("active-3", "sketch"));
+    // Help: documentation, shortcuts, what's new and settings, each its own link in the tile.
+    painter.rect_filled(help_r, radius, palette("active-1", "form"));
+    let ink = palette("active-3", "form");
+    let links: [(&str, u8); 4] = [(app.tr("home.documentation"), 0), (app.tr("ui.keyboard_shortcuts"), 1), (app.tr("home.whats_new"), 2), (app.tr("ui.preferences"), 3)];
+    let mut y = help_r.top() + 14.0;
+    let mut chosen: Option<u8> = None;
+    for (label, which) in links {
+        let g = painter.layout_no_wrap(label.to_string(), font(t.font_body), ink);
+        let r = egui::Rect::from_min_size(egui::pos2(help_r.left() + 20.0, y), g.size());
+        let resp = ui.interact(r.expand(2.0), ui.id().with(("home_help", which)), Sense::click());
+        if resp.hovered() {
+            painter.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, ink));
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        painter.galley(r.min, g, ink);
+        if resp.clicked() {
+            chosen = Some(which);
+        }
+        y += (help_r.height() - 28.0) / 4.0;
+    }
+    match chosen {
+        Some(0) => ui.ctx().open_url(egui::OpenUrl::new_tab(crate::help::DOCS_URL)),
+        Some(1) => {
+            act = Some(Box::new(|app: &mut SolveApp| {
+                app.keymap.open = true;
+                app.keymap.read_only = true;
+            }))
+        }
+        Some(2) => ui.ctx().open_url(egui::OpenUrl::new_tab("https://github.com/g1338544-beep/draftbench/releases")),
+        Some(3) => act = Some(Box::new(|app: &mut SolveApp| crate::prefs::open_at(app, 0))),
+        _ => {}
+    }
+    // The design opened last, large; or a word on where recent designs appear.
+    let last = recent.first().cloned();
+    let resp = tile(ui, "last", last_r, t.field, Some(t.border));
+    painter.text(last_r.left_top() + vec2(18.0, 14.0), egui::Align2::LEFT_TOP, app.tr("home.recent"), font(t.font_subtitle), t.text);
+    match &last {
+        Some(p) => {
+            let name = std::path::Path::new(p).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
+            let pic = egui::Rect::from_min_max(last_r.left_top() + vec2(18.0, 40.0), last_r.right_bottom() - vec2(18.0, 46.0));
+            if let Some(Some(tx)) = app.home.thumbs.get(p.as_str()) {
+                let [tw, th] = [THUMB[0] as f32, THUMB[1] as f32];
+                let k = (pic.width() / tw).min(pic.height() / th).max(0.1);
+                let fit = egui::Rect::from_center_size(pic.center(), vec2(tw * k, th * k));
+                painter.image(tx.id(), fit, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            }
+            let clip = painter.with_clip_rect(last_r.shrink(12.0));
+            clip.text(egui::pos2(last_r.left() + 18.0, last_r.bottom() - 40.0), egui::Align2::LEFT_TOP, name, font(t.font_heading), t.text);
+            if resp.clicked() {
+                let p = p.clone();
+                act = Some(Box::new(move |app: &mut SolveApp| open_recent(app, &p)));
+            }
+            resp.on_hover_text(p.as_str());
+        }
+        None => {
+            let g = painter.layout(crate::i18n::tr_label("Designs you open or save appear here.").to_string(), font(t.font_body), t.text_dim, last_r.width() - 36.0);
+            painter.galley(last_r.left_top() + vec2(18.0, 46.0), g, t.text_dim);
+        }
+    }
+    ui.add_space(t.space_8);
+    ui.horizontal_wrapped(|ui| {
+        ui.hyperlink_to(app.tr("home.report_issue"), "https://github.com/g1338544-beep/draftbench/issues/new");
+    });
+    act
+}
+
+/// A sample card on a pale ground of its own colour, with its name and a line under it.
+fn tinted_card(ui: &mut egui::Ui, pic: Pic, name: &str, sub: &str, i: usize) -> egui::Response {
+    let accent = CARD_ACCENTS.get(i % CARD_ACCENTS.len()).copied().unwrap_or("");
+    let t = Tokens::get();
+    let size = vec2(THUMB[0] as f32 + 16.0, THUMB[1] as f32 + 80.0);
+    let (r, resp) = ui.allocate_exact_size(size, Sense::click());
+    let hover = resp.hovered();
+    let edge = palette("active-2", accent);
+    ui.painter().rect(r, CornerRadius::same(16), t.field, Stroke::new(if hover { 2.0 } else { 1.0 }, if hover { edge } else { t.border }), egui::StrokeKind::Inside);
+    let band = egui::Rect::from_min_size(r.min, vec2(r.width(), THUMB[1] as f32 + 16.0));
+    ui.painter().rect_filled(band.shrink(1.0), CornerRadius { nw: 15, ne: 15, sw: 0, se: 0 }, palette("active-1", accent).gamma_multiply(0.55));
+    let img = egui::Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2(THUMB[0] as f32, THUMB[1] as f32));
+    match pic {
+        Pic::Ready(Some(tx)) => {
+            ui.painter().image(tx.id(), img, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        Pic::Ready(None) => {
+            egui::Spinner::new().size(18.0).paint_at(ui, egui::Rect::from_center_size(img.center(), vec2(18.0, 18.0)));
+        }
+        Pic::Icon(icon) => {
+            crate::icons::paint_icon(ui.painter(), egui::Rect::from_center_size(img.center(), vec2(56.0, 56.0)), icon, 1.0);
+        }
+    }
+    let ty = band.bottom() + 8.0;
+    let p = ui.painter().with_clip_rect(egui::Rect::from_min_max(egui::pos2(r.left() + 8.0, ty), egui::pos2(r.right() - 8.0, r.bottom())));
+    p.text(egui::pos2(r.left() + 12.0, ty), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(t.font_heading), t.text);
+    p.text(egui::pos2(r.left() + 12.0, ty + 20.0), egui::Align2::LEFT_TOP, sub, egui::FontId::proportional(t.font_caption), t.text_dim);
+    p.rect_filled(egui::Rect::from_min_size(egui::pos2(r.left() + 12.0, r.bottom() - 18.0), vec2(36.0, 5.0)), CornerRadius::same(3), edge);
+    if hover {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
 }
 
 fn section(ui: &mut egui::Ui, title: &str) {

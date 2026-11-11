@@ -144,7 +144,7 @@ fn auto_project_can_be_turned_off() {
     assert!(r["projected"].is_null());
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sketch.auto_project", json!({"value": false}));
-    let r = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [20, 15, 20]}}));
+    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
     assert!(r["projected"].is_null());
 }
 
@@ -164,7 +164,7 @@ fn auto_project_off_holds_for_designs_started_and_opened() {
     assert!(!s.auto_project, "file.new");
     run(&mut s, "doc.open", json!({"path": file.to_string_lossy()}));
     assert!(!s.auto_project, "doc.open");
-    let r = run(&mut s, "sketch.create", json!({"project_edges": true, "plane": {"face": [20, 15, 20]}}));
+    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
     assert!(r["projected"].is_null(), "{r}");
     run(&mut s, "sketch.auto_project", json!({"value": true}));
     run(&mut s, "file.new", json!({}));
