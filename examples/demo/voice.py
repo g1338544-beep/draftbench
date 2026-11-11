@@ -16,7 +16,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from joint_tutorial import NARRATION  # noqa: E402
 
-VOICE = "th-TH-PremwadeeNeural"
+# A man's voice (the owner's choice), at an everyday speaking pace.
+VOICE = "th-TH-NiwatNeural"
 
 
 def seconds(path):
@@ -30,7 +31,7 @@ async def one(words, f):
     try:
         import edge_tts
 
-        for voice, rate in ((VOICE, "-5%"), (VOICE, "+0%"), ("th-TH-NiwatNeural", "+0%")):
+        for voice, rate in ((VOICE, "+4%"), (VOICE, "+0%"), ("th-TH-PremwadeeNeural", "+0%")):
             for _ in range(2):
                 try:
                     await edge_tts.Communicate(words, voice, rate=rate).save(f)
