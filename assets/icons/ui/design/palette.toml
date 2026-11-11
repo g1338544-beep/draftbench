@@ -9,44 +9,44 @@
 
 [roles.ink]        # outlines and details drawn over a face
 source = "#34465b"
-light = "#4a413a"
+light = "#34465b"
 dark  = "#1f2021"
 [roles.line]       # line art that sits directly on the UI background (SVG: currentColor)
 source = "#34465b"
-light = "#4a413a"
-dark  = "#e6dfd8"
+light = "#34465b"
+dark  = "#dbe4ee"
 [roles.passive-1]  # passive geometry, lightest face
 source = "#e2e8ef"
-light = "#ece7e2"
-dark  = "#a39a90"
+light = "#e2e8ef"
+dark  = "#8da3c3"
 [roles.passive-2]
 source = "#b8c3cf"
-light = "#c9c0b8"
-dark  = "#857b72"
+light = "#b8c3cf"
+dark  = "#6d81a2"
 [roles.passive-3]  # darkest passive face
 source = "#8e9faf"
-light = "#a0958b"
-dark  = "#665d55"
+light = "#8e9faf"
+dark  = "#546782"
 [roles.gap]        # erases earlier artwork to transparency; light/dark retained for legacy schema only
 source = "#ffffff"
 light = "#ffffff"
 dark  = "#1e2530"
 [roles.guide]      # construction and guide dots
 source = "#6f879c"
-light = "#8a7f75"
-dark  = "#a0958b"
+light = "#6f879c"
+dark  = "#8093a4"
 [roles.active-1]   # changed or result geometry, palest face
 source = "#b9ddf8"
-light = "#bfe2cc"
-dark  = "#7ab792"
+light = "#bcdcf6"
+dark  = "#7f9db6"
 [roles.active-2]
 source = "#328bd3"
-light = "#439a65"
-dark  = "#3a965e"
+light = "#3584cf"
+dark  = "#3786d1"
 [roles.active-3]   # strongest blue: strokes and accents
 source = "#236ead"
-light = "#057f45"
-dark  = "#128d45"
+light = "#d06a00"
+dark  = "#b55100"
 
 [strokes]          # on the 64 grid
 geometry = 2.55
@@ -58,21 +58,83 @@ parameters = 4.2
 # an icon keeps its drawing and only changes colour: "extrude" in the Solid accent and
 # "surface_extrude" (see aliases.toml) are the same artwork in orange. Roles an accent does not
 # list keep their base value. Edit hex values here; nothing else needs to change.
-# Shared accent definitions: Solid uses the base palette (green); Surface uses orange,
+# Shared accent definitions: Solid uses the base palette (blue faces, orange cue); Surface uses orange,
 # Form purple, Mesh yellow, Sketch green, constraints red and Sketch construction orange.
 # This is the single colour authority for SVGs, semantic UI tokens and the review page.
 # Active-3 is the primary stroke; active-1/2 preserve face shading. SVG source hexes
 # above are stable role identifiers: change these accent ramps, not accepted artwork.
 
 [accents.surface.active-1]
-light = "#f1d2af"
-dark  = "#cc9362"
+light = "#f8d6ad"
+dark  = "#b3936c"
 [accents.surface.active-2]
-light = "#c06f00"
-dark  = "#bd750d"
+light = "#e08a1e"
+dark  = "#be6b00"
 [accents.surface.active-3]
-light = "#a45000"
-dark  = "#955a0e"
+light = "#1f66b0"
+dark  = "#2e74bf"
+# Mixed-colour scheme (owner's choice A2): each ribbon group has its own face colour, and its
+# action cue (active-3: arrows, result strokes) takes a contrasting colour. Base (Create): blue
+# faces with an orange cue.
+[accents.modify.active-1]
+light = "#bfe6e6"
+dark  = "#7ca1a1"
+[accents.modify.active-2]
+light = "#2a9a9a"
+dark  = "#219494"
+[accents.modify.active-3]
+light = "#d06a00"
+dark  = "#b55100"
+
+[accents.pattern.active-1]
+light = "#decff8"
+dark  = "#9f91b7"
+[accents.pattern.active-2]
+light = "#9567e2"
+dark  = "#9264df"
+[accents.pattern.active-3]
+light = "#1f66b0"
+dark  = "#2e74bf"
+
+[accents.construct.active-1]
+light = "#f6e0a6"
+dark  = "#ac975f"
+[accents.construct.active-2]
+light = "#d4a414"
+dark  = "#a97a00"
+[accents.construct.active-3]
+light = "#1f66b0"
+dark  = "#2e74bf"
+
+[accents.inspect.active-1]
+light = "#f3cfe6"
+dark  = "#af8da3"
+[accents.inspect.active-2]
+light = "#c2559c"
+dark  = "#c2559c"
+[accents.inspect.active-3]
+light = "#1f66b0"
+dark  = "#2e74bf"
+
+[accents.assemble.active-1]
+light = "#f6e0a6"
+dark  = "#ac975f"
+[accents.assemble.active-2]
+light = "#d4a414"
+dark  = "#a97a00"
+[accents.assemble.active-3]
+light = "#ca473d"
+dark  = "#c13e35"
+
+[accents.utility.active-1]
+light = "#d5dce4"
+dark  = "#939aa1"
+[accents.utility.active-2]
+light = "#6f8396"
+dark  = "#718598"
+[accents.utility.active-3]
+light = "#057f45"
+dark  = "#19874d"
 
 [accents.form.active-1]
 light = "#decff8"
@@ -173,4 +235,34 @@ constraint = [
 ]
 construction = [
   "centerline", "construction", "infinite",
+]
+utility = [
+  "camera", "compute", "copy", "cut", "delete", "export", "eye", "fit", "folder", "import",
+  "library", "new", "paste", "printer", "render_image", "save", "settings", "update",
+]
+modify = [
+  "appearance", "cavity", "chamfer", "combine", "delete_face", "draft", "fillet", "mate",
+  "material", "move", "move_face", "params", "presspull", "refold", "replace_face", "scale",
+  "sheet_rules", "shell", "split_body", "split_face", "trim_body", "unfold",
+]
+construct = [
+  "axis_edge", "axis_normal_to_face", "axis_through_cylinder", "axis_two_planes",
+  "axis_two_points", "plane", "plane_along_path", "plane_angle", "plane_midplane",
+  "plane_perpendicular", "plane_tangent", "plane_three_points", "plane_two_edges",
+  "point_along_path", "point_center", "point_edge_plane", "point_three_planes",
+  "point_two_edges", "point_vertex",
+]
+inspect = [
+  "accessibility", "bom", "center_of_mass", "curvature_comb", "curvature_map",
+  "draft_analysis", "environment_map", "interference", "iso_analysis", "measure", "min_radius",
+  "origin", "section", "wcs_reset", "wcs_rotate_x", "wcs_rotate_y", "wcs_rotate_z", "wcs_set",
+  "zebra",
+]
+assemble = [
+  "as_built", "cam", "capture", "component", "contact_all", "contact_new", "contact_off",
+  "contact_sets", "drive", "explode", "gear", "joint", "motion_link", "play", "rack_pinion",
+  "revert", "rigid_group", "screw", "trace",
+]
+pattern = [
+  "mirror", "pattern_circ", "pattern_path", "pattern_rect",
 ]

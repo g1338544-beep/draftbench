@@ -695,6 +695,7 @@ impl BodyDraw {
         let mut looks: Vec<_> = self.face_looks.iter().map(|(f, l)| (*f, l.color, l.opacity.to_bits())).collect();
         looks.sort_unstable();
         looks.hash(&mut h);
+        edge_width().to_bits().hash(&mut h);
         h.finish()
     }
 
@@ -748,7 +749,7 @@ impl BodyDraw {
             }
             for w in e.windows(2) {
                 let (a, b) = (w[0].to_f32(), w[1].to_f32());
-                out.line(a, b, edge_col, 1.4, false);
+                out.line(a, b, edge_col, edge_width(), false);
                 if hidden_edges {
                     let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
                     let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
@@ -769,7 +770,7 @@ impl BodyDraw {
         if edges && (!shaded || hidden_edges) {
             for (a, b) in cylinder_side_lines(m) {
                 let (a, b) = (a.to_f32(), b.to_f32());
-                out.line(a, b, edge_col, 1.4, false);
+                out.line(a, b, edge_col, edge_width(), false);
                 if hidden_edges {
                     out.hidden_line(a, b, hidden_col, 1.2);
                 }
@@ -4050,6 +4051,24 @@ pub(crate) fn set_line_colours(edge: &str, sketch: &str) {
     EDGE_COLOUR.store(pack_colour(edge), std::sync::atomic::Ordering::Relaxed);
     SKETCH_COLOUR.store(pack_colour(sketch), std::sync::atomic::Ordering::Relaxed);
 }
+
+/// The model edges' width in logical pixels (`f32` bits; 0 before the preferences are read).
+static EDGE_WIDTH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Draw the model's edges `px` logical pixels wide (kept within 0.5 to 5).
+pub(crate) fn set_edge_width(px: f32) {
+    let px = if px.is_finite() { px.clamp(0.5, 5.0) } else { DEFAULT_EDGE_WIDTH };
+    EDGE_WIDTH.store(px.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The width model edges are drawn with.
+pub(crate) fn edge_width() -> f32 {
+    let v = f32::from_bits(EDGE_WIDTH.load(std::sync::atomic::Ordering::Relaxed));
+    if v > 0.0 { v } else { DEFAULT_EDGE_WIDTH }
+}
+
+/// Edges a little over two pixels wide read clearly against shaded faces.
+const DEFAULT_EDGE_WIDTH: f32 = 2.0;
 
 static PART_COLOUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static SELECTION_COLOUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

@@ -132,10 +132,10 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     }
     let c = lit(i, occlusion(i));
     // Silhouettes (styles with edges): where a curved surface turns away from the eye, a line
-    // about 1.5 px wide, on the visible surface only (depth-correct).
+    // about 2 px wide (as wide as the edges), on the visible surface only (depth-correct).
     if (u.screen.w > 0.5 && length(i.n) > 0.5 && fw > 1e-6) {
-        let a = 1.0 - smoothstep(fw * 0.8, fw * 2.0, abs(ndv));
-        return vec4<f32>(mix(c.rgb, out_color(vec4<f32>(0.07, 0.08, 0.10, 1.0)).rgb, a), c.a);
+        let a = 1.0 - smoothstep(fw * 1.2, fw * 2.8, abs(ndv));
+        return vec4<f32>(mix(c.rgb, out_color(vec4<f32>(0.04, 0.05, 0.06, 1.0)).rgb, a), c.a);
     }
     return c;
 }
@@ -304,12 +304,17 @@ fn lit(i: TOut, visibility: f32) -> vec4<f32> {
     let v = normalize(u.back.xyz);
     var n = normalize(i.n);
     if (dot(n, v) < 0.0) { n = -n; }
-    let key = normalize(v * 0.8 + vec3<f32>(-0.3, 0.2, 0.6));
+    // A key light above and to the left of the eye, a weaker light from the eye, and a sky/ground
+    // ambient (upward faces lighter): faces turned different ways get clearly different shades,
+    // which is what makes a part read as solid. A tight highlight gives it a metallic sheen.
+    let key = normalize(v * 0.45 + vec3<f32>(-0.35, 0.15, 0.85));
     let diff = max(dot(n, key), 0.0);
     let fill = max(dot(n, v), 0.0);
+    let sky = 0.5 + 0.5 * n.z;
     let h = normalize(key + v);
-    let spec = pow(max(dot(n, h), 0.0), 40.0) * 0.25;
-    let k = 0.42 + 0.38 * diff + 0.25 * fill - (0.42 + 0.25 * fill) * (1.0 - visibility);
+    let spec = pow(max(dot(n, h), 0.0), 56.0) * 0.32 * visibility;
+    let amb = 0.24 + 0.12 * sky;
+    let k = amb + 0.52 * diff + 0.2 * fill - (amb + 0.2 * fill) * (1.0 - visibility);
     return out_color(vec4<f32>(min(i.c.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), i.c.a));
 }
 
