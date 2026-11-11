@@ -808,6 +808,8 @@ impl Dialog {
                 vec![
                     SelInput::new("Specify Point", selection::VERTICES | EDGES | FACES | selection::ORIGIN | selection::POINTS, false),
                     SelInput::new("Select Body (optional)", BODIES, true),
+                    // Owner: the direction stays, as the third input.
+                    SelInput::new("Specify Vector (optional)", EDGES | FACES | selection::AXES | PLANES, false),
                 ],
             ),
             "solid.sphere" => Dialog::new(
@@ -4213,7 +4215,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             // Cylinder: the picked point (a circle's centre and axis), a picked direction, the bodies to work on.
             // The axis comes from the point: a face's normal, a circle's axis, a sketch point's plane
-            // (the owner removed the separate direction input).
+            // unless a direction is picked in the third input.
             if *cmd == "solid.cylinder" && d.inputs.len() >= 2 {
                 if let Some(first) = sels(d, 0).first()
                     && let Some(base) = crate::dialogs_move::sel_point(app, Some(first))
@@ -4224,6 +4226,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     } else if let Some(n) = sketch_point_normal(app, first) {
                         p.insert("axis".into(), pt(n));
                     }
+                }
+                // A picked direction (third input) wins over the point's own.
+                if let Some(dir) = sels(d, 2).first().and_then(|x| crate::dialogs_assembly::snap_of(&app.session, x)) {
+                    p.insert("axis".into(), pt(dir.z));
                 }
                 let bodies = sels(d, 1).body_names();
                 if !bodies.is_empty() {

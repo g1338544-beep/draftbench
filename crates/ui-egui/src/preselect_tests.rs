@@ -1964,11 +1964,12 @@ fn a_box_stands_out_of_a_face_that_faces_down_an_axis() {
 
 #[test]
 fn a_cylinders_second_input_takes_the_body_after_the_point() {
-    // Owner: Cylinder has two inputs, the point and then the body; once the point is picked a
+    // Owner: Cylinder's inputs are the point, the body, then the direction; once the point is picked a
     // click on the part selects the whole body into the second input.
     let mut app = boxed();
     let mut d = start(&mut app, vec![], "solid.cylinder");
-    assert_eq!(d.inputs.len(), 2);
+    let labels: Vec<_> = d.inputs.iter().map(|i| i.label).collect();
+    assert_eq!(labels, ["Specify Point", "Select Body (optional)", "Specify Vector (optional)"]);
     let top = picked(&app, Vec3::new(20.0, 15.0, 20.0), Vec3::new(8.0, 10.0, 20.0));
     d.pick(&app.session, top);
     assert_eq!(d.active, 1, "the body input is next");
