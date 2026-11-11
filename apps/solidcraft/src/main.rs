@@ -739,7 +739,9 @@ fn main() -> eframe::Result {
                 let every = if app.autosave_minutes > 0.0 { app.autosave_minutes * 60.0 } else { f64::MAX / 4.0 };
                 solidcraft_ui_egui::recovery_ui::start(&mut app, &dir, std::time::Duration::from_secs_f64(every.min(1e9)));
                 // Safe mode keeps autosaving but offers nothing: the entries wait for a normal start.
-                if safe_mode {
+                // Nor is anything offered unless the person asked for it (Preferences): the
+                // autosaves stay in the folder for File > Recover.
+                if safe_mode || !app.preferences.offer_recovery {
                     app.recoverable.clear();
                 }
             }

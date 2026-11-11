@@ -384,6 +384,9 @@ preference_settings! {
     edge_colour: String = String::new(), 1;
     /// Colour of sketch lines as `#rrggbb`; empty keeps the theme's own.
     sketch_colour: String = String::new(), 1;
+    /// At launch, offer the designs a closed or crashed app left unsaved (off: nothing is asked;
+    /// the autosaves stay in the recovery folder for `doc.recovery_list` / `doc.recover`).
+    offer_recovery: bool = false, 1 => check("Offer to recover unsaved designs at start");
     /// Width of the model's edges on screen (logical pixels).
     edge_width: f32 = 2.0, 1, accept(0.5..=5.0);
     /// Enter in a dialog previews the result first; Enter again applies it. (Off under test so the
