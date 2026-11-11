@@ -1,0 +1,35 @@
+# Runs the unit tests of the crates the Draftbench changes touch, on a GitHub-hosted runner (the
+# main CI needs runners this repository does not have). Run by hand: Actions -> Draftbench tests.
+name: Draftbench tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: draftbench-tests
+      - name: Test
+        run: |
+          set -o pipefail
+          cargo test -p solidcraft-ui-egui -p solidcraft-engine -p solidcraft-doc -p solidcraft-sketch -p solidcraft-render --no-fail-fast 2>&1 | tee test.log | grep -E "^(test result|failures:|    [a-z_:0-9]+$|error|---- )" || true
+          echo "==== summary ===="
+          grep -E "^test .* FAILED|^test result|^error" test.log | sort | uniq -c | sort -rn | head -200
+          ! grep -qE "^test .* FAILED|^error(\[|:)" test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-log
+          path: test.log
