@@ -38,9 +38,10 @@ fn pick_the_plane(h: &mut Harness, cmd: &str) {
 }
 
 /// The open dialog's fields.
+/// The dialog's filled-in fields (a coil's optional height and end turns start blank).
 fn fields(h: &Harness) -> Vec<(&'static str, String)> {
     match h.app.dialog.as_ref().map(|d| &d.kind) {
-        Some(Kind::Primitive { fields, .. }) => fields.clone(),
+        Some(Kind::Primitive { fields, .. }) => fields.iter().filter(|(_, v)| !v.is_empty()).cloned().collect(),
         other => panic!("no primitive dialog: {other:?}"),
     }
 }

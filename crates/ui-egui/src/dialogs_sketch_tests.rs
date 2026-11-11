@@ -114,7 +114,8 @@ fn apply_commits_once_keeps_values_and_waits_for_new_selection_ok_closes() {
         h.settle();
         assert_eq!(h.app.session.undo.len(), undo + 1, "{command}: one Apply, one undo");
         let d = h.app.dialog.as_ref().unwrap();
-        assert!(d.inputs.iter().all(|i| i.items.is_empty()));
+        // Apply clears the first pick only (owner, as NX): the rest stay for the next one.
+        assert!(d.inputs.first().is_some_and(|i| i.items.is_empty()), "{command}");
         assert_eq!(d.active, 0);
         // Repick the original input; the numeric values are unchanged.
         let next = picked(&h, command);

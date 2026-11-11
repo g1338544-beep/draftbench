@@ -284,7 +284,8 @@ fn the_command_now_has_a_toolbar_placement_and_opens_a_window() {
     let spec = solidcraft_engine::find_command("sketch.move").expect("sketch.move is registered");
     assert_eq!((spec.tab, spec.panel), ("SKETCH", "MODIFY"));
     assert_eq!(spec.icon, "sketch_move");
-    assert_eq!(crate::icon_svg::resolve(spec.icon).master, "move", "reuse the finished Move drawing");
+    // The owner asked for sketch commands to look different from the 3D ones: its own drawing.
+    assert_eq!(crate::icon_svg::resolve(spec.icon).master, "sketch_move", "a drawing of its own");
 
     let mut h = rectangle();
     let before = curve_ids(&h).len();

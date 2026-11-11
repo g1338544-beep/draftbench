@@ -119,7 +119,8 @@ fn edit_starts_from_the_section_as_it_was_left() {
     h.app.session.selection.clear();
     h.app.start("inspect.section");
     let (offset, _, plane) = section_dialog(&h);
-    assert_eq!(offset, "0 mm", "a new section starts at its plane");
+    // Every command starts from its last settings (owner's request): the distance stays.
+    assert_eq!(offset, "12 mm", "a new section starts at the last distance");
     assert!(plane.is_empty(), "a new section picks its own plane: {plane:?}");
     crate::dialogs::cancel(&mut h.app);
     h.frames(2);
