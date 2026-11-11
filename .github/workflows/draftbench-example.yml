@@ -1,0 +1,45 @@
+# Builds the example designs in examples/ with the CLI and records their motion: the design file,
+# a GIF and an MP4 of the cam turning, as an artifact and a pre-release. Run by hand.
+name: Draftbench example
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: draftbench-example
+      - name: Build the CLI
+        run: cargo build --release -p solidcraft-cli
+      - name: Build the cam example and record it
+        run: |
+          set -x
+          mkdir -p out
+          CLI=target/release/solidcraft-cli
+          $CLI run examples/cam-follower.json --out out/cam-follower.draftnew --results > out/build.json || { cat out/build.json; exit 1; }
+          echo '{"commands":[{"command":"motion.export_animation","params":{"joint":"Cam turns","from":"0 deg","to":"360 deg","samples":90,"fps":24,"width":960,"height":600,"path":"out/cam-follower.gif"}}]}' > anim.json
+          $CLI run anim.json --in out/cam-follower.draftnew --results > out/anim.json || { cat out/anim.json; exit 1; }
+          cat out/anim.json
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          ffmpeg -y -stream_loop 2 -i out/cam-follower.gif -movflags +faststart -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" out/cam-follower.mp4
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cam-example
+          path: out/
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="example-cam-${GITHUB_SHA::7}"
+          gh release create "$tag" out/cam-follower.draftnew out/cam-follower.gif out/cam-follower.mp4 --prerelease --title "Cam example ($tag)" --notes "A cam turning a follower, built from examples/cam-follower.json. Open cam-follower.draftnew and drag the cam." --target "$GITHUB_SHA"
