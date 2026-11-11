@@ -58,9 +58,18 @@ def joint(d, step, a, a_name, b, b_name, pin, pin_name):
 
 
 def apply(d):
-    d.caption("   กด Apply: ได้ข้อต่อแล้ว หน้าคำสั่งยังเปิดอยู่ ทำข้อต่อถัดไปต่อได้เลย", "")
-    d.click(d.at(handle="dialog:Apply"), settle=1.2)
-    d.wait(1.0)
+    """OK makes the joint; the next one starts As-Built Joint again (Revolute each time)."""
+    d.caption("   กด OK: ได้ข้อต่อแล้ว เปิด As-Built Joint ทำข้อต่อถัดไป", "")
+    d.click(d.at(handle="dialog:OK"), settle=1.2)
+    d.wait(0.8)
+    open_as_built(d)
+    revolute(d)
+
+
+def revolute(d):
+    d.click(d.at(handle="dialog:Type"), settle=0.4)
+    d.click(d.at(handle="dialog:Type:Revolute"), settle=0.8)
+    d.wait(0.6)
 
 
 def run(d):
@@ -76,9 +85,7 @@ def run(d):
     d.caption("1. แท็บ Assemble แล้วกด As-Built Joint", "")
     open_as_built(d)
     d.caption("2. Type: เลือก Revolute (หมุนรอบแกนสลัก)", "")
-    d.click(d.at(handle="dialog:Type"), settle=0.4)
-    d.click(d.at(handle="dialog:Type:Revolute"), settle=0.8)
-    d.wait(0.8)
+    revolute(d)
     joint(d, 3, BASE, "Base", ARM, "Arm", PIN_A, "A")
     apply(d)
     joint(d, 4, ARM, "Arm", HANDLE, "Handle", PIN_B, "B")
