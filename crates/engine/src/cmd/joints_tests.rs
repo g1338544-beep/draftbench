@@ -1740,3 +1740,28 @@ fn joint_inspect_reads_only() {
     assert_eq!(run(&mut s, "document.inspect", json!({}))["undo"], undo);
     assert_eq!(serde_json::to_value(&s.doc).unwrap_or_default(), before);
 }
+
+/// The toggle clamp of the how-to video (examples/motion/toggle-clamp-parts.json): four parts put
+/// together, four as-built revolute joints on the pins make a closed four-bar, and turning the
+/// link moves the handle and the arm with it (the video's Play showed nothing moving).
+#[test]
+fn the_toggle_clamp_moves_as_a_four_bar() {
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/motion/toggle-clamp-parts.json")).unwrap();
+    let mut s = Session::default();
+    for c in script["commands"].as_array().unwrap() {
+        run(&mut s, c["command"].as_str().unwrap(), c["params"].clone());
+    }
+    let pins = [("Base", "Arm", [0.0, 0.0, 14.0]), ("Arm", "Handle", [0.0, 40.0, 20.0]), ("Handle", "Link", [30.0, 40.0, 20.0]), ("Base", "Link", [40.0, 0.0, 14.0])];
+    for (i, (a, b, at)) in pins.iter().enumerate() {
+        run(
+            &mut s,
+            "joint.as_built",
+            json!({"type": "revolute", "a": a, "b": b, "at": {"occurrence": 0, "point": at, "z": [0, 0, 1]}, "name": format!("J{}", i + 1)}),
+        );
+    }
+    let place = |s: &Session, name: &str| s.doc.assembly.occurrences.iter().find(|o| o.name.starts_with(name)).map(|o| o.transform).unwrap();
+    let (handle, arm) = (place(&s, "Handle"), place(&s, "Arm"));
+    let r = run(&mut s, "joint.drive", json!({"joint": "J4", "value": "10 deg"}));
+    assert_eq!(r["moved"], json!(true), "{r}");
+    assert!(place(&s, "Handle") != handle && place(&s, "Arm") != arm, "the loop follows: {r}");
+}
