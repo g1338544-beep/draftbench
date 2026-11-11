@@ -500,7 +500,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
     // A short how-to on the dialogs people find hard to start (Joint, Cam, Drive Joints).
     let guide = match k {
         Asm::Joint(_) => Some(
-            "How to: 1. Fixed part: click the part that stays put, where it joins (a face, an edge or a circle). 2. Moving part: click the part that should move, at the matching place; it jumps onto the fixed part. 3. Type: how it moves. 4. Range: how far it may go, then Play to check. 5. OK.",
+            "1. Fixed part: click where the part that stays put joins. 2. Moving part: click the matching place on the part that moves. 3. Type, Range, Play, OK.",
         ),
         Asm::Cam(_) => Some(
             "How to: first make a Revolute joint for the cam and a Slider (or Revolute) joint for the follower. 1. Profile = click the cam's outline edges. 2. Pick the cam joint and the follower joint below. 3. Optional: a round Roller on the follower, or its Tip. 4. Animate to check, then OK.",

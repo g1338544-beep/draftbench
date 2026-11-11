@@ -75,6 +75,9 @@ def run(d):
     d.click(d.at(handle="dialog:Type"), settle=0.4)
     d.click(d.at(handle="dialog:Type:Slider"), settle=0.8)
     d.wait(0.8)
+    # Fold Options away so the Range rows fit on screen.
+    if has(d, "Flip"):
+        d.click(d.at(handle="dialog:section:Options"), settle=0.4)
     d.caption("5. Range: ติ๊ก Keep within ใส่ระยะชัก From -80 mm To 0 mm", "")
     tick_range(d)
     fill(d, handle_like(d, "dialog:", "From"), "-80 mm")
