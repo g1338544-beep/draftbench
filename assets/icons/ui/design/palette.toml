@@ -228,6 +228,7 @@ surface = [
   "ruled", "stitch", "thicken", "unstitch", "untrim",
 ]
 sketch = [
+  "edit_sketch", "sketch_3d",
   "auto_constrain_datum", "finish_auto_constrain", "sketch_move", "sketch_scale", "sketch_text", "spline_cv5",
   "arc3", "arc_center", "arc_slot", "arc_slot_center", "arc_tangent",
   "sketch_copy3d", "blend", "circle", "circle2", "circle3", "circle_tt",

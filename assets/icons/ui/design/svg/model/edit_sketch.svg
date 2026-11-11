@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Edit Sketch</title>
+  <path d="M8 8L56 8L56 56L8 56Z" fill="none" stroke="#6f879c" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="0.1 5.9"/><path d="M14 27L29 18L38 40L15 41Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.89" stroke-linejoin="round"/><circle cx="14" cy="27" r="3.3" fill="#236ead"/><circle cx="29" cy="18" r="3.3" fill="#236ead"/><circle cx="38" cy="40" r="3.3" fill="#236ead"/><circle cx="15" cy="41" r="3.3" fill="#236ead"/><path d="M36 52L38 44L54 28L60 34L44 50Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round"/><path d="M50 32L56 38" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/><path d="M36 52L38 44L44 50Z" fill="#34465b"/>
+</svg>

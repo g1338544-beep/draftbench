@@ -21,7 +21,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             created_doc!()
         )),
     CommandSpec::new("sketch.create3d", "3D Sketch", create3d)
-        .icon("sketch")
+        .icon("sketch_3d")
         .params("(none) opens a 3D sketch: no plane to pick, lines, splines and points are placed freely in the 3D view (its drawing plane is XY)"),
     CommandSpec::new("sketch.line3d", "3D Line", line3d).icon("line").enabled(in_sketch).params(concat!(
         "points: [[x,y,z]…] world points (2 or more): one 3D line per segment, joined end to end (needs 3D Sketch on)",

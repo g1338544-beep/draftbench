@@ -33,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.color", "Sketch Line Color", sketch_line_color)
         .icon("sketch")
         .params("sketch?: id or name (default: the open sketch); color: \"#rrggbb\", or \"\" for the usual colours: the colour the sketch's lines are drawn in"),
-    CommandSpec::new("sketch.edit", "Edit Sketch", edit_sketch).noundo().icon("sketch").params("sketch: id or name"),
+    CommandSpec::new("sketch.edit", "Edit Sketch", edit_sketch).noundo().icon("edit_sketch").params("sketch: id or name"),
     CommandSpec::new("sketch.finish", "Finish Sketch", finish_sketch).at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo(),
     CommandSpec::new("sketch.line", "Line", draw_line)
         .at("SKETCH", "CREATE")

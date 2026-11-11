@@ -675,7 +675,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
-        act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
+        act("ui.editSketch", "Edit Sketch", "edit_sketch").with(json!({ "sketch": id })).on(!editing),
         act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
         Item::sep(),
