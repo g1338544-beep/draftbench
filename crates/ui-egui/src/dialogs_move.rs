@@ -131,6 +131,17 @@ pub(crate) fn sel_point(app: &SolveApp, s: Option<&Sel>) -> Option<Vec3> {
     }
     match s {
         Sel::Vertex { point, .. } | Sel::Face { point, .. } | Sel::Edge { point, .. } => Some(*point),
+        // A sketch point picked as "<sketch id>:<point id>" (or of the open sketch): where it is.
+        Sel::SketchPoint { id } => {
+            let st = app.session.world_state();
+            let (sketch, pid) = match id.split_once(':').and_then(|(sk, p)| Some((sk.parse::<u64>().ok()?, p))) {
+                Some((sk, p)) => (sk, p),
+                None => (app.session.active_sketch?, id.as_str()),
+            };
+            let ss = st.sketch(sketch)?;
+            let at = ss.sketch.resolve_point(pid).and_then(|i| ss.sketch.point(i))?;
+            Some(ss.plane.to_world(at))
+        }
         _ => None,
     }
 }

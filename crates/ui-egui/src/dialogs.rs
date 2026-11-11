@@ -761,7 +761,7 @@ impl Dialog {
                 // As NX lays it out: the point it stands on (a circle's centre gives its axis too),
                 // then optionally the direction, then the bodies a Join/Cut/Intersect works on.
                 vec![
-                    SelInput::new("Specify Point", selection::VERTICES | EDGES | FACES | selection::ORIGIN, false),
+                    SelInput::new("Specify Point", selection::VERTICES | EDGES | FACES | selection::ORIGIN | selection::POINTS, false),
                     SelInput::new("Specify Vector (optional)", EDGES | FACES | selection::AXES | PLANES, false),
                     SelInput::new("Select Body (optional)", BODIES, true),
                 ],
