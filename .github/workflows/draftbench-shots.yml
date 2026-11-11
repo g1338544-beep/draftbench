@@ -1,0 +1,42 @@
+# Screenshots of the desktop app (Linux, under Xvfb) for reviewing a look change: the Home page and
+# the sample design, light and dark. Run by hand on any branch.
+name: Draftbench shots
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: draftbench-tutorial
+          cache-on-failure: true
+      - name: System packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb mesa-vulkan-drivers libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 fonts-thai-tlwg fonts-dejavu-core libgtk-3-0
+      - name: Build the app
+        run: cargo build --release -p solidcraft
+      - name: Shots
+        env:
+          SOLIDCRAFT_CONTROL_TOKEN: 6a1f3c9e8b7d2a4f5e6c7b8a9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a
+        run: |
+          mkdir -p shots
+          Xvfb :99 -screen 0 1600x900x24 &
+          sleep 2
+          DISPLAY=:99 target/release/solidcraft --sample --control 7878 > shots/app.log 2>&1 &
+          for i in $(seq 1 120); do python3 -c "import sys;sys.path.insert(0,'examples/demo');from enclosure_mcp import control;r=control(7878,'ui.inspect');sys.exit(0 if r.get('ok') else 1)" 2>/dev/null && break; sleep 1; done
+          python3 examples/demo/shots.py 7878 shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots
+          path: shots/
