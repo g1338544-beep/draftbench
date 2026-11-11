@@ -37,7 +37,9 @@ def handles(d):
 
 def open_as_built(d):
     """The As-Built Joint button: on the ASSEMBLE tab, in its panel's drop-down when it is folded."""
-    d.click(d.at(handle="tab:ASSEMBLE"), settle=0.6)
+    # Clicking the tab that is already open drops its menu down, so only switch when needed.
+    if "toolbar:joint.as_built" not in handles(d):
+        d.click(d.at(handle="tab:ASSEMBLE"), settle=0.6)
     if "toolbar:joint.as_built" not in handles(d):
         for name in [h for h in handles(d) if h.startswith("panel:ASSEMBLE:")]:
             d.click(d.at(handle=name), settle=0.4)
