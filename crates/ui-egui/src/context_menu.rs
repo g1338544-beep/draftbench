@@ -554,7 +554,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
         v.push(Item::sep());
-        v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
+        v.push(act("ui.appearance", "Colour & Material", "appearance").key("A"));
         v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": [face] })));
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
@@ -638,7 +638,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })),
         Item::sep(),
         act("ui.material", "Physical Material", "material").with(json!({ "bodies": names })),
-        act("ui.appearance", "Appearance", "appearance").key("A").with(json!({ "bodies": names })),
+        act("ui.appearance", "Colour & Material", "appearance").key("A").with(json!({ "bodies": names })),
         act("ui.properties", "Properties", "measure").with(json!({ "bodies": names })),
         Item::sep(),
         act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })),
@@ -859,7 +859,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v.push(Item::sep());
     v.push(act("ui.material", "Physical Material", "material").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     v.push(
-        act("ui.appearance", "Appearance", "appearance")
+        act("ui.appearance", "Colour & Material", "appearance")
             .key("A")
             .with(if id == 0 { json!({ "bodies": names }) } else { json!({"component": id}) })
             .on(id != 0 || !bodies.is_empty()),

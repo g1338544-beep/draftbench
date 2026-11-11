@@ -1905,7 +1905,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::SaveMesh(_) => "EXPORT",
         Kind::ViewDxf { .. } => "Export Current View as DXF",
         Kind::Plastic(k) => k.title(),
-        Kind::Appearance(_) => "APPEARANCE",
+        Kind::Appearance(_) => "COLOUR & MATERIAL",
         Kind::Motion(k) => k.title(),
         Kind::Part(_) => "INSERT PART",
         Kind::PartSize(_) => "Change Part Size",

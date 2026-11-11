@@ -65,7 +65,7 @@ fn appearance_browser_action_targets_the_clicked_body() {
     let mut app = sample_app();
     let b = body(&app);
     app.run("select.clear", json!({})).unwrap();
-    act(&mut app, &Target::Body { name: b.clone() }, "Appearance");
+    act(&mut app, &Target::Body { name: b.clone() }, "Colour & Material");
     let dialog = app.dialog.as_ref().unwrap();
     assert!(matches!(dialog.kind, crate::dialogs::Kind::Appearance(_)));
     assert_eq!(dialog.inputs[0].items, vec![solidcraft_engine::Sel::Body { name: b }]);
@@ -76,7 +76,7 @@ fn appearance_component_action_assigns_an_inherited_look() {
     let mut app = sample_app();
     let created = app.run("component.create", json!({"name": "Painted part"})).unwrap();
     let id = created["component"].as_u64().unwrap();
-    act(&mut app, &Target::Component { id }, "Appearance");
+    act(&mut app, &Target::Component { id }, "Colour & Material");
     let d = app.dialog.clone().unwrap();
     let commands = crate::dialogs::apply_commands(&app, &d).unwrap();
     assert_eq!(commands[0].1["components"], json!(["Painted part"]));
@@ -144,7 +144,7 @@ fn face_menu_hides_and_finds_the_body() {
     for l in ["Create Sketch", "Offset Plane", "Press Pull", "Extrude", "Measure", "Find in Browser", "Find in Timeline"] {
         assert!(find(&items, l).enabled, "{l}");
     }
-    assert!(find(&items, "Appearance").enabled);
+    assert!(find(&items, "Colour & Material").enabled);
     context_menu::run_item(&mut app, &find(&items, "Find in Timeline"), pos2(0.0, 0.0));
     assert!(matches!(app.session.selection.as_slice(), [solidcraft_engine::Sel::Feature { .. }]));
     context_menu::run_item(&mut app, &find(&items, "Show/Hide"), pos2(0.0, 0.0));
@@ -501,7 +501,7 @@ fn menus_follow_fusion_order() {
             "Shell",
             "Edit Feature",
             "Edit Profile Sketch",
-            "Appearance",
+            "Colour & Material",
             "Properties",
             "Delete",
             "Show/Hide",
@@ -517,7 +517,7 @@ fn menus_follow_fusion_order() {
             "Move/Copy",
             "Create Components from Bodies",
             "Physical Material",
-            "Appearance",
+            "Colour & Material",
             "Properties",
             "Save As Mesh",
             "Delete",
@@ -1013,7 +1013,7 @@ fn appearance_submenu_swatches_apply_to_the_clicked_body_and_keep_library_action
     let mut app = sample_app();
     let name = body(&app);
     let rows = context_menu::items(&app, &Target::Body { name: name.clone() });
-    let appearance = find(&rows, "Appearance");
+    let appearance = find(&rows, "Colour & Material");
     assert_eq!(appearance.children[0].id, "ui.appearance");
     assert_eq!(appearance.children[0].params, appearance.params);
     let swatch = appearance.children.iter().find(|row| row.swatch.is_some()).unwrap();

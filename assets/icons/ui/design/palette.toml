@@ -136,6 +136,18 @@ dark  = "#718598"
 light = "#057f45"
 dark  = "#19874d"
 
+# Colour & Material (owner's request: a multi-coloured icon): the palette's three paint blobs
+# are the three active roles, each its own hue.
+[accents.paint.active-1]
+light = "#f2c12e"
+dark  = "#d9ab1f"
+[accents.paint.active-2]
+light = "#e0483c"
+dark  = "#c83a30"
+[accents.paint.active-3]
+light = "#2f7fd6"
+dark  = "#3b86d8"
+
 [accents.form.active-1]
 light = "#decff8"
 dark  = "#9c8dd2"
@@ -241,7 +253,7 @@ utility = [
   "library", "new", "paste", "printer", "render_image", "save", "settings", "update",
 ]
 modify = [
-  "appearance", "cavity", "chamfer", "combine", "delete_face", "draft", "fillet", "mate",
+  "cavity", "chamfer", "combine", "delete_face", "draft", "fillet", "mate",
   "material", "move", "move_face", "params", "presspull", "refold", "replace_face", "scale",
   "sheet_rules", "shell", "split_body", "split_face", "trim_body", "unfold",
 ]
@@ -266,3 +278,4 @@ assemble = [
 pattern = [
   "mirror", "pattern_circ", "pattern_path", "pattern_rect",
 ]
+paint = ["appearance"]
