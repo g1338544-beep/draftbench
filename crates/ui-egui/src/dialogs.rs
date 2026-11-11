@@ -758,7 +758,13 @@ impl Dialog {
                     operation: 0,
                     at: None,
                 },
-                vec![],
+                // As NX lays it out: the point it stands on (a circle's centre gives its axis too),
+                // then optionally the direction, then the bodies a Join/Cut/Intersect works on.
+                vec![
+                    SelInput::new("Specify Point", selection::VERTICES | EDGES | FACES | selection::ORIGIN, false),
+                    SelInput::new("Specify Vector (optional)", EDGES | FACES | selection::AXES | PLANES, false),
+                    SelInput::new("Select Body (optional)", BODIES, true),
+                ],
             ),
             "solid.sphere" => Dialog::new(
                 Kind::Primitive { cmd: "solid.sphere", fields: vec![("diameter", length_default(s, "20"))], operation: 0, at: None },
@@ -4141,6 +4147,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     _ => {
                         p.insert("center".into(), pt(point));
                     }
+                }
+            }
+            // Cylinder: the picked point (a circle's centre and axis), a picked direction, the bodies to work on.
+            if *cmd == "solid.cylinder" && d.inputs.len() >= 3 {
+                if let Some(first) = sels(d, 0).first()
+                    && let Some(base) = crate::dialogs_move::sel_point(app, Some(first))
+                {
+                    p.insert("base".into(), pt(base));
+                    if let Some(snap) = crate::dialogs_assembly::snap_of(&app.session, first) {
+                        p.insert("axis".into(), pt(snap.z));
+                    }
+                }
+                if let Some(dir) = sels(d, 1).first().and_then(|x| crate::dialogs_assembly::snap_of(&app.session, x)) {
+                    p.insert("axis".into(), pt(dir.z));
+                }
+                let bodies = sels(d, 2).body_names();
+                if !bodies.is_empty() {
+                    p.insert("targets".into(), json!(bodies));
                 }
             }
             // A coil is built on a picked plane or flat face, standing at its centre point when one is picked.
