@@ -717,7 +717,13 @@ fn appearance_library(_s: &mut Session, _p: &Value) -> Result<Value> {
         .iter()
         .map(|(n, c, o)| {
             let category = n.split(" - ").next().unwrap_or(n);
-            json!({"name": n, "category": category, "color": format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]), "opacity": o})
+            let mut v = json!({"name": n, "category": category, "color": format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]), "opacity": o});
+            if let Some(p) = solidcraft_doc::appearance::library_optics(n, *o)
+                && let (Some(m), Ok(pv)) = (v.as_object_mut(), serde_json::to_value(p))
+            {
+                m.insert("pbr".into(), pv);
+            }
+            v
         })
         .collect();
     Ok(json!({"appearances": list}))

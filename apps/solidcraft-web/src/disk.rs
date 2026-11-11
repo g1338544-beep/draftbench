@@ -282,7 +282,31 @@ mod web {
     /// answer is the engine path of the file, read into the engine's files; a design keeps its
     /// handle, so Save writes back to the file. `None`: closed, or it could not be read.
     pub fn pick_open(files: &Rc<Files>) -> impl std::future::Future<Output = Option<String>> + use<> {
-        let promise = start_picker("showOpenFilePicker", &open_options());
+        pick_open_with(files, &open_options())
+    }
+
+    /// The browser's open dialog for one file of `extensions` (a DXF or SVG for a sketch, a CSV…):
+    /// the file arrives as an upload and its path answers the command that asked for it.
+    pub fn pick_open_kind(files: &Rc<Files>, extensions: &[&str]) -> impl std::future::Future<Output = Option<String>> + use<> {
+        let options = Object::new();
+        let _ = Reflect::set(&options, &"multiple".into(), &JsValue::FALSE);
+        let list = Array::new();
+        for e in extensions.iter().take(32) {
+            list.push(&format!(".{}", e.trim_start_matches('.')).into());
+        }
+        if list.length() > 0 {
+            let accept = Object::new();
+            let _ = Reflect::set(&accept, &"application/octet-stream".into(), &list);
+            let entry = Object::new();
+            let _ = Reflect::set(&entry, &"description".into(), &extensions.join(", ").to_uppercase().into());
+            let _ = Reflect::set(&entry, &"accept".into(), &accept);
+            let _ = Reflect::set(&options, &"types".into(), &Array::of1(&entry));
+        }
+        pick_open_with(files, &options)
+    }
+
+    fn pick_open_with(files: &Rc<Files>, options: &Object) -> impl std::future::Future<Output = Option<String>> + use<> {
+        let promise = start_picker("showOpenFilePicker", options);
         let files = files.clone();
         async move {
             let r = async {

@@ -234,16 +234,25 @@ mod web {
                 .cards(3.0)
                 .show_body(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        if ui_kit::button(ui, "Open from computer…", ui_kit::Button::Normal).clicked() {
+                        // Plain names (owner's request: the three were confusing): open a design,
+                        // add a file to the one open, or save the open one to the computer.
+                        let tr = solidcraft_ui_egui::i18n::tr_label;
+                        if ui_kit::button(ui, tr("Open a design…"), ui_kit::Button::Normal)
+                            .on_hover_text(tr("Open a design (or a STEP/STL as a new design) from the computer"))
+                            .clicked()
+                        {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
-                        if ui_kit::button(ui, "Insert from computer…", ui_kit::Button::Normal)
-                            .on_hover_text("STEP, 3MF or STL into the open design")
+                        if ui_kit::button(ui, tr("Add a part to this design…"), ui_kit::Button::Normal)
+                            .on_hover_text(tr("A STEP, 3MF or STL file goes into the design that is open"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);
                         }
-                        if ui_kit::button(ui, "Download open design", ui_kit::Button::Normal).clicked() {
+                        if ui_kit::button(ui, tr("Save this design to the computer"), ui_kit::Button::Normal)
+                            .on_hover_text(tr("Download the open design as a file"))
+                            .clicked()
+                        {
                             act = Some(("download_open", String::new()));
                         }
                     });
@@ -585,6 +594,12 @@ mod web {
                             pick_open: Some(Box::new(move |exts: &[&str]| {
                                 if disk::handles_open(exts) {
                                     return Box::pin(disk::pick_open(&opener));
+                                }
+                                // A file for a command (a DXF or SVG into the open sketch, a CSV…):
+                                // the browser's open dialog for that kind, its path back to the
+                                // command (the files window would only open or insert designs).
+                                if disk::supported() && !exts.is_empty() {
+                                    return Box::pin(disk::pick_open_kind(&opener, exts));
                                 }
                                 panel.panel.set(true);
                                 Box::pin(std::future::ready(None))

@@ -136,13 +136,47 @@ impl Appearances {
 mod defaults;
 pub use defaults::LIBRARY;
 
+/// The optical response a library look stands for (owner's request: realistic materials):
+/// metals reflect in their own colour, polished ones sharply and brushed or cast ones softly;
+/// plastics, rubber, wood and paint are dielectric with their usual gloss. None for see-through
+/// looks (the physical response is for opaque surfaces).
+pub fn library_optics(name: &str, opacity: f64) -> Option<crate::pbr_appearance::PbrParameters> {
+    if opacity < 1.0 {
+        return None;
+    }
+    let n = name.to_ascii_lowercase();
+    let metal = ["aluminum", "aluminium", "steel", "iron", "brass", "copper", "titanium", "chrome", "bronze"].iter().any(|m| n.contains(m));
+    let (metallic, roughness) = if metal {
+        if n.contains("anodized") {
+            (0.85, 0.45)
+        } else if n.contains("polished") || n.contains("chrome") {
+            (1.0, 0.12)
+        } else if n.contains("cast") {
+            (1.0, 0.6)
+        } else if n.contains("brushed") || n.contains("satin") {
+            (1.0, 0.38)
+        } else {
+            (1.0, 0.28)
+        }
+    } else if n.contains("rubber") {
+        (0.0, 0.85)
+    } else if n.contains("wood") {
+        (0.0, 0.7)
+    } else if n.contains("gloss") || n.contains("paint") {
+        (0.0, 0.2)
+    } else {
+        (0.0, 0.42)
+    };
+    crate::pbr_appearance::PbrParameters::new(metallic, roughness, 1.5).ok()
+}
+
 /// A library appearance by name (case-insensitive).
 pub fn library(name: &str) -> Option<Look> {
     LIBRARY.iter().find(|(n, _, _)| n.eq_ignore_ascii_case(name.trim())).map(|(n, c, o)| Look {
         name: n.to_string(),
         color: *c,
         opacity: *o,
-        pbr: None,
+        pbr: library_optics(n, *o),
     })
 }
 

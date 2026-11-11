@@ -26,7 +26,28 @@ pub struct Look {
 
 /// Built-in looks, used until the engine offers a library (`appearance.library`).
 pub(crate) fn builtin() -> Vec<Look> {
-    let l = |cat: &str, name: &str, c: [u8; 3], o: f64| Look { name: name.into(), category: cat.into(), color: c, opacity: o, pbr: None };
+    // Realistic by default (owner's request): each built-in look carries its optical response —
+    // metals reflect in their own colour and are smoother or rougher, plastics and paint are
+    // dielectric with a soft or glossy finish. Transparent looks keep the plain shading (the
+    // physical response is for opaque surfaces).
+    let optics = |cat: &str, name: &str, o: f64| -> Option<PbrParameters> {
+        if o < 1.0 {
+            return None;
+        }
+        let (metallic, roughness) = match cat {
+            "Metal" if name.contains("Chrome") => (1.0, 0.08),
+            "Metal" if name.contains("Brushed") || name.contains("Satin") => (1.0, 0.42),
+            "Metal" if name.contains("Anodized") => (0.85, 0.5),
+            "Metal" => (1.0, 0.28),
+            "Plastic" if name.contains("Rubber") => (0.0, 0.85),
+            "Plastic" => (0.0, 0.45),
+            "Paint" => (0.0, 0.25),
+            "Wood" => (0.0, 0.7),
+            _ => (0.0, 0.5),
+        };
+        PbrParameters::new(metallic, roughness, 1.5).ok()
+    };
+    let l = |cat: &str, name: &str, c: [u8; 3], o: f64| Look { name: name.into(), category: cat.into(), color: c, opacity: o, pbr: optics(cat, name, o) };
     vec![
         l("Metal", "Aluminum - Satin", [196, 199, 204], 1.0),
         l("Metal", "Steel - Brushed", [160, 164, 170], 1.0),
