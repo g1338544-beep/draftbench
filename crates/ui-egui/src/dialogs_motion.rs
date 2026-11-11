@@ -411,7 +411,7 @@ fn study_pose(app: &SolveApp, params: &Value, step: u32) -> Result<BTreeMap<u64,
 
 /// Save the study being edited as an animated GIF, seen from the viewport's camera. Drawn on a
 /// scratch copy, so the dialog's keys need not be saved first and the design is not changed.
-fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
+fn export_animation(app: &mut SolveApp, params: Value, name: &str, back_and_forth: bool) {
     // The view as the viewport shows it: its camera, and its grid and axes on or off.
     let (camera, guides) = (app.cam, crate::control::window_guides(app));
     let file = format!("{}.gif", Some(name.trim()).filter(|n| !n.is_empty()).unwrap_or("Motion Study"));
@@ -427,7 +427,7 @@ fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
         let made = sc.execute("motion.study", &params).and_then(|r| {
             sc.execute(
                 "motion.export_animation",
-                &json!({"study": r["study"], "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes}),
+                &json!({"study": r["study"], "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes, "back_and_forth": back_and_forth}),
             )
         });
         match made {
@@ -773,7 +773,11 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     let params = study_params(&app.session, name, study.as_deref(), steps, tracks);
     if export {
         match &params {
-            Ok(p) => export_animation(app, p.clone(), name),
+            Ok(p) => {
+                // Back and forth as the dialog plays it.
+                let back_and_forth = ui.data(|d| d.get_temp::<bool>(egui::Id::new("motion_back_and_forth"))).unwrap_or(false);
+                export_animation(app, p.clone(), name, back_and_forth)
+            }
             Err(e) => *error = Some(e.clone()),
         }
     }

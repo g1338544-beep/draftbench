@@ -105,7 +105,14 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
             bytes += png.len();
         }
     }
-    let mut out = json!({"path": path, "format": if gif { "gif" } else { "png" }, "frames": n, "width": width, "height": height});
+    // Back and forth: the frames again in reverse (without repeating the two ends), so the GIF plays
+    // forward then back and loops smoothly.
+    if gif && p.get("back_and_forth").and_then(Value::as_bool).unwrap_or(false) && frames.len() > 2 {
+        let back: Vec<_> = frames.iter().skip(1).take(frames.len() - 2).rev().cloned().collect();
+        frames.extend(back);
+    }
+    let count = if gif { frames.len() } else { n as usize };
+    let mut out = json!({"path": path, "format": if gif { "gif" } else { "png" }, "frames": count, "width": width, "height": height});
     if gif {
         // GIF counts in hundredths of a second, and viewers slow anything under 2 down.
         let delay = (100.0 / fps).round().clamp(2.0, 100.0) as u16;
