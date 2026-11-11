@@ -18,6 +18,21 @@ from enclosure_mcp import control  # noqa: E402
 from enclosure_ui_mcp import Demo  # noqa: E402
 
 
+# What the voice-over says for each caption (voice.py speaks these; English names are written the
+# way a Thai speaker says them, so the Thai voice reads them naturally).
+NARRATION = {
+    "ตัวอย่าง: ทำกระบอกลมด้วย Joint แบบ Slider": "ตัวอย่างนี้ จะสอนทำกระบอกลม ด้วยคำสั่ง จอยท์ แบบ สไลเดอร์ ครับ",
+    "1. ไปที่แท็บ Assemble แล้วกด Joint": "ขั้นที่หนึ่ง ไปที่แท็บ แอสเซมเบิล แล้วกดคำสั่ง จอยท์",
+    "2. Fixed part: คลิกหน้าปลายกระบอก (ชิ้นที่อยู่กับที่)": "ขั้นที่สอง ช่อง ฟิกซ์ พาร์ท คลิกที่หน้าปลายกระบอก ซึ่งเป็นชิ้นที่อยู่กับที่",
+    "3. Moving part: คลิกหน้าปลายก้านสูบ (ชิ้นที่จะขยับ) ก้านจะกระโดดเข้ามาประกบ": "ขั้นที่สาม ช่อง มูฟวิ่ง พาร์ท คลิกที่หน้าปลายก้านสูบ ซึ่งเป็นชิ้นที่จะขยับ ก้านจะกระโดดเข้ามาประกบทันที",
+    "4. Type: เลือก Slider (เลื่อนตามแกน)": "ขั้นที่สี่ ช่อง ไทป์ เลือก สไลเดอร์ คือการเลื่อนตามแกน",
+    "5. Range: ติ๊ก Keep within ใส่ระยะชัก From -80 mm To 0 mm": "ขั้นที่ห้า หัวข้อ เรนจ์ ติ๊ก คีพ วิธอิน แล้วใส่ระยะชัก จาก ลบแปดสิบ มิลลิเมตร ถึง ศูนย์ มิลลิเมตร",
+    "6. กด OK": "ขั้นที่หก กด โอเค",
+    "7. ปิดหน้าต่างทั้งหมดแล้วคลิกค้างที่ก้านสูบ ลากเข้า-ออกด้วยเมาส์": "ขั้นที่เจ็ด คลิกค้างที่ก้านสูบ แล้วลากเข้า ลากออก ด้วยเมาส์",
+    "ก้านเลื่อนได้แค่ในช่วง Range ที่ตั้ง ไม่หลุดออกจากกระบอก": "ก้านจะเลื่อนได้แค่ในช่วงที่ตั้งไว้ ไม่หลุดออกจากกระบอกครับ",
+}
+
+
 def handle_like(d, *words):
     """The first handle drawn whose name holds all `words`; the dialog is scrolled down (a few
     times) to bring a row below its fold into view."""
@@ -50,8 +65,16 @@ def tick_range(d):
     for at in [box, (row[0] + 60, row[1]), (row[0] + 110, row[1]), (row[0] - 40, row[1])]:
         d.click(at, settle=0.5)
         d.settle_camera()
-        if has(d, "From"):
-            return
+        # The From row may open below the dialog's fold: scroll down a little before looking.
+        for _ in range(3):
+            if has(d, "From"):
+                return
+            card = next((h for h in d.ui("ui.handles") if h["name"] in ("dialog:card", "dialog:Type")), None)
+            if card is None:
+                break
+            d.ui("ui.scroll", {"x": card["x"], "y": card["y"] + 120, "delta": -200})
+            d.wait(0.3)
+            d.settle_camera()
     raise RuntimeError("the Range check box did not tick")
 
 
@@ -109,8 +132,13 @@ def main():
     ap.add_argument("--design", required=True)
     ap.add_argument("--log")
     ap.add_argument("--speed", type=float, default=1.0)
+    ap.add_argument("--voice", help="voice.py's index.json: each caption waits for its narration")
     a = ap.parse_args()
     d = Demo(a.port, None, open(a.log, "w") if a.log else None, a.speed, 2.2)
+    if a.voice:
+        import json
+
+        d.voice = {k: v["seconds"] for k, v in json.load(open(a.voice)).items()}
     d.ui("ui.prefs", {"language": "en", "theme": "light", "ui_scale": 1, "button": "apply"})
     d.ui("ui.resize", {"width": 1920, "height": 1080})
     # The whole screen, and a larger interface so the video reads well.

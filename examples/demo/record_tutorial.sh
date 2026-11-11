@@ -1,7 +1,8 @@
 #!/bin/bash
 # record_tutorial.sh DISPLAY PORT OUTDIR DESIGN: record joint_tutorial.py driving the app on X
 # display DISPLAY (started with --control PORT) to OUTDIR/joint-tutorial.mp4, with captions and a
-# drawn pointer (overlay.py), as record_ui.sh does for the enclosure demo.
+# drawn pointer (overlay.py), as record_ui.sh does for the enclosure demo. With OUTDIR/voice/index.json
+# (voice.py speak) the steps wait for their narration and the Thai voice-over is mixed in.
 set -e
 DISP=${1:-:99}; PORT=${2:-7878}; OUT=$(cd "${3:-.}" && pwd); DESIGN=$4
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -17,7 +18,8 @@ ffmpeg -loglevel info -nostats -y -f x11grab -draw_mouse 0 -video_size 1920x1080
 FF=$!
 trap 'kill -INT $FF 2>/dev/null || true; wait $FF 2>/dev/null || true' EXIT
 sleep 1
-python3 "$HERE/joint_tutorial.py" --port "$PORT" --design "$DESIGN" --log "$OUT/steps.log"
+VOICE=(); [ -f "$OUT/voice/index.json" ] && VOICE=(--voice "$OUT/voice/index.json")
+python3 "$HERE/joint_tutorial.py" --port "$PORT" --design "$DESIGN" --log "$OUT/steps.log" "${VOICE[@]}"
 sleep 1
 kill -INT $FF; wait $FF || true
 trap - EXIT
@@ -27,4 +29,8 @@ read CX CY < "$OUT/cursor.start"
 ffmpeg -loglevel error -y -i "$OUT/raw.mp4" -loop 1 -i "$OUT/cursor.png" -loop 1 -i "$OUT/ripple.png" -filter_complex \
   "[0:v]ass=$OUT/captions.ass[v0];[v0][2:v]overlay@rip=x=-100:y=-100:enable='$(cat "$OUT/ripple.enable")':shortest=1[v1];[v1][1:v]overlay@cur=x=$CX:y=$CY:shortest=1,sendcmd=f=$OUT/cursor.cmd[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 16 -pix_fmt yuv420p -movflags +faststart "$OUT/joint-tutorial.mp4"
-ls -la "$OUT"/joint-tutorial.mp4
+if [ -f "$OUT/voice/index.json" ]; then
+  mv "$OUT/joint-tutorial.mp4" "$OUT/joint-tutorial-silent.mp4"
+  python3 "$HERE/voice.py" mix "$OUT/steps.log" "$START" "$OUT" "$OUT/joint-tutorial-silent.mp4" "$OUT/joint-tutorial.mp4"
+fi
+ls -la "$OUT"/joint-tutorial*.mp4

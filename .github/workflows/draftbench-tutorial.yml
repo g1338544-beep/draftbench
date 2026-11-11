@@ -23,6 +23,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb ffmpeg mesa-vulkan-drivers libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 fonts-thai-tlwg fonts-dejavu-core libgtk-3-0
+      - name: Thai voice-over
+        run: |
+          pip install --quiet edge-tts
+          mkdir -p out
+          python3 examples/demo/voice.py speak out
       - name: Build the app and the CLI
         run: cargo build --release -p solidcraft -p solidcraft-cli
       - name: Record

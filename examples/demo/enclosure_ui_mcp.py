@@ -60,11 +60,14 @@ class Demo:
         self.n = getattr(self, "n", 0) + 1
         if self.n > self.stop:
             raise StopIteration
-        # Every caption stays up long enough to read.
+        # Every caption stays up long enough to read, and to hear its narration (`voice`: seconds
+        # of spoken audio per caption, when the video gets a voice-over).
         shown = time.time() - getattr(self, "shown_at", 0.0)
-        if shown < self.minimum_caption:
-            time.sleep(self.minimum_caption - shown)
+        need = max(self.minimum_caption, getattr(self, "need", 0.0))
+        if shown < need:
+            time.sleep(need - shown)
         self.shown_at = time.time()
+        self.need = getattr(self, "voice", {}).get(text, 0.0) + 0.5 if text else 0.0
         print(f"  {text}  [{via}]", file=sys.stderr)
         self.mark(caption=text, via=via)
 
