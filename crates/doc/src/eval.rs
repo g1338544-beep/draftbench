@@ -399,6 +399,43 @@ fn thread_on(st: &ModelState, feature: u64, p: Vec3, designation: Option<&str>, 
 /// profile, 60° flanks): cut from the shaft (external) or the hole wall (internal), running from
 /// `start` to `end` along the axis. `radius` is the face's own radius; `open` says which ends
 /// of the threaded length are free ends of the face.
+/// An internal thread cut into a sleeve of the body round the hole: the body less a cylinder a
+/// little wider than the thread (exact faces), joined with the body within a slightly wider
+/// cylinder (overlapping the first by a quarter pitch) cut faceted by the groove. `None` when any
+/// step fails or the volume does not add up, so the caller can cut the whole body instead.
+fn threaded_in_sleeve(input: &Traced, t: &ThreadInfo, cyl: &kernel::CylinderFace, groove: &solidcraft_geom::Mesh) -> Option<Traced> {
+    let axis = cyl.axis.vec();
+    let size = input.body.size();
+    if !(size.is_finite() && size > 0.0 && t.pitch > 0.0) {
+        return None;
+    }
+    let inner_r = t.major_diameter / 2.0 + t.pitch * 0.5;
+    let outer_r = inner_r + t.pitch * 0.25;
+    // Through the whole body along the axis: a sleeve ends only where the part does.
+    let base = cyl.axis_point + axis * (cyl.start.min(cyl.end) - size);
+    let height = (cyl.end - cyl.start).abs() + 2.0 * size;
+    let inner = Traced::unnamed(kernel::cylinder(base, axis, inner_r, height).ok()?);
+    let outer = Traced::unnamed(kernel::cylinder(base, axis, outer_r, height).ok()?);
+    let rest = kernel::boolean(&input.body, &inner.body, BoolOp::Cut).ok()??;
+    let rest = Traced::step(rest, &[input, &inner]);
+    let local = kernel::boolean(&input.body, &outer.body, BoolOp::Intersect).ok()??;
+    let local = Traced::step(local, &[input, &outer]);
+    let cut = kernel::faceted_boolean(&local.body, groove, BoolOp::Cut, t.pitch * 0.005).ok()??;
+    let names = crate::lineage::Lineage::unnamed_faces(groove.triangles.len());
+    let lineage = local.lineage.as_ref().and_then(|l| crate::lineage::Lineage::step(&cut, &[l, &names]));
+    let threaded = Traced { body: cut, lineage };
+    let joined = kernel::boolean(&rest.body, &threaded.body, BoolOp::Union).ok()??;
+    // The volume must be the body's less what the groove took from the sleeve.
+    let vol = |b: &kernel::Body| b.tessellate(t.pitch * 0.005).ok().map(|m| m.measure().volume).filter(|v| v.is_finite());
+    let (v_in, v_local, v_threaded, v_out) = (vol(&input.body)?, vol(&local.body)?, vol(&threaded.body)?, vol(&joined)?);
+    let want = v_in - (v_local - v_threaded);
+    if !(v_threaded < v_local && (v_out - want).abs() <= want.abs() * 2e-3 + t.pitch.powi(3) * 0.05) {
+        log::debug!("thread in a sleeve: volume {v_out} vs {want}; cutting the whole body");
+        return None;
+    }
+    Some(Traced::step(joined, &[&rest, &threaded]))
+}
+
 fn thread_groove(t: &ThreadInfo, radius: f64, open: (bool, bool)) -> Result<solidcraft_geom::Mesh> {
     let (p, d) = (t.pitch, t.major_diameter);
     let h = p * 3f64.sqrt() / 2.0;
@@ -5764,14 +5801,22 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 None => (input, cyl.radius),
             };
             let groove = thread_groove(&t, radius, ((t.start - cyl.start).abs() < tol, (t.end - cyl.end).abs() < tol))?;
-            // The B-rep boolean can't take helical walls in reasonable time: the body is cut
-            // faceted (curved faces within a two-hundredth of the pitch).
-            let nb = kernel::faceted_boolean(&input.body, &groove, BoolOp::Cut, t.pitch * 0.005)?
-                .ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
-            // The groove's faces are its triangles, with no role to name them by.
-            let groove = crate::lineage::Lineage::unnamed_faces(groove.triangles.len());
-            let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
-            let nb = Traced { body: nb, lineage };
+            // A hole is threaded in a sleeve of the body round it alone, so the rest of the part keeps
+            // its true faces (other holes stay round and can take threads, edges stay clean). When
+            // that can't be done cleanly, the whole body is cut faceted as before.
+            let nb = match (t.internal && cyl.internal).then(|| threaded_in_sleeve(&input, &t, &cyl, &groove)).flatten() {
+                Some(done) => done,
+                None => {
+                    // The B-rep boolean can't take helical walls in reasonable time: the body is cut
+                    // faceted (curved faces within a two-hundredth of the pitch).
+                    let nb = kernel::faceted_boolean(&input.body, &groove, BoolOp::Cut, t.pitch * 0.005)?
+                        .ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
+                    // The groove's faces are its triangles, with no role to name them by.
+                    let groove = crate::lineage::Lineage::unnamed_faces(groove.triangles.len());
+                    let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
+                    Traced { body: nb, lineage }
+                }
+            };
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
             }
