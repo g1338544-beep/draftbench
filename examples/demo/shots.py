@@ -21,6 +21,7 @@ def main():
     port, out = int(sys.argv[1]), os.path.abspath(sys.argv[2])
     os.makedirs(out, exist_ok=True)
     ui(port, "ui.resize", {"width": 1600, "height": 900})
+    ui(port, "ui.prefs", {"theme": "light", "button": "apply"})
     time.sleep(1.5)
     ui(port, "ui.home", {"open": True})
     time.sleep(2.5)
