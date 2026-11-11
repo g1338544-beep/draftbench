@@ -511,7 +511,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
     if let Some(text) = guide {
         let t = crate::theme::Tokens::get();
         ui.vertical(|ui| {
-            ui.label(egui::RichText::new(crate::i18n::tr_label(text)).color(t.text_dim));
+            ui.add(egui::Label::new(egui::RichText::new(crate::i18n::tr_label(text)).color(t.text_dim)).wrap());
         });
     }
     let t = Tokens::get();

@@ -591,12 +591,12 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     }
     if tracks.is_empty() {
         ui.vertical(|ui| {
-            ui.label(
+            ui.add(egui::Label::new(
                 RichText::new(crate::i18n::tr_label(
                     "How to: 1. Add Key picks a joint and moves it from where it is now to its limit (or a quarter turn / 50 mm). 2. Change the joint or the values at the start and end keys. 3. Play. Add keys in between to make a sequence.",
                 ))
                 .color(t.text_dim),
-            );
+            ).wrap());
         });
     }
     // Playback: to start, step back, play/stop, step on, to end; loop and speed.
