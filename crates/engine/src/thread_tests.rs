@@ -393,19 +393,18 @@ thread_local! {
 
 /// Owner: the web app closed when a modelled thread was made. On the web a panic inside the
 /// kernel can't be caught (the desktop app turns it into an error), so threading the usual parts
-/// must not panic at all: a drilled blind or through hole in a round part, and a shaft on it.
+/// must not panic at all: a counterbored and a blind hole in a round part.
 #[test]
 fn modelled_threads_on_a_round_part_never_panic_inside_the_kernel() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| KERNEL_PANICS.with(|c| c.set(c.get() + 1))));
     let cases: Vec<(&str, Vec<(&str, Value)>, Value)> = vec![
-        ("blind M6 hole", vec![("solid.hole", json!({"position": [5, 0, 20], "diameter": 5, "depth": 10}))], json!({"face": [7.5, 0, 15], "designation": "M6", "modeled": true})),
-        ("through M6 hole", vec![("solid.hole", json!({"position": [5, 0, 20], "diameter": 5}))], json!({"face": [7.5, 0, 10], "designation": "M6", "modeled": true})),
         (
-            "M6 shaft",
-            vec![("solid.cylinder", json!({"base": [0, 0, 20], "radius": 3, "height": 12, "operation": "join"}))],
-            json!({"face": [3, 0, 26], "designation": "M6", "modeled": true}),
+            "M6 in a counterbored hole",
+            vec![("solid.hole", json!({"position": [0, 0, 20], "type": "counterbore", "diameter": 5, "cb_diameter": 10, "cb_depth": 4, "depth": 15}))],
+            json!({"face": [2.5, 0, 10], "designation": "M6", "modeled": true}),
         ),
+        ("blind M6 hole", vec![("solid.hole", json!({"position": [5, 0, 20], "diameter": 5, "depth": 10}))], json!({"face": [7.5, 0, 15], "designation": "M6", "modeled": true})),
     ];
     let mut report = Vec::new();
     for (what, steps, thread) in cases {

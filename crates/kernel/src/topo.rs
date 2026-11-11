@@ -263,6 +263,7 @@ pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
     // Faces cut from one surface (an imported face split where it wraps around a closed
     // surface) carry the very same surface: the edge between them is a seam.
     let surf_keys: Vec<String> = solid.face_iter().map(|f| format!("{:?}", f.surface())).collect();
+    let curved_ends = std::cell::OnceCell::new();
     let mut faces_of: HashMap<String, Vec<usize>> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for (fi, f) in solid.face_iter().enumerate() {
@@ -284,7 +285,7 @@ pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
             Some([a, b2]) => {
                 (!matches!(surfs.get(*a), Some(Surf::Plane { .. })) && same_surface(&surfs, &verts, mesh.edges.get(ei), *a, *b2, tol * 10.0))
                     || (surf_keys.get(*a).is_some_and(|k| Some(k) == surf_keys.get(*b2)) && !matches!(surfs.get(*a), Some(Surf::Plane { .. })))
-                    || round_flat_split(&surfs, mesh, ei, *a, *b2, tol)
+                    || round_flat_split(&surfs, mesh, ei, *a, *b2, tol, &curved_ends)
             }
             _ => false,
         })
@@ -295,7 +296,7 @@ pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
 /// pieces, as a counterbore's floor): the two faces lie in one plane and both ends of the edge
 /// meet curved edges? Drawn, such cuts show as spokes across a face that is one round face to
 /// the eye (owner: "the hole doesn't look smooth"); hidden, the pieces also light up together.
-fn round_flat_split(surfs: &[Surf], mesh: &Mesh, ei: usize, a: usize, b: usize, tol: f64) -> bool {
+fn round_flat_split(surfs: &[Surf], mesh: &Mesh, ei: usize, a: usize, b: usize, tol: f64, curved_ends: &std::cell::OnceCell<std::collections::HashSet<[i64; 3]>>) -> bool {
     let (Some(sa @ Surf::Plane { .. }), Some(sb)) = (surfs.get(a), surfs.get(b)) else { return false };
     if !sa.same(sb, tol * 10.0) {
         return false;
@@ -306,17 +307,32 @@ fn round_flat_split(surfs: &[Surf], mesh: &Mesh, ei: usize, a: usize, b: usize, 
     if e.iter().any(|x| ((*x - p) - dir * (*x - p).dot(dir)).len() > tol * 10.0) {
         return false;
     }
-    let curved = |w: &Vec<Vec3>| {
-        let (Some(s), Some(t)) = (w.first().copied(), w.last().copied()) else { return false };
-        let Some(d) = (t - s).normalized().or_else(|| w.get(w.len() / 2).and_then(|m| (*m - s).normalized())) else { return false };
-        w.len() > 2 && w.iter().any(|x| ((*x - s) - d * (*x - s).dot(d)).len() > tol * 10.0)
-    };
-    let meets_curve = |end: Vec3| {
-        mesh.edges.iter().enumerate().any(|(j, w)| {
-            j != ei && curved(w) && (w.first().is_some_and(|s| s.dist(end) <= tol * 10.0) || w.last().is_some_and(|t| t.dist(end) <= tol * 10.0))
-        })
-    };
-    meets_curve(p) && meets_curve(q)
+    // The ends of every curved edge, found once per mesh, on a grid of the tolerance.
+    let cell = (tol * 10.0).max(1e-9);
+    let key = |v: Vec3| [(v.x / cell).round() as i64, (v.y / cell).round() as i64, (v.z / cell).round() as i64];
+    let ends = curved_ends.get_or_init(|| {
+        let curved = |w: &Vec<Vec3>| {
+            let (Some(s), Some(t)) = (w.first().copied(), w.last().copied()) else { return false };
+            let Some(d) = (t - s).normalized().or_else(|| w.get(w.len() / 2).and_then(|m| (*m - s).normalized())) else { return false };
+            w.len() > 2 && w.iter().any(|x| ((*x - s) - d * (*x - s).dot(d)).len() > cell)
+        };
+        let mut set = std::collections::HashSet::new();
+        for w in mesh.edges.iter().filter(|w| curved(w)) {
+            for v in [w.first(), w.last()].into_iter().flatten() {
+                // The neighbouring cells too, so a point near a cell's border is still found.
+                let [x, y, z] = key(*v);
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        for dz in -1..=1 {
+                            set.insert([x + dx, y + dy, z + dz]);
+                        }
+                    }
+                }
+            }
+        }
+        set
+    });
+    ends.contains(&key(p)) && ends.contains(&key(q))
 }
 
 /// Least-squares sphere through points: centre and radius.
