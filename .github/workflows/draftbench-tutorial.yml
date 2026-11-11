@@ -1,0 +1,42 @@
+# Records a how-to video in the running desktop app (Linux, under Xvfb): the Joint dialog
+# clicked step by step for an air cylinder (examples/demo/joint_tutorial.py). Run by hand.
+name: Draftbench tutorial
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  joint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: draftbench-tutorial
+      - name: System packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb ffmpeg mesa-vulkan-drivers libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 fonts-thai-tlwg fonts-dejavu-core libgtk-3-0
+      - name: Build the app and the CLI
+        run: cargo build --release -p solidcraft -p solidcraft-cli
+      - name: Record
+        env:
+          SOLIDCRAFT_CONTROL_TOKEN: tutorial-token
+        run: |
+          mkdir -p out
+          target/release/solidcraft-cli run examples/motion/cylinder-parts.json --out out/cylinder-parts.draftnew
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          DISPLAY=:99 target/release/solidcraft --control 7878 > out/app.log 2>&1 &
+          for i in $(seq 1 120); do python3 -c "import sys;sys.path.insert(0,'examples/demo');from enclosure_mcp import control;r=control(7878,'ui.inspect');sys.exit(0 if r.get('ok') else 1)" 2>/dev/null && break; sleep 1; done
+          DISPLAY=:99 examples/demo/record_tutorial.sh :99 7878 out out/cylinder-parts.draftnew
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: joint-tutorial
+          path: out/
