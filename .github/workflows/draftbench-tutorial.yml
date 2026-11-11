@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   joint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +28,7 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update -qq
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq
           sudo apt-get install -y -qq xvfb ffmpeg mesa-vulkan-drivers libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 fonts-thai-tlwg fonts-dejavu-core libgtk-3-0
       - name: Thai voice-over
         if: inputs.tutorial == 'joint'
