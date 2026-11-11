@@ -1764,4 +1764,11 @@ fn the_toggle_clamp_moves_as_a_four_bar() {
     let r = run(&mut s, "joint.drive", json!({"joint": "J4", "value": "10 deg"}));
     assert_eq!(r["moved"], json!(true), "{r}");
     assert!(place(&s, "Handle") != handle && place(&s, "Arm") != arm, "the loop follows: {r}");
+    // As the joint dialog's Play drives it: by id, through both ends of its range.
+    let id = s.doc.assembly.joints.iter().find(|j| j.name == "J4").unwrap().id;
+    for v in ["-20 deg", "20 deg", "0 deg"] {
+        let before = place(&s, "Handle");
+        let r = run(&mut s, "joint.drive", json!({"joint": id, "values": [v]}));
+        assert!(place(&s, "Handle") != before, "{v}: {r}");
+    }
 }
