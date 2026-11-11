@@ -8,8 +8,8 @@
     "to": "360 deg",
     "samples": 90,
     "fps": 24,
-    "width": 960,
-    "height": 600,
+    "width": 1280,
+    "height": 720,
     "path": "out/cam-follower.gif"
    }
   }

@@ -132,6 +132,24 @@
    "params": {
     "component": "root"
    }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "components": [
+     "Base"
+    ],
+    "color": "#7d8796"
+   }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "components": [
+     "Rod"
+    ],
+    "color": "#e8873a"
+   }
   }
  ]
 }

@@ -8,8 +8,8 @@
     "to": "180 deg",
     "samples": 60,
     "fps": 24,
-    "width": 960,
-    "height": 600,
+    "width": 1280,
+    "height": 720,
     "path": "out/rack-pinion.gif"
    }
   }

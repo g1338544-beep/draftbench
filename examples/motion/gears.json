@@ -192,6 +192,33 @@
    "params": {
     "component": "root"
    }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "components": [
+     "Base"
+    ],
+    "color": "#7d8796"
+   }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "components": [
+     "Gear A"
+    ],
+    "color": "#e8873a"
+   }
+  },
+  {
+   "command": "appearance.assign",
+   "params": {
+    "components": [
+     "Gear B"
+    ],
+    "color": "#2f8fd8"
+   }
   }
  ]
 }
