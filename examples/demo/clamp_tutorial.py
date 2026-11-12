@@ -31,6 +31,35 @@ HANDLE = [65, 40, 20]
 LINK = [36, 16, 14]
 
 
+def frame_left(d, centre=(-20.0, 15.0, 10.0), aim=0.27):
+    """Slide the camera so the clamp sits in the left part of the view, clear of a wide dialog:
+    the camera's target moves along the two ground directions in proportion to how the clamp's
+    centre moves on screen (measured by nudging the target), until it is `aim` of the way across."""
+    cam = d.ui("ui.camera", {})
+    width = d.ui("ui.inspect").get("window", {}).get("width") or 1670
+    for _ in range(3):
+        here = d.at(world=list(centre))
+        target = cam["target"]
+        nudged = []
+        for k in (0, 1):
+            t = list(target)
+            t[k] += 10.0
+            d.ui("ui.camera", {"target": t})
+            nudged.append(d.at(world=list(centre)))
+        d.ui("ui.camera", {"target": target})
+        # Screen motion per mm of target along X and Y (only x matters: slide sideways).
+        dx = [(n[0] - here[0]) / 10.0 for n in nudged]
+        want = aim * width - here[0]
+        k = 0 if abs(dx[0]) >= abs(dx[1]) else 1
+        if abs(dx[k]) < 1e-6:
+            return
+        t = list(target)
+        t[k] += want / dx[k]
+        cam = d.ui("ui.camera", {"target": t})
+        if abs(want) < 10:
+            return
+
+
 def handles(d):
     return [h["name"] for h in d.ui("ui.handles")]
 
@@ -105,6 +134,11 @@ def run(d):
     d.caption("8. Motion Study: ทำให้กลไกขยับต่อเนื่อง (แท็บ Assemble)", "")
     d.tool("motion.study")
     d.wait(1.2)
+    # The study's panel is wide: keep the clamp in the free part of the view.
+    try:
+        frame_left(d)
+    except (RuntimeError, KeyError, TypeError):
+        pass
     d.caption("9. กด Add Key: เลือก Joint1 ให้แขนหมุนจากตำแหน่งปัจจุบันไปจนสุด", "")
     d.click(handle_like(d, "Add Key"), settle=1.0)
     d.wait(1.5)
@@ -126,10 +160,11 @@ def run(d):
         d.wait(0.6)
     d.caption("   หมุนมุมมองดูรอบๆ ได้ระหว่างที่กลไกขยับ", "")
     tap(d.at(handle="motion:Play"))
-    d.ui("ui.view", {"view": "front", "animate": True})
-    d.wait(6.0)
-    d.ui("ui.view", {"view": "iso", "animate": True})
-    d.wait(4.0)
+    cam = d.ui("ui.camera", {})
+    for k in range(24):
+        d.ui("ui.camera", {"yaw": cam["yaw"] + 0.03 * (k + 1)})
+        d.wait(0.25)
+    d.wait(3.0)
     d.caption("11. Export Animation…: บันทึกการเคลื่อนไหวเป็นไฟล์ GIF ส่งลูกค้าดู", "")
     try:
         d.glide(handle_like(d, "Export Animation"), 0.6)
