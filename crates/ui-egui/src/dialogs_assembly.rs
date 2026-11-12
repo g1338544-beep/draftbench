@@ -106,6 +106,9 @@ pub enum Asm {
         joint: usize,
         values: Vec<String>,
         focus: bool,
+        /// More joints driven at the same time, each by its own value (owner: up to four
+        /// apart): an index into the movable joints' list (None: not used) and its value.
+        more: [(Option<usize>, String); 3],
     },
     MotionLink {
         a: usize,
@@ -236,7 +239,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
             let joint = picked_joint(app);
-            (Asm::Drive { joint, values: current_values(s, joint), focus: true }, vec![])
+            (Asm::Drive { joint, values: current_values(s, joint), focus: true, more: Default::default() }, vec![])
         }
         "motion.trace" => (Asm::Trace(Box::new(trace::form(s, picked_joint(app)))), vec![SelInput::new("Point", SNAPS, false)]),
         "joint.motion_link" => {
@@ -387,7 +390,7 @@ pub fn occurrence_bounds(s: &Session, occs: &[u64]) -> Aabb3 {
 
 pub fn drive_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let joint = app.session.doc.assembly.joints.iter().position(|j| j.id == id)?;
-    Some(Dialog::new(Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint), focus: true }), vec![]))
+    Some(Dialog::new(Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint), focus: true, more: Default::default() }), vec![]))
 }
 
 // ---- snaps ----
@@ -696,7 +699,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             enter |= text_row(ui, "Name", name, crate::i18n::tr_label("Joint Origin1")).0;
         }
         Asm::RigidGroup => {}
-        Asm::Drive { joint, values, focus } => {
+        Asm::Drive { joint, values, focus, more } => {
             let s = &app.session;
             let list = movable(s);
             if list.is_empty() {
@@ -773,6 +776,39 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                             .size(crate::theme::Tokens::get().font_small)
                             .color(if limited { t.text } else { t.text_dim }),
                     );
+                });
+            }
+            // Up to three more joints, each moved by its own value and slider (owner).
+            for (k, (pick, value)) in more.iter_mut().enumerate() {
+                let mut names: Vec<&str> = vec!["—"];
+                names.extend(refs.iter().copied());
+                let mut at = pick.and_then(|i| list.iter().position(|x| *x == i)).map_or(0, |p| p + 1);
+                let before = at;
+                choice_row(ui, &format!("Joint {}", k + 2), &format!("drv_more_{k}"), &mut at, &names);
+                *pick = at.checked_sub(1).and_then(|p| list.get(p).copied());
+                let Some(j) = pick.and_then(|i| s.doc.assembly.joints.get(i)).cloned() else { continue };
+                if at != before || value.trim().is_empty() {
+                    *value = current_values(s, pick.unwrap_or(0)).first().cloned().unwrap_or_default();
+                }
+                let angle = j.kind.is_angle(0);
+                let name = j.kind.dofs().first().copied().unwrap_or("value");
+                form_row(ui, &format!("  {}", capital(name)), |ui| {
+                    enter |= field(ui, value);
+                });
+                let (lo, hi) = match j.limits.first().copied().flatten() {
+                    Some((a, b)) => (a.min(b), a.max(b)),
+                    None if angle => (-std::f64::consts::PI, std::f64::consts::PI),
+                    None => (-100.0, 100.0),
+                };
+                let kind = if angle { ValueKind::Angle } else { ValueKind::Length };
+                let cur = s.doc.eval(value, kind).ok().filter(|x| x.is_finite()).unwrap_or(0.0);
+                let scale = if angle { 1f64.to_degrees() } else { 1.0 };
+                let mut shown = cur * scale;
+                ui.vertical(|ui| {
+                    let r = crate::ui_kit::slider(ui, &mut shown, lo * scale..=hi * scale, crate::ui_kit::Slider { show_value: false, ..Default::default() });
+                    if r.changed() {
+                        *value = if angle { format!("{shown:.1} deg") } else { format!("{shown:.2} mm") };
+                    }
                 });
             }
             // The preview drove the joint: where it stopped short, and why (a closed loop or a
@@ -1115,9 +1151,18 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             cmd("joint.rigid_group", json!({ "occurrences": occs }))
         }
-        Asm::Drive { joint, values, .. } => {
+        Asm::Drive { joint, values, more, .. } => {
             let j = s.doc.assembly.joints.get(*joint).ok_or("no joint that moves yet")?;
-            cmd("joint.drive", json!({"joint": j.id, "values": values}))
+            let mut out = cmd("joint.drive", json!({"joint": j.id, "values": values}));
+            for (pick, value) in more {
+                if let Some(other) = pick.and_then(|i| s.doc.assembly.joints.get(i))
+                    && other.id != j.id
+                    && !value.trim().is_empty()
+                {
+                    out.push(("joint.drive".to_string(), json!({"joint": other.id, "values": [value]})));
+                }
+            }
+            out
         }
         Asm::MotionLink { a, b, ia, ib, ratio, offset } => {
             let js = &s.doc.assembly.joints;

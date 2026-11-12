@@ -582,7 +582,7 @@ fn drive_preset_refuses_a_rigid_joint() {
     let mut app = two_boxes();
     let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
     app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
-    let mut k = Asm::Drive { joint: 0, values: Vec::new(), focus: true };
+    let mut k = Asm::Drive { joint: 0, values: Vec::new(), focus: true, more: Default::default() };
     let e = preset(&app.session, &mut k, &json!({"joint": "Glue"})).unwrap_err();
     assert!(e.contains("rigid"), "{e}");
 }
@@ -890,4 +890,29 @@ fn play_moves_several_moving_parts() {
     let x = |s: &Session, name: &str| s.doc.occurrences.iter().find(|o| o.name.starts_with(name)).map(|o| o.transform[3][0]).unwrap();
     let (b, c) = (x(&scratch, "B"), x(&scratch, "C"));
     assert!(b.abs() > 1.0 && (b - c).abs() < 1e-6, "both blocks slide in the preview: {b} {c}");
+}
+
+/// Owner: Drive Joints moves up to four joints apart, each by its own value.
+#[test]
+fn drive_joints_moves_more_joints_apart() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| s.execute(id, &p).unwrap());
+    for (b, at) in [("B", [40.0, 10.0, 10.0]), ("C", [70.0, 10.0, 10.0])] {
+        s.execute("joint.as_built", &json!({"type": "slider", "a": "A", "b": b, "at": {"occurrence": 0, "point": at, "z": [1, 0, 0]}})).unwrap();
+    }
+    let mut app = SolveApp::new(s, Services::default());
+    app.start("joint.drive");
+    let mut d = app.dialog.clone().unwrap();
+    let Kind::Assembly(Asm::Drive { joint, values, more, .. }) = &mut d.kind else { panic!("{:?}", d.kind) };
+    *joint = 0;
+    *values = vec!["5 mm".into()];
+    more[0] = (Some(1), "-8 mm".into());
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds.len(), 2, "{cmds:?}");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let x = |app: &SolveApp, name: &str| app.session.doc.occurrences.iter().find(|o| o.name.starts_with(name)).map(|o| o.transform[3][0]).unwrap();
+    let (b, c) = (x(&app, "B"), x(&app, "C"));
+    assert!((b.abs() - 5.0).abs() < 1e-6 && (c.abs() - 8.0).abs() < 1e-6, "each block by its own value: {b} {c}");
 }
