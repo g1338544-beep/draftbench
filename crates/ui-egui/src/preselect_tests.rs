@@ -1277,6 +1277,9 @@ fn thread_choices_apply_a_fine_pitch_and_partial_modelled_thread() {
     h.step(&json!({"key":"A","cmd":true})).unwrap();
     h.step(&json!({"text":"4 mm"})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:Modeled"}})).unwrap();
+    // Modelled teeth are drawn unless Cut into the body is ticked (owner: cutting was too slow).
+    assert_eq!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["cut"], false);
+    h.step(&json!({"click":{"handle":"dialog:Cut into the body (slow)"}})).unwrap();
     let (command, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
     assert_eq!(params["designation"], "M8x1");
     assert_eq!(params["length"], "4 mm");
@@ -1383,6 +1386,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     h.step(&json!({"start":"solid.thread"})).unwrap();
     designation(&mut h, "M8x1");
     h.step(&json!({"click":{"handle":"dialog:Modeled"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Cut into the body (slow)"}})).unwrap();
     assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("modeled"), Some(&json!(true)), "{:?}", h.app.dialog);
     assert!(crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_ok(), "{:?}", h.app.dialog);
     wait_feature_preview(&mut h);

@@ -1975,6 +1975,7 @@
   "ui.thickness": "厚さ",
   "ui.thread": "ねじ",
   "ui.thread_cosmetic_in_browser": "ブラウザーではモデル化したねじは表示用ねじとして表示されます。デスクトップ版では実際に切削されます。",
+  "ui.thread_cut_into_body": "ボディに切削する (低速)",
   "ui.tie_ends": "拘束",
   "ui.tie_ends_tip": "未拘束をすべて拘束",
   "ui.timeline_bottom": "下部タイムライン",

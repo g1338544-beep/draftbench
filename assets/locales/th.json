@@ -1016,6 +1016,7 @@
   "ui.thickness": "ความหนา",
   "ui.thread": "เกลียว",
   "ui.thread_cosmetic_in_browser": "บนเว็บ เกลียวแบบ Modeled จะแสดงเป็นเกลียวสัญลักษณ์ (cosmetic) เวอร์ชันคอมจะตัดเกลียวจริง",
+  "ui.thread_cut_into_body": "ตัดเกลียวลงเนื้องานจริง (ช้า)",
   "ui.tie_ends": "ผูก",
   "ui.tie_ends_tip": "กำหนดเงื่อนไขให้ปลายเส้นที่ไม่ต่อกันทั้งหมด",
   "ui.timeline_bottom": "ไทม์ไลน์ด้านล่าง",

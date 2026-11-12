@@ -981,6 +981,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 if cut != was {
                     d.extra.insert("cut".into(), json!(cut));
                 }
+                if cut && !solidcraft_engine::doc::heavy_work::modelled_threads() {
+                    crate::ui_kit::caption(ui, "Modeled", crate::i18n::tr_label("In the browser a modelled thread shows as a cosmetic thread; the desktop app cuts it."));
+                }
             }
             if full != was_full {
                 *length = if full { String::new() } else { "10 mm".into() };

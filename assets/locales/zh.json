@@ -1975,6 +1975,7 @@
   "ui.thickness": "厚度",
   "ui.thread": "螺纹",
   "ui.thread_cosmetic_in_browser": "在浏览器中，建模螺纹显示为装饰螺纹；桌面版会真正切出螺纹。",
+  "ui.thread_cut_into_body": "切入实体 (较慢)",
   "ui.tie_ends": "约束",
   "ui.tie_ends_tip": "约束全部未约束端点",
   "ui.timeline_bottom": "底部时间轴",

@@ -1975,6 +1975,7 @@
   "ui.thickness": "Thickness",
   "ui.thread": "Thread",
   "ui.thread_cosmetic_in_browser": "In the browser a modelled thread shows as a cosmetic thread; the desktop app cuts it.",
+  "ui.thread_cut_into_body": "Cut into the body (slow)",
   "ui.tie_ends": "Tie",
   "ui.tie_ends_tip": "Constrain all untied ends",
   "ui.timeline_bottom": "Bottom timeline",
