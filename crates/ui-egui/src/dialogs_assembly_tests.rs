@@ -807,3 +807,29 @@ fn as_built_moves_several_moving_parts_as_one() {
     let (b, c) = (x(&app, "B"), x(&app, "C"));
     assert!((b.abs() - 5.0).abs() < 1e-6 && (b - c).abs() < 1e-6, "both blocks slid 5 mm together: {b} {c}");
 }
+
+/// Owner: Motion Link between two blocks' sliders did nothing on OK. Ratio -1 moves the second
+/// block the other way when the first is driven.
+#[test]
+fn motion_link_moves_the_second_slider_with_the_first() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| s.execute(id, &p).unwrap());
+    for (b, at) in [("B", [40.0, 10.0, 10.0]), ("C", [70.0, 10.0, 10.0])] {
+        s.execute("joint.as_built", &json!({"type": "slider", "a": "A", "b": b, "at": {"occurrence": 0, "point": at, "z": [1, 0, 0]}})).unwrap();
+    }
+    let mut app = SolveApp::new(s, Services::default());
+    app.start("joint.motion_link");
+    let mut d = app.dialog.clone().unwrap();
+    let Kind::Assembly(Asm::MotionLink { a, b, ratio, .. }) = &mut d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!((*a, *b), (0, 1), "the two sliders are offered");
+    *ratio = "-1".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let x = |app: &SolveApp, name: &str| app.session.doc.occurrences.iter().find(|o| o.name.starts_with(name)).map(|o| o.transform[3][0]).unwrap();
+    let first = app.session.doc.assembly.joints.first().map(|j| j.id).unwrap();
+    let r = app.run("joint.drive", json!({"joint": first, "value": "5 mm"})).unwrap();
+    let (b, c) = (x(&app, "B"), x(&app, "C"));
+    assert!((b.abs() - 5.0).abs() < 1e-6 && (b + c).abs() < 1e-6, "the second block goes the other way: {b} {c} {r}");
+}
