@@ -44,6 +44,7 @@ mod piece_names;
 mod points;
 mod profile_refs;
 pub mod progress;
+pub mod thread_view;
 mod walk;
 pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
 pub mod plastic;

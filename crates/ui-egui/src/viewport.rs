@@ -480,6 +480,67 @@ fn shown_mesh(
         .unwrap_or_else(|| drawn_mesh(app, b))
 }
 
+thread_local! {
+    /// Body meshes with drawn threads, by the mesh they were made from and the threads.
+    #[allow(clippy::type_complexity)]
+    static THREADED: std::cell::RefCell<Vec<(std::sync::Weak<solidcraft_engine::geom::Mesh>, u64, std::sync::Arc<solidcraft_engine::geom::Mesh>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `mesh` with each thread's round face replaced by its teeth ([`thread_view`]): the face's
+/// triangles left out, the teeth (and the plain rest of the face) added on that face.
+fn threaded_mesh(mesh: std::sync::Arc<solidcraft_engine::geom::Mesh>, threads: &[&solidcraft_engine::doc::ThreadInfo]) -> std::sync::Arc<solidcraft_engine::geom::Mesh> {
+    use solidcraft_engine::doc::thread_view;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(threads).unwrap_or_default().hash(&mut h);
+    let key = h.finish();
+    let same = |w: &std::sync::Weak<solidcraft_engine::geom::Mesh>| w.upgrade().is_some_and(|m| std::sync::Arc::ptr_eq(&m, &mesh));
+    if let Some(m) = THREADED.with(|c| c.borrow().iter().find(|(w, k, _)| *k == key && same(w)).map(|(_, _, m)| m.clone())) {
+        return m;
+    }
+    let mut out = (*mesh).clone();
+    for t in threads {
+        let k = *t.axis;
+        let mut wall: Option<(f64, f64)> = None;
+        let mut face = None;
+        let mut keep_tris = Vec::with_capacity(out.triangles.len());
+        let mut keep_faces = Vec::with_capacity(out.triangles.len());
+        for (tri, f) in out.triangles.iter().zip(&out.tri_face) {
+            let corners = tri.map(|i| out.positions.get(i as usize).copied());
+            if let [Some(a), Some(b), Some(c)] = corners
+                && thread_view::on_face(t, a, b, c)
+            {
+                for p in [a, b, c] {
+                    let z = (p - t.axis_point).dot(k);
+                    wall = Some(wall.map_or((z, z), |(lo, hi)| (lo.min(z), hi.max(z))));
+                }
+                face.get_or_insert(*f);
+                continue;
+            }
+            keep_tris.push(*tri);
+            keep_faces.push(*f);
+        }
+        let (Some(wall), Some(face)) = (wall, face) else { continue };
+        let Some(teeth) = thread_view::thread_mesh(t, wall) else { continue };
+        out.triangles = keep_tris;
+        out.tri_face = keep_faces;
+        let base = out.positions.len() as u32;
+        out.positions.extend(&teeth.positions);
+        out.normals.extend(&teeth.normals);
+        out.triangles.extend(teeth.triangles.iter().map(|t| t.map(|i| i + base)));
+        out.tri_face.extend(std::iter::repeat_n(face, teeth.triangles.len()));
+    }
+    let out = std::sync::Arc::new(out);
+    THREADED.with(|c| {
+        let mut c = c.borrow_mut();
+        c.retain(|(w, _, _)| w.strong_count() > 0);
+        if c.len() > 64 {
+            c.remove(0);
+        }
+        c.push((std::sync::Arc::downgrade(&mesh), key, out.clone()));
+    });
+    out
+}
+
 /// The mesh the model scene builds `b` from on the CPU (its edges always, its faces when they
 /// are not drawn from the plan on the GPU): a refined plan's mesh when the view has one for it
 /// (#1320), the reference mesh at Normal display quality, else the plan's mesh at the chosen
@@ -855,7 +916,9 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         let face_looks: std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look> =
             if shaded { s.doc.face_colors(b).into_iter().collect() } else { Default::default() };
         let opaque = !faded && opacity >= 0.999 && face_looks.values().all(|l| l.opacity >= 0.999);
-        let planned = drawn_plan(app, b, opaque);
+        // A modelled thread drawn rather than cut: its teeth replace the face in the picture.
+        let shown_threads: Vec<&solidcraft_engine::doc::ThreadInfo> = st.threads.iter().filter(|t| t.shown && t.body == b.name).collect();
+        let planned = if shown_threads.is_empty() { drawn_plan(app, b, opaque) } else { None };
         let on_gpu = planned.is_some();
         if let Some(plan) = planned {
             let face_colors = (0..b.body.face_count())
@@ -866,7 +929,8 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
                 .collect();
             sc.planned.push(crate::gpu::PlannedBody { plan, face_colors });
         }
-        let body = BodyDraw { mesh: drawn_mesh(app, b), col, faded, opacity, face_looks, on_gpu };
+        let mesh = if shown_threads.is_empty() { drawn_mesh(app, b) } else { threaded_mesh(drawn_mesh(app, b), &shown_threads) };
+        let body = BodyDraw { mesh, col, faded, opacity, face_looks, on_gpu };
         let key = body.key(shaded, edges, hidden_edges, edge_col, hidden_col);
         key.hash(&mut run_key);
         run.push(body);

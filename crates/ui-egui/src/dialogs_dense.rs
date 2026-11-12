@@ -974,6 +974,14 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if modeled != before {
                 d.extra.insert("modeled".into(), json!(modeled));
             }
+            if modeled {
+                let was = d.extra.get("cut").and_then(Value::as_bool).unwrap_or(false);
+                let mut cut = was;
+                crate::ui_kit::checkbox_grid(ui, &mut [("Cut into the body (slow)", &mut cut)], 1);
+                if cut != was {
+                    d.extra.insert("cut".into(), json!(cut));
+                }
+            }
             if full != was_full {
                 *length = if full { String::new() } else { "10 mm".into() };
             }

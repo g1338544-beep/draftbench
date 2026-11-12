@@ -736,6 +736,11 @@ pub enum FeatureKind {
         length: Option<Expr>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         modeled: bool,
+        /// A modelled thread cut into the body (faceted, and slow: seconds to minutes). Off, its
+        /// teeth are drawn on the hole or shaft and the body keeps its round face, as a symbolic
+        /// thread: made at once, and later features stay fast.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        cut: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {

@@ -407,13 +407,36 @@ fn a_modelled_thread_is_cosmetic_where_modelled_threads_are_off() {
     assert!(said.contains("cosmetic thread in the browser"), "{said}");
 }
 
+
+/// Owner: a modelled thread in a blind or a through hole took minutes or never finished. Drawn
+/// (cut: false, as the dialog makes it) it is made at once, the hole keeps its round face, and
+/// the thread lists its teeth to be drawn there.
 #[test]
-#[ignore = "timing probe, run by hand with SOLIDCRAFT_TIMING=1"]
-fn zz_timing_blind_thread() {
+fn a_drawn_thread_is_made_at_once_in_blind_and_through_holes() {
+    for depth in [Some(6.0), None] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 28, "height": 8, "corner": [-20, -14, 0]}));
+        let mut hole = json!({"position": [0, 0, 8], "diameter": 5});
+        if let Some(d) = depth {
+            hole["depth"] = json!(d);
+        }
+        run(&mut s, "solid.hole", hole);
+        let before = volume(&mut s, "Body1");
+        let t = std::time::Instant::now();
+        let r = run(&mut s, "solid.thread", json!({"face": [2.5, 0, 5], "designation": "M6", "modeled": true, "cut": false}));
+        assert!(t.elapsed().as_secs_f64() < 5.0, "{depth:?}: {:?}", t.elapsed());
+        assert_eq!(r["thread"]["shown"], json!(true), "{r}");
+        assert!((r["thread"]["radius"].as_f64().unwrap() - 2.5).abs() < 1e-6, "{r}");
+        assert!((volume(&mut s, "Body1") - before).abs() < 1e-6, "the body keeps its round hole");
+        let st = s.model.state();
+        let shown = &st.threads[0];
+        let teeth = solidcraft_doc::thread_view::thread_mesh(shown, (shown.start, shown.end)).unwrap();
+        assert!(teeth.triangles.len() > 1000, "{depth:?}: the teeth are drawn");
+    }
+    // A hole too wide for the thread still says so.
     let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length": 135, "width": 28, "height": 8, "corner": [-80, -25, 0]}));
-    run(&mut s, "solid.hole", json!({"position": [-40, -10, 8], "diameter": 5, "depth": 6}));
-    let t = std::time::Instant::now();
-    let r = s.execute("solid.thread", &json!({"face": [-37.5, -10, 5], "designation": "M6", "modeled": true}));
-    eprintln!("thread total: {:?} {:?}", t.elapsed(), r.map(|_| "ok"));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 28, "height": 8, "corner": [-20, -14, 0]}));
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 8], "diameter": 6}));
+    let e = s.execute("solid.thread", &json!({"face": [3, 0, 5], "designation": "M6", "modeled": true, "cut": false})).unwrap_err().to_string();
+    assert!(e.contains("too wide"), "{e}");
 }

@@ -255,6 +255,12 @@ pub struct ThreadInfo {
     /// Threaded part along the axis from `axis_point`.
     pub start: f64,
     pub end: f64,
+    /// A modelled thread not cut into the body: its teeth are drawn over the round face.
+    #[serde(default)]
+    pub shown: bool,
+    /// The round face's radius (the drilled hole, or the shaft as turned to the thread).
+    #[serde(default)]
+    pub radius: f64,
 }
 
 /// ISO metric coarse threads: (nominal diameter, pitch).
@@ -392,6 +398,8 @@ fn thread_on(st: &ModelState, feature: u64, p: Vec3, designation: Option<&str>, 
         axis: cyl.axis,
         start: a,
         end: b,
+        shown: false,
+        radius: cyl.radius,
     })
 }
 
@@ -414,33 +422,56 @@ fn threaded_in_sleeve(input: &Traced, t: &ThreadInfo, cyl: &kernel::CylinderFace
     // Through the whole body along the axis: a sleeve ends only where the part does.
     let base = cyl.axis_point + axis * (cyl.start.min(cyl.end) - size);
     let height = (cyl.end - cyl.start).abs() + 2.0 * size;
-    let tm = web_time::Instant::now();
-    let probe = |what: &str| if std::env::var_os("SOLIDCRAFT_TIMING").is_some() { eprintln!("thread {what}: {:?}", tm.elapsed()) };
     let inner = Traced::unnamed(kernel::cylinder(base, axis, inner_r, height).ok()?);
     let outer = Traced::unnamed(kernel::cylinder(base, axis, outer_r, height).ok()?);
     let rest = kernel::boolean(&input.body, &inner.body, BoolOp::Cut).ok()??;
     let rest = Traced::step(rest, &[input, &inner]);
-    probe("rest");
     let local = kernel::boolean(&input.body, &outer.body, BoolOp::Intersect).ok()??;
     let local = Traced::step(local, &[input, &outer]);
-    probe("local");
     let cut = kernel::faceted_boolean(&local.body, groove, BoolOp::Cut, t.pitch * 0.005).ok()??;
     let names = crate::lineage::Lineage::unnamed_faces(groove.triangles.len());
     let lineage = local.lineage.as_ref().and_then(|l| crate::lineage::Lineage::step(&cut, &[l, &names]));
     let threaded = Traced { body: cut, lineage };
-    probe(&format!("faceted cut ({} faces)", threaded.body.face_count()));
     let joined = kernel::boolean(&rest.body, &threaded.body, BoolOp::Union).ok()??;
-    probe("union");
     // The volume must be the body's less what the groove took from the sleeve.
     let vol = |b: &kernel::Body| b.tessellate(t.pitch * 0.005).ok().map(|m| m.measure().volume).filter(|v| v.is_finite());
     let (v_in, v_local, v_threaded, v_out) = (vol(&input.body)?, vol(&local.body)?, vol(&threaded.body)?, vol(&joined)?);
     let want = v_in - (v_local - v_threaded);
-    probe("volumes");
     if !(v_threaded < v_local && (v_out - want).abs() <= want.abs() * 2e-3 + t.pitch.powi(3) * 0.05) {
         log::debug!("thread in a sleeve: volume {v_out} vs {want}; cutting the whole body");
         return None;
     }
     Some(Traced::step(joined, &[&rest, &threaded]))
+}
+
+/// A modelled thread drawn rather than cut (owner: cutting took minutes or failed): a shaft
+/// thicker than the thread is still turned down to it (an exact cut), the sizes are checked as
+/// for a cut thread, and the thread is listed with its teeth to be drawn on the face.
+fn shown_thread(st: &mut ModelState, feature: u64, p: Vec3, designation: Option<&str>, length: Option<f64>) -> Result<()> {
+    let mut t = thread_on(st, feature, p, designation, length, true)?;
+    let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
+    let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+    let cyl = kernel::cylinder_face_at(&mb.body, p).ok_or_else(|| DocError::Invalid("no cylindrical face there to thread".into()))?;
+    let tol = t.pitch * 1e-3;
+    let radius = match thread_turn(&t, &cyl, &mb)? {
+        Some(ring) => {
+            let input = mb.traced();
+            let turned =
+                kernel::boolean(&input.body, &ring.body, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("turning the shaft down removed everything".into()))?;
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::traced_new(mb.name.clone(), Traced::step(turned, &[&input, &ring]), mb.feature);
+            }
+            t.major_diameter / 2.0
+        }
+        None => cyl.radius,
+    };
+    // The same size checks as a cut thread (a hole too wide or too narrow says so); the groove
+    // itself is a cheap mesh and is not kept.
+    thread_groove(&t, radius, ((t.start - cyl.start).abs() < tol, (t.end - cyl.end).abs() < tol))?;
+    t.shown = true;
+    t.radius = radius;
+    st.threads.push(t);
+    Ok(())
 }
 
 fn thread_groove(t: &ThreadInfo, radius: f64, open: (bool, bool)) -> Result<solidcraft_geom::Mesh> {
@@ -5783,13 +5814,16 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
-        FeatureKind::Thread { face, designation, length, modeled } => {
+        FeatureKind::Thread { face, designation, length, modeled, cut: cut_into } => {
             let l = match length {
                 Some(e) => Some(val(vals, e, Kind::Length)?),
                 None => None,
             };
             // The browser computes on the page's own thread: there a modelled thread (minutes of
             // work) is shown as a cosmetic one, so the page doesn't freeze and close (owner).
+            if *modeled && !*cut_into {
+                return shown_thread(st, f.id, face.0, designation.as_deref(), l);
+            }
             let cut = *modeled && crate::heavy_work::modelled_threads();
             let t = thread_on(st, f.id, face.0, designation.as_deref(), l, cut)?;
             if !cut {

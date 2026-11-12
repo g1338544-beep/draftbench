@@ -1017,7 +1017,11 @@ impl Dialog {
             Kind::Plastic(k) => return k.previews(),
             Kind::Part(_) | Kind::PartSize(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
-            Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
+            // Drawn teeth (not cut) are quick everywhere.
+            Kind::Thread { .. } => {
+                let flag = |k: &str| self.extra.get(k).and_then(Value::as_bool).unwrap_or(false);
+                return flag("modeled") && (!cfg!(target_arch = "wasm32") || !flag("cut"));
+            }
             // A sweep along a long or curved path can take long enough to freeze the browser tab
             // while the pointer moves; the browser build applies it only on OK.
             Kind::Sweep { .. } => return !cfg!(target_arch = "wasm32"),
@@ -4057,6 +4061,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 p["designation"] = json!(designation.trim());
             }
             put(&mut p, &[("length", length)]);
+            // Modelled teeth are drawn unless asked to be cut into the body (owner: cutting took
+            // minutes or failed, through and blind holes alike).
+            if d.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false) {
+                p["cut"] = json!(d.extra.get("cut").and_then(Value::as_bool).unwrap_or(false));
+            }
             ("solid.thread", p)
         }
         Kind::Material { index } => {
@@ -5354,10 +5363,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Thread { face, designation, length, modeled } => {
+        FeatureKind::Thread { face, designation, length, modeled, cut } => {
             let mut d = start("solid.thread")?;
             if *modeled {
                 d.extra.insert("modeled".into(), json!(true));
+                d.extra.insert("cut".into(), json!(*cut));
             }
             d.kind = Kind::Thread {
                 designation: designation.clone().unwrap_or_default(),

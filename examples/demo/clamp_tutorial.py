@@ -97,35 +97,43 @@ def run(d):
     joint(d, 6, BASE, "Base", LINK, "Link", PIN_D, "D")
     d.caption("ครบ 4 ข้อต่อ: Base-Arm-Handle-Link ต่อกันเป็นวง (Four-bar)", "")
     d.wait(1.5)
-    d.caption("7. Range: ติ๊ก Keep within ให้ Link หมุนได้ -25° ถึง 20°", "")
-    tick_range(d)
-    fill(d, handle_like(d, "dialog:", "From"), "-25 deg")
-    fill(d, handle_like(d, "dialog:", "To (no"), "20 deg")
-    d.ui("ui.key", {"key": "Tab"})
-    d.wait(0.8)
+    d.caption("7. กด OK จบคำสั่ง ข้อต่อทั้ง 4 อยู่ใน Browser หัวข้อ Joints", "")
+    d.click(d.at(handle="dialog:OK"), settle=1.2)
+    d.wait(1.5)
     d.ui("ui.view", {"view": "iso", "animate": True})
     d.wait(1.2)
-    d.caption("8. กด Play: กลไกขยับต่อเนื่อง ด้ามจับโยก แขนกดยกขึ้น-ลง Link ดันตามทั้งวง", "")
-    play = handle_like(d, "Play")
+    d.caption("8. Motion Study: ทำให้กลไกขยับต่อเนื่อง (แท็บ Assemble)", "")
+    d.tool("motion.study")
+    d.wait(1.2)
+    d.caption("9. กด Add Key: เลือก Joint1 ให้แขนหมุนจากตำแหน่งปัจจุบันไปจนสุด", "")
+    d.click(handle_like(d, "Add Key"), settle=1.0)
+    d.wait(1.5)
 
-    # A playing joint keeps the view moving, so these clicks do not wait for it to settle.
+    # Playing keeps the view moving, so these clicks do not wait for it to settle.
     def tap(at):
         d.glide(at, 0.3)
         d.ui("ui.click", {"x": at[0], "y": at[1]})
         d.mark(cursor=list(at), click=True)
 
-    tap(play)
-    d.wait(8.0)
+    d.caption("10. กด Play: แขนกด ด้ามจับ และ Link ขยับตามกันทั้งวงอย่างต่อเนื่อง", "")
+    for _ in range(2):
+        tap(d.at(handle="motion:Play"))
+        d.wait(7.0)
+        try:
+            tap(d.at(handle="motion:To the start"))
+        except RuntimeError:
+            pass
+        d.wait(0.6)
     d.caption("   หมุนมุมมองดูรอบๆ ได้ระหว่างที่กลไกขยับ", "")
+    tap(d.at(handle="motion:Play"))
     d.ui("ui.view", {"view": "front", "animate": True})
     d.wait(6.0)
     d.ui("ui.view", {"view": "iso", "animate": True})
-    d.wait(6.0)
-    tap(play)
-    d.wait(0.5)
-    d.caption("9. กด OK จบคำสั่ง ข้อต่อทั้ง 4 อยู่ใน Browser หัวข้อ Joints", "")
-    d.click(d.at(handle="dialog:OK"), settle=1.0)
+    d.wait(4.0)
+    d.caption("11. Export Animation… บันทึกเป็นไฟล์ภาพเคลื่อนไหวส่งให้ลูกค้าดูได้ แล้วกด OK", "")
     d.wait(3.0)
+    d.click(d.at(handle="dialog:OK"), settle=1.0)
+    d.wait(2.0)
     d.caption("", "")
 
 

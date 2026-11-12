@@ -191,6 +191,8 @@ enum Transport {
 fn transport(ui: &mut egui::Ui, what: Transport, tip: &str) -> egui::Response {
     let t = Tokens::get();
     let (r, resp) = ui.allocate_exact_size(vec2(26.0, 22.0), Sense::click());
+    // For scripts and the control channel: `motion:Play`, `motion:Stop`, `motion:To the start`…
+    crate::scenario::publish_handle(&format!("motion:{tip}"), r.center());
     let fill = if resp.hovered() { t.hover } else { t.field };
     ui.painter().rect(r, 3.0, fill, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
     let c = r.center();
