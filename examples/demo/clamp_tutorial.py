@@ -130,10 +130,17 @@ def run(d):
     d.wait(6.0)
     d.ui("ui.view", {"view": "iso", "animate": True})
     d.wait(4.0)
-    d.caption("11. Export Animation… บันทึกเป็นไฟล์ภาพเคลื่อนไหวส่งให้ลูกค้าดูได้ แล้วกด OK", "")
+    d.caption("11. Export Animation…: บันทึกการเคลื่อนไหวเป็นไฟล์ GIF ส่งลูกค้าดู", "")
+    try:
+        d.glide(handle_like(d, "Export Animation"), 0.6)
+    except RuntimeError:
+        pass
     d.wait(3.0)
+    d.caption("12. กด OK เก็บ Motion Study ไว้ในงาน เปิดเล่นใหม่ได้ทุกเมื่อ", "")
     d.click(d.at(handle="dialog:OK"), settle=1.0)
     d.wait(2.0)
+    d.caption("สรุปคำสั่งที่ใช้: As-Built Joint (Revolute) 4 จุด → Motion Study (Add Key, Play) → Export Animation", "")
+    d.wait(5.0)
     d.caption("", "")
 
 
@@ -165,6 +172,15 @@ def main():
     t0 = time.time()
     run(d)
     d.mark(caption="", via="")
+    # The animation itself, as Export Animation saves it, next to the video (for the customer).
+    try:
+        studies = d.ui("engine.execute", {"command": "motion.list", "params": {}})
+        print("studies:", studies, file=sys.stderr)
+        first = (studies.get("studies") or [{}])[0]
+        gif = os.path.join(os.path.dirname(os.path.abspath(a.design)), "clamp-motion.gif")
+        d.ui("engine.execute", {"command": "motion.export_animation", "params": {"study": first.get("id", first.get("name")), "path": gif, "back_and_forth": True}})
+    except RuntimeError as e:
+        print("no animation:", e, file=sys.stderr)
     print(f"done in {time.time() - t0:.1f}s", file=sys.stderr)
 
 
