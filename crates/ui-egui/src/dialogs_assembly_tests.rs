@@ -670,3 +670,33 @@ fn the_clamps_joint_previews_come_quickly() {
     }
     assert_eq!(app.session.doc.assembly.joints.len(), 4);
 }
+
+/// The same third joint picked on each of the link's faces round its upper pin (the owner's pick
+/// was a face of the link): every preview comes quickly.
+#[test]
+fn the_clamps_third_joint_previews_quickly_from_any_face_of_the_pin() {
+    let script: serde_json::Value = serde_json::from_str(include_str!("../../../examples/motion/toggle-clamp-parts.json")).unwrap();
+    let mut s = Session::default();
+    for c in script["commands"].as_array().unwrap() {
+        s.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
+    }
+    for (a, b, at) in [("Base", "Arm", [0.0, 0.0, 14.0]), ("Arm", "Handle", [0.0, 40.0, 20.0])] {
+        s.execute("joint.as_built", &json!({"type": "revolute", "a": a, "b": b, "at": {"occurrence": 0, "point": at, "z": [0, 0, 1]}})).unwrap();
+    }
+    let app = SolveApp::new(s, Services::default());
+    let colors = crate::preview::Colors { body: [1, 1, 1, 255], added: [2, 2, 2, 255], new_body: [2, 2, 2, 255], removed: [3, 3, 3, 100], edge: [0, 0, 0, 255] };
+    for at in [[31.5, 40.0, 20.0], [32.5, 40.0, 17.0], [34.5, 40.0, 14.0], [36.0, 40.0, 11.0], [30.0, 46.0, 11.0], [24.0, 40.0, 11.0]] {
+        let mut app2 = SolveApp::new(app.session.clone(), Services::default());
+        app2.session.selection = vec![Sel::Body { name: "Handle".into() }, Sel::Body { name: "Link".into() }];
+        app2.start("joint.as_built");
+        let mut d = app2.dialog.clone().unwrap();
+        let Some(sel) = face_sel(&app2.session, Vec3::new(at[0], at[1], at[2])) else { continue };
+        d.active = 1;
+        d.pick(&app2.session, sel.clone());
+        let t = std::time::Instant::now();
+        let shown = preview_commands(&app2, &d).map(|cmds| world_preview(&app2.session, &cmds, colors));
+        let took = t.elapsed();
+        eprintln!("{at:?} {sel:?}: {took:?} {:?}", shown.as_ref().map(|r| r.as_ref().map(|x| x.is_ok())));
+        assert!(took.as_secs_f64() < 3.0, "{at:?}: {took:?}");
+    }
+}
