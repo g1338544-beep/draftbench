@@ -225,7 +225,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         // that moves, then where the joint is.
         "joint.as_built" => (
             Asm::Joint(Box::new(JointForm::new(true))),
-            vec![SelInput::new("Fixed part", BODIES, false), SelInput::new("Moving part", BODIES, false), SelInput::new("Position", SNAPS, false)],
+            // Several moving parts move as one (owner: two blocks sliding together).
+            vec![SelInput::new("Fixed part", BODIES, false), SelInput::new("Moving part", BODIES, true), SelInput::new("Position", SNAPS, false)],
         ),
         "joint.origin" => (Asm::JointOrigin { name: String::new(), hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
         "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
@@ -1017,13 +1018,14 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Ok(out);
             }
             if f.as_built {
-                let (fixed, moving) = (occurrences(s, sel_items(inputs, 0)), occurrences(s, sel_items(inputs, 1)));
-                let (Some(a), Some(b)) = (fixed.first(), moving.first()) else {
+                let fixed = occurrences(s, sel_items(inputs, 0));
+                let Some(a) = fixed.first() else {
                     return Err("select the fixed part and the moving part".into());
                 };
-                if a == b {
-                    return Err("select two components".into());
-                }
+                let moving: Vec<u64> = occurrences(s, sel_items(inputs, 1)).into_iter().filter(|o| o != a).collect();
+                let Some(b) = moving.first() else {
+                    return Err(if sel_items(inputs, 1).is_empty() { "select the fixed part and the moving part" } else { "select two components" }.into());
+                };
                 let mut p = json!({"type": kind, "a": a, "b": b, "limits": limits});
                 if let Some(x) = sel_items(inputs, 2).first().and_then(|x| snap_of(s, x)) {
                     p["at"] = match axis_dir(f.axis) {
@@ -1032,7 +1034,13 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                         None => x.param,
                     };
                 }
-                return Ok(cmd("joint.as_built", p));
+                // Several moving parts: held together first, then the joint moves them as one.
+                let mut out = Vec::new();
+                if moving.len() > 1 {
+                    out.push(("joint.rigid_group".to_string(), json!({"occurrences": moving})));
+                }
+                out.push(("joint.as_built".to_string(), p));
+                return Ok(out);
             }
             // The first pick is the part that stays (`a`), the second the part that moves: the engine
             // places `b` against `a`.

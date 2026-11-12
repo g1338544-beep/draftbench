@@ -779,3 +779,31 @@ fn the_saved_video_follows_the_animate_speed() {
     assert_eq!(video_frames(4.0), 15);
     assert!(video_frames(16.0) >= 6 && video_frames(0.25) <= 240);
 }
+
+/// Owner: two blocks slide together. Several moving parts are held together and the one joint
+/// moves them all.
+#[test]
+fn as_built_moves_several_moving_parts_as_one() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| s.execute(id, &p).unwrap());
+    let mut app = SolveApp::new(s, Services::default());
+    app.session.selection = ["Body1", "Body2", "Body3"].iter().map(|b| Sel::Body { name: b.to_string() }).collect();
+    app.start("joint.as_built");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs[1].items.len(), 2, "both blocks are moving parts");
+    d.active = 2;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 10.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("{:?}", d.kind) };
+    f.kind = 2;
+    f.axis = 1;
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["joint.rigid_group", "joint.as_built"]);
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let x = |app: &SolveApp, name: &str| app.session.doc.occurrences.iter().find(|o| o.name.starts_with(name)).map(|o| o.transform[3][0]).unwrap();
+    let joint = app.session.doc.assembly.joints.last().map(|j| j.id).unwrap();
+    app.run("joint.drive", json!({"joint": joint, "value": "5 mm"})).unwrap();
+    let (b, c) = (x(&app, "B"), x(&app, "C"));
+    assert!((b.abs() - 5.0).abs() < 1e-6 && (b - c).abs() < 1e-6, "both blocks slid 5 mm together: {b} {c}");
+}

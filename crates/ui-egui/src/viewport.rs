@@ -4038,9 +4038,84 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
 }
 
 /// Sketch points and the status of the active sketch (constraint glyphs: `sketch_tools`).
+/// The size of the model edges picked: a full circle's diameter, an arc's radius and length, a
+/// line's or curve's length; several edges their total length.
+pub(crate) fn edge_readout(app: &SolveApp, st: &solidcraft_engine::doc::ModelState) -> Option<String> {
+    let edges: Vec<(&str, usize)> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|x| match x {
+            Sel::Edge { body, index, .. } => Some((body.as_str(), *index)),
+            _ => None,
+        })
+        .collect();
+    if edges.is_empty() || edges.len() != app.session.selection.len() || edges.len() > 500 {
+        return None;
+    }
+    let mm = |v: f64| crate::prefs::show_mm(app, v, 1);
+    let mut total = 0.0;
+    let mut one = None;
+    for (body, index) in &edges {
+        let b = st.body(body)?;
+        let mesh = b.mesh();
+        let pts = mesh.edges.get(*index)?;
+        let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
+        total += len;
+        one = Some(pts.clone());
+    }
+    if edges.len() > 1 {
+        return Some(format!("{} edges  Length {}", edges.len(), mm(total)));
+    }
+    let pts = one?;
+    match circle_of(&pts) {
+        Some((r, closed)) if closed => Some(format!("Circle  Ø {}  (R {})", mm(2.0 * r), mm(r))),
+        // A circle is often kept as two half arcs: an arc gives its circle's diameter too.
+        Some((r, _)) => Some(format!("Arc  Ø {}  R {}  Length {}", mm(2.0 * r), mm(r), mm(total))),
+        None => Some(format!("Length {}", mm(total))),
+    }
+}
+
+/// The radius of a polyline that lies on one circle (and whether it closes), if it does.
+fn circle_of(pts: &[Vec3]) -> Option<(f64, bool)> {
+    if pts.len() < 4 {
+        return None;
+    }
+    let (a, b, c) = (*pts.first()?, *pts.get(pts.len() / 3)?, *pts.get(2 * pts.len() / 3)?);
+    // The circle through three of its points.
+    let (ab, ac) = (b - a, c - a);
+    let n = ab.cross(ac);
+    let n2 = n.len2();
+    if n2 < 1e-18 {
+        return None;
+    }
+    let centre = a + (n.cross(ab) * ac.len2() + ac.cross(n) * ab.len2()) * (0.5 / n2);
+    let r = centre.dist(a);
+    let tol = (r * 2e-3).max(1e-4);
+    let flat = n * (1.0 / n2.sqrt());
+    if !r.is_finite() || pts.iter().any(|p| (p.dist(centre) - r).abs() > tol || (*p - centre).dot(flat).abs() > tol) {
+        return None;
+    }
+    let closed = pts.first()?.dist(*pts.last()?) <= tol;
+    Some((r, closed))
+}
+
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     let st = crate::open_meshing::shown_world(app);
+    // Owner: an edge picked with no command open says its size in the lower right (NX's quick
+    // readout): a circle its diameter, a line or curve its length.
+    if app.dialog.is_none()
+        && app.session.active_sketch.is_none()
+        && let Some(text) = edge_readout(app, &st)
+    {
+        let above_bar = app.viewport.layout.as_ref().map_or(proj.rect.bottom() - 48.0, |l| l.navigation.top() - 8.0);
+        let at = pos2(proj.rect.right() - 16.0, above_bar);
+        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(t.font_label), t.text);
+        let r = Rect::from_min_size(at - galley.size() - vec2(10.0, 6.0), galley.size() + vec2(20.0, 12.0));
+        painter.rect(r, 6.0, t.panel, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        painter.galley(r.min + vec2(10.0, 6.0), galley, t.text);
+    }
     for item in &app.session.selection {
         if let Sel::ExternalSketchPoint { sketch, id } = item
             && let Some(ss) = st.sketch(*sketch)

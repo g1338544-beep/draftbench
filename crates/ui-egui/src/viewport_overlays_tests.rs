@@ -356,3 +356,28 @@ fn compass_circle_grabs_on_hover_and_the_home_chip_points() {
     h.settle();
     assert_ne!(h.output.cursor_icon, egui::CursorIcon::Grab, "no hand away from the compass");
 }
+
+/// Owner: an edge picked says its size in the lower right: a circle its diameter, a straight
+/// edge its length.
+#[test]
+fn a_picked_edge_says_its_size() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("solid.cylinder", json!({"base": [100, 0, 0], "radius": 5, "height": 10, "body_name": "Pin"})).unwrap();
+    h.settle();
+    let st = h.app.session.world_state();
+    let pick = |body: &str, keep: &dyn Fn(&[Vec3]) -> bool| {
+        let b = st.body(body).unwrap();
+        let mesh = b.mesh();
+        let index = mesh.edges.iter().position(|e| keep(e)).unwrap();
+        vec![Sel::Edge { body: body.to_string(), index, point: Vec3::ZERO }]
+    };
+    let box_body = st.bodies.iter().find(|b| b.name != "Pin").unwrap().name.clone();
+    h.app.session.selection = pick(&box_body, &|e| e.len() == 2 && (e[0].dist(e[1]) - 40.0).abs() < 1e-6);
+    assert_eq!(edge_readout(&h.app, &st).as_deref(), Some("Length 40.00 mm"));
+    h.app.session.selection = pick("Pin", &|e| e.len() > 4);
+    let text = edge_readout(&h.app, &st).unwrap();
+    assert!(text.contains("Ø 10.00 mm") && text.contains("R 5.00 mm"), "{text}");
+    h.app.session.selection.clear();
+    assert!(edge_readout(&h.app, &st).is_none());
+}
