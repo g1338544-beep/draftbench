@@ -54,3 +54,21 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     assert!(remainder.is_empty());
     assert!(vertices.iter().all(|v| v[27] == 102));
 }
+
+/// Owner: a body picked, then a colour in the view's colour menu, did nothing (the swatches only
+/// set the default colour). Picked bodies or components take the colour; with nothing picked it
+/// stays the default for parts without their own.
+#[test]
+fn a_colour_from_the_view_menu_paints_the_picked_body() {
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    let mut app = SolveApp::new(session, Services::default());
+    app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Block".into() }];
+    super::paint_part(&mut app, "#c84638".into());
+    assert_eq!(app.session.doc.appearances.bodies["Block"].color, [0xc8, 0x46, 0x38]);
+    assert!(app.preferences.part_colour.is_empty(), "the default stays");
+    app.session.selection.clear();
+    super::paint_part(&mut app, "#3c96c8".into());
+    assert_eq!(app.preferences.part_colour, "#3c96c8");
+    assert_eq!(app.session.doc.appearances.bodies["Block"].color, [0xc8, 0x46, 0x38], "the painted body keeps its colour");
+}

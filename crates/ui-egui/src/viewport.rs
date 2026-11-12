@@ -4497,6 +4497,42 @@ const PART_SWATCHES: [[u8; 3]; 16] = [
     [240, 240, 240],
 ];
 
+/// A colour picked in the 3D view: onto the picked bodies or components (owner: "clicking a part
+/// and a colour doesn't change it"), or, with nothing picked, every part without its own colour.
+fn paint_part(app: &mut SolveApp, hex: String) {
+    let (bodies, components) = picked_parts(app);
+    if bodies.is_empty() && components.is_empty() {
+        app.preferences.part_colour = hex;
+        return;
+    }
+    let mut p = serde_json::json!({ "color": hex });
+    if !bodies.is_empty() {
+        p["bodies"] = serde_json::json!(bodies);
+    }
+    if !components.is_empty() {
+        p["components"] = serde_json::json!(components);
+    }
+    if let Err(e) = app.run("appearance.assign", p) {
+        app.set_status(e, true);
+    }
+}
+
+/// The bodies and components (as ids) picked in the view or the browser.
+pub(crate) fn picked_parts(app: &SolveApp) -> (Vec<String>, Vec<u64>) {
+    use crate::selection::SelectionExt;
+    let bodies = app.session.selection.body_names();
+    let components: Vec<u64> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|x| match x {
+            solidcraft_engine::Sel::Occurrence { path } => path.last().and_then(|id| app.session.doc.occurrences.iter().find(|o| o.id == *id)).map(|o| o.component),
+            _ => None,
+        })
+        .collect();
+    (bodies, components)
+}
+
 /// The part colour and line weight popup of the 3D view (owner's request: in the view, not only
 /// in Preferences). Returns whether it stays open.
 fn look_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
@@ -4520,7 +4556,7 @@ fn look_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
                     ui.painter().rect(r, 4.0, egui::Color32::from_rgb(c[0], c[1], c[2]), Stroke::new(if chosen { 2.5 } else { 1.0 }, if chosen { t.accent } else { t.border }), egui::StrokeKind::Inside);
                     crate::scenario::publish_handle(&format!("look:swatch:{k}"), r.center());
                     if resp.on_hover_text(&hex).clicked() {
-                        app.preferences.part_colour = hex;
+                        paint_part(app, hex);
                     }
                 }
             });
@@ -4528,7 +4564,7 @@ fn look_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
                 ui.label(crate::i18n::tr_label("Custom"));
                 let mut rgb = parse_hex_colour(&app.preferences.part_colour).unwrap_or([160, 178, 196]);
                 if ui.color_edit_button_srgb(&mut rgb).changed() {
-                    app.preferences.part_colour = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+                    paint_part(app, format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]));
                 }
                 if !app.preferences.part_colour.is_empty() && crate::ui_kit::button(ui, crate::i18n::tr_label("Theme"), crate::ui_kit::Button::Small).clicked() {
                     app.preferences.part_colour.clear();
