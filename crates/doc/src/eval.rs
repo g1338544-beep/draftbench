@@ -414,21 +414,28 @@ fn threaded_in_sleeve(input: &Traced, t: &ThreadInfo, cyl: &kernel::CylinderFace
     // Through the whole body along the axis: a sleeve ends only where the part does.
     let base = cyl.axis_point + axis * (cyl.start.min(cyl.end) - size);
     let height = (cyl.end - cyl.start).abs() + 2.0 * size;
+    let tm = web_time::Instant::now();
+    let probe = |what: &str| if std::env::var_os("SOLIDCRAFT_TIMING").is_some() { eprintln!("thread {what}: {:?}", tm.elapsed()) };
     let inner = Traced::unnamed(kernel::cylinder(base, axis, inner_r, height).ok()?);
     let outer = Traced::unnamed(kernel::cylinder(base, axis, outer_r, height).ok()?);
     let rest = kernel::boolean(&input.body, &inner.body, BoolOp::Cut).ok()??;
     let rest = Traced::step(rest, &[input, &inner]);
+    probe("rest");
     let local = kernel::boolean(&input.body, &outer.body, BoolOp::Intersect).ok()??;
     let local = Traced::step(local, &[input, &outer]);
+    probe("local");
     let cut = kernel::faceted_boolean(&local.body, groove, BoolOp::Cut, t.pitch * 0.005).ok()??;
     let names = crate::lineage::Lineage::unnamed_faces(groove.triangles.len());
     let lineage = local.lineage.as_ref().and_then(|l| crate::lineage::Lineage::step(&cut, &[l, &names]));
     let threaded = Traced { body: cut, lineage };
+    probe(&format!("faceted cut ({} faces)", threaded.body.face_count()));
     let joined = kernel::boolean(&rest.body, &threaded.body, BoolOp::Union).ok()??;
+    probe("union");
     // The volume must be the body's less what the groove took from the sleeve.
     let vol = |b: &kernel::Body| b.tessellate(t.pitch * 0.005).ok().map(|m| m.measure().volume).filter(|v| v.is_finite());
     let (v_in, v_local, v_threaded, v_out) = (vol(&input.body)?, vol(&local.body)?, vol(&threaded.body)?, vol(&joined)?);
     let want = v_in - (v_local - v_threaded);
+    probe("volumes");
     if !(v_threaded < v_local && (v_out - want).abs() <= want.abs() * 2e-3 + t.pitch.powi(3) * 0.05) {
         log::debug!("thread in a sleeve: volume {v_out} vs {want}; cutting the whole body");
         return None;

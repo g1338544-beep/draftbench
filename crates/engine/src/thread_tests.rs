@@ -406,3 +406,14 @@ fn a_modelled_thread_is_cosmetic_where_modelled_threads_are_off() {
     let said = s.model.result(id).and_then(|r| r.warning.clone()).unwrap_or_default();
     assert!(said.contains("cosmetic thread in the browser"), "{said}");
 }
+
+#[test]
+#[ignore = "timing probe, run by hand with SOLIDCRAFT_TIMING=1"]
+fn zz_timing_blind_thread() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 135, "width": 28, "height": 8, "corner": [-80, -25, 0]}));
+    run(&mut s, "solid.hole", json!({"position": [-40, -10, 8], "diameter": 5, "depth": 6}));
+    let t = std::time::Instant::now();
+    let r = s.execute("solid.thread", &json!({"face": [-37.5, -10, 5], "designation": "M6", "modeled": true}));
+    eprintln!("thread total: {:?} {:?}", t.elapsed(), r.map(|_| "ok"));
+}

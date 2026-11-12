@@ -313,8 +313,8 @@ fn lit(i: TOut, visibility: f32) -> vec4<f32> {
     let sky = 0.5 + 0.5 * n.z;
     let h = normalize(key + v);
     let spec = pow(max(dot(n, h), 0.0), 56.0) * 0.32 * visibility;
-    let amb = 0.4 + 0.1 * sky;
-    let k = amb + 0.42 * diff + 0.18 * fill - (amb + 0.2 * fill) * (1.0 - visibility);
+    let amb = 0.3 + 0.12 * sky;
+    let k = amb + 0.5 * diff + 0.2 * fill - (amb + 0.2 * fill) * (1.0 - visibility);
     return out_color(vec4<f32>(min(i.c.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), i.c.a));
 }
 
