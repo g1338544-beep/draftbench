@@ -4,7 +4,7 @@
 use serde_json::json;
 use solidcraft_geom::Vec3;
 
-use super::tests::{occ, place, run};
+use super::tests::{occ, part, pin, place, run};
 use crate::Session;
 
 /// A 200 x 60 x 10 plate with a 10 mm hole at x = `X` (X = 50), and a 20 x 20 x 20 latch beside
@@ -86,4 +86,58 @@ fn a_pin_in_path_follows_a_bent_slot_either_way() {
         run(&mut s, "joint.drive", json!({"joint": "Pin", "values": ["0 deg", "40 mm"]}));
         assert!(latch(&s).dist(Vec3::new(40.0 + sign * 30.0, 110.0 + sign * 10.0, 0.0)) < 1e-6, "{on}: {:?}", latch(&s));
     }
+}
+
+/// Owner: a slotted clamp arm and a crank whose pin runs in the arm's slot both swing (a
+/// closed loop): driving the crank turns the arm, and the pin stays in the slot, round its bend
+/// too.
+#[test]
+fn a_pin_in_path_closes_a_loop_where_both_parts_swing() {
+    let mut s = Session::default();
+    let (o2, o4, p0) = (Vec3::ZERO, Vec3::new(45.0, 0.0, 0.0), Vec3::new(0.0, 20.0, 0.0));
+    for (name, c) in [("Ground", o2), ("Crank", p0), ("Arm", o4)] {
+        part(&mut s, name, [c.x, c.y, -5.0]);
+    }
+    let g = occ(&s, "Ground");
+    run(&mut s, "occurrence.ground", json!({"occurrence": g, "grounded": true}));
+    pin(&mut s, "revolute", "Crank", "Ground", "Crank", o2, Vec3::Z);
+    pin(&mut s, "revolute", "Arm", "Ground", "Arm", o4, Vec3::Z);
+    // The arm's slot: from near its pivot straight through the crank pin, then bent 20°.
+    let u = (p0 - o4) * (1.0 / (p0 - o4).len());
+    let bent = Vec3::new(u.x * 20f64.to_radians().cos() - u.y * 20f64.to_radians().sin(), u.x * 20f64.to_radians().sin() + u.y * 20f64.to_radians().cos(), 0.0);
+    let path = [o4 + u * 10.0, p0, p0 + bent * 25.0];
+    let at = json!({"occurrence": 0, "point": [p0.x, p0.y, 0], "z": [0, 0, 1]});
+    let pts: Vec<[f64; 3]> = path.iter().map(|q| [q.x, q.y, q.z]).collect();
+    let r = run(&mut s, "joint.as_built", json!({"type": "pin_path", "a": "Arm", "b": "Crank", "at": at, "path": pts, "path_on": "a", "name": "Slot"}));
+    assert_eq!(r["conflicts"], json!([]), "{r}");
+    // How far the crank's pin is from the arm's slot, where the arm is now.
+    let off_slot = |s: &Session| {
+        let pin = place(s, "Crank", p0);
+        let slot: Vec<Vec3> = path.iter().map(|q| place(s, "Arm", *q)).collect();
+        slot.windows(2)
+            .map(|w| {
+                let d = w[1] - w[0];
+                let t = ((pin - w[0]).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+                (w[0] + d * t).dist(pin)
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let arm_turn = |s: &Session| {
+        let q = place(s, "Arm", p0) - o4;
+        q.y.atan2(q.x) - (p0 - o4).y.atan2((p0 - o4).x)
+    };
+    for v in [-30.0f64, -15.0, 10.0, 20.0, 30.0] {
+        let r = run(&mut s, "joint.drive", json!({"joint": "Crank", "value": v}));
+        assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{v}°: {r}");
+        let th = (90.0 + v).to_radians();
+        let at = Vec3::new(20.0 * th.cos(), 20.0 * th.sin(), 0.0);
+        assert!(place(&s, "Crank", p0).dist(at) < 1e-6, "{v}°: the crank keeps its value");
+        assert!(off_slot(&s) < 1e-5, "{v}°: the pin left the slot by {}", off_slot(&s));
+        if v < 0.0 {
+            // On the straight part the arm points at the pin.
+            let want = (at - o4).y.atan2((at - o4).x) - (p0 - o4).y.atan2((p0 - o4).x);
+            assert!((arm_turn(&s) - want).abs() < 1e-6, "{v}°: arm {} wants {want}", arm_turn(&s));
+        }
+    }
+    assert!(arm_turn(&s).abs() > 1e-3, "the arm swung");
 }
