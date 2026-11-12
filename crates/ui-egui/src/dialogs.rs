@@ -2049,6 +2049,7 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
 /// Rows above the selection inputs: the pattern type and object type, the Hole placement (one
 /// face point, or sketch points).
 fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
+    crate::dialogs_assembly::sync_inputs(d);
     if matches!(d.kind, Kind::Mirror) {
         object_type_row(d, ui);
         return;

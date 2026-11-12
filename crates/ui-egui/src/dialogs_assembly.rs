@@ -29,7 +29,7 @@ pub(crate) use trace::stop_text;
 pub use trace::{TraceForm, picked_point};
 
 /// Joint types in the order the Type box lists them (command names).
-pub const TYPES: [&str; 13] = [
+pub const TYPES: [&str; 14] = [
     "rigid",
     "revolute",
     "slider",
@@ -43,6 +43,7 @@ pub const TYPES: [&str; 13] = [
     "point_on_plane",
     "point_on_line",
     "line_on_plane",
+    "pin_path",
 ];
 /// The As-Built joint's axis choices: as the Position gives it, or along X, Y or Z.
 const AXIS_LABELS: [&str; 4] = ["As picked", "X", "Y", "Z"];
@@ -56,7 +57,7 @@ fn axis_dir(axis: usize) -> Option<[f64; 3]> {
     }
 }
 
-const TYPE_LABELS: [&str; 13] = [
+const TYPE_LABELS: [&str; 14] = [
     "Rigid",
     "Revolute",
     "Slider",
@@ -70,7 +71,38 @@ const TYPE_LABELS: [&str; 13] = [
     "Point on plane",
     "Point on line",
     "Line on plane",
+    "Pin in Path",
 ];
+
+/// The pin's slot: its centre line (sketch curves or model edges), for a Pin in Path joint.
+const SLOT_PATH: &str = "Slot path";
+
+/// Joints with one axis of their own (turning or sliding on it): the As-Built Axis applies.
+fn has_axis(kind: JointKind) -> bool {
+    matches!(
+        kind,
+        JointKind::Revolute | JointKind::Slider | JointKind::Cylindrical | JointKind::PinSlot | JointKind::PinPath | JointKind::PointOnLine
+    )
+}
+
+/// The As-Built dialog's inputs follow its type (owner: each type shows only what it uses):
+/// a Pin in Path joint picks its slot's centre line too.
+pub fn sync_inputs(d: &mut crate::dialogs::Dialog) {
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return };
+    if !f.as_built || f.editing.is_some() {
+        return;
+    }
+    let want = f.joint_kind() == JointKind::PinPath;
+    let has = d.inputs.iter().position(|i| i.label == SLOT_PATH);
+    match (want, has) {
+        (true, None) => d.inputs.push(SelInput::new(SLOT_PATH, crate::selection::CURVES | EDGES, true)),
+        (false, Some(i)) => {
+            d.inputs.remove(i);
+            d.active = d.active.min(d.inputs.len().saturating_sub(1));
+        }
+        _ => {}
+    }
+}
 /// What a joint origin input accepts (snaps on faces, edges and vertices).
 pub const SNAPS: u16 = FACES | EDGES | VERTICES;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
@@ -157,6 +189,8 @@ pub struct JointForm {
     /// As-built with several moving parts: 0 they move together, 1 they open and close as a
     /// gripper's fingers (each its own joint; the ones across the middle go the other way).
     pub gripper: usize,
+    /// Pin in Path: the slot is on the fixed part (0) or on the moving one (1).
+    pub slot_on: usize,
 }
 
 impl JointForm {
@@ -174,6 +208,7 @@ impl JointForm {
             hover: None,
             axis: 0,
             gripper: 0,
+            slot_on: 0,
         }
     }
 
@@ -390,7 +425,10 @@ pub fn occurrence_bounds(s: &Session, occs: &[u64]) -> Aabb3 {
 
 pub fn drive_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let joint = app.session.doc.assembly.joints.iter().position(|j| j.id == id)?;
-    Some(Dialog::new(Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint), focus: true, more: Default::default() }), vec![]))
+    Some(Dialog::new(
+        Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint), focus: true, more: Default::default() }),
+        vec![],
+    ))
 }
 
 // ---- snaps ----
@@ -602,15 +640,24 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             form_row(ui, "Motion", |ui| {
                 ui.label("");
             });
-            choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
+            // Pin in Path is made as built (its slot is where it is drawn).
+            let types: &[&str] = if f.as_built { &TYPE_LABELS } else { &TYPE_LABELS[..TYPE_LABELS.len() - 1] };
+            choice_row(ui, "Type", "jt_type", &mut f.kind, types);
+            // Each type shows only the options it uses (owner).
+            let jk = f.joint_kind();
             if f.as_built && f.editing.is_none() {
-                choice_row(ui, "Axis", "jt_axis", &mut f.axis, &AXIS_LABELS);
-                crate::ui_kit::caption(
-                    ui,
-                    "Axis",
-                    crate::i18n::tr_label("As picked: along a round edge, square to a face. X, Y, Z turn it when the motion goes the wrong way."),
-                );
-                if sel_items(inputs, 1).len() > 1 {
+                if has_axis(jk) {
+                    choice_row(ui, "Axis", "jt_axis", &mut f.axis, &AXIS_LABELS);
+                }
+                if jk == JointKind::PinPath {
+                    choice_row(ui, "Slot on", "jt_slot_on", &mut f.slot_on, &["Fixed part", "Moving part"]);
+                    crate::ui_kit::caption(
+                        ui,
+                        "Slot on",
+                        crate::i18n::tr_label("Slot path: click the slot's centre line (sketch lines or arcs, or model edges), in order."),
+                    );
+                }
+                if sel_items(inputs, 1).len() > 1 && matches!(jk, JointKind::Slider | JointKind::Revolute) {
                     choice_row(ui, "Moving parts", "jt_gripper", &mut f.gripper, &["Together", "Gripper (in / out)"]);
                 }
             }
@@ -621,6 +668,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 2 => "Slides along one axis (a cylinder rod, a rail)",
                 3 => "Slides and turns on one axis (a shaft in a bore)",
                 6 => "Turns every way about a point",
+                13 => "A pin turns and runs along a slot of any shape (straight, bent or curved)",
                 _ => "",
             };
             if !says.is_empty() {
@@ -805,7 +853,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 let scale = if angle { 1f64.to_degrees() } else { 1.0 };
                 let mut shown = cur * scale;
                 ui.vertical(|ui| {
-                    let r = crate::ui_kit::slider(ui, &mut shown, lo * scale..=hi * scale, crate::ui_kit::Slider { show_value: false, ..Default::default() });
+                    let r = crate::ui_kit::slider(
+                        ui,
+                        &mut shown,
+                        lo * scale..=hi * scale,
+                        crate::ui_kit::Slider { show_value: false, ..Default::default() },
+                    );
                     if r.changed() {
                         *value = if angle { format!("{shown:.1} deg") } else { format!("{shown:.2} mm") };
                     }
@@ -1012,6 +1065,89 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     commands(app, k, inputs).err().map(|e| (e, Vec::new()))
 }
 
+/// A slot's centre line from the curves or edges picked: their polylines joined end to end, in
+/// the world.
+fn slot_path(s: &Session, items: &[Sel]) -> Option<Vec<Vec3>> {
+    let st = s.world_state();
+    let mut parts: Vec<Vec<Vec3>> = Vec::new();
+    for x in items {
+        match x {
+            Sel::ExternalSketchCurve { sketch, id } => {
+                let ss = st.sketch(*sketch)?;
+                let i = ss.sketch.curves.iter().position(|c| &c.id == id)?;
+                parts.extend(solidcraft_engine::view::world_curve_parts(&ss.sketch, i, &ss.plane));
+            }
+            Sel::Edge { body, index, .. } => {
+                let b = st.body(body)?;
+                parts.push(b.mesh().edges.get(*index)?.clone());
+            }
+            _ => {}
+        }
+    }
+    chain(parts)
+}
+
+/// A Pin in Path joint's travel from the pin to each end of the slot (the `path` and `at` of its
+/// command, in the world).
+fn path_range(p: &Value) -> Option<(f64, f64)> {
+    let pt = |v: &Value| -> Option<Vec3> {
+        let a = v.as_array()?;
+        Some(Vec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?))
+    };
+    let path: Vec<Vec3> = p.get("path")?.as_array()?.iter().filter_map(pt).collect();
+    let at = p.get("at").and_then(|a| a.get("point")).and_then(pt).or_else(|| path.first().copied())?;
+    let (mut total, mut best, mut s0) = (0.0, f64::INFINITY, 0.0);
+    for w in path.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let d = b - a;
+        let l = d.len();
+        let t = if l > 1e-12 { ((at - a).dot(d) / (l * l)).clamp(0.0, 1.0) } else { 0.0 };
+        let dist = (a + d * t).dist(at);
+        if dist < best {
+            best = dist;
+            s0 = total + l * t;
+        }
+        total += l;
+    }
+    Some((-s0, total - s0))
+}
+
+/// Polylines joined end to end into one (each turned round as needed); None when they do not
+/// meet.
+fn chain(mut parts: Vec<Vec<Vec3>>) -> Option<Vec<Vec3>> {
+    parts.retain(|p| p.len() >= 2);
+    if parts.is_empty() {
+        return None;
+    }
+    let mut line = parts.remove(0);
+    while !parts.is_empty() {
+        let (head, tail) = (*line.first()?, *line.last()?);
+        let tol = 1e-3;
+        let k = parts.iter().position(|p| {
+            let (a, b) = (p[0], p[p.len() - 1]);
+            a.dist(tail) < tol || b.dist(tail) < tol || a.dist(head) < tol || b.dist(head) < tol
+        })?;
+        let mut p = parts.remove(k);
+        let (a, b) = (p[0], p[p.len() - 1]);
+        if a.dist(tail) < tol {
+            line.extend(p.into_iter().skip(1));
+        } else if b.dist(tail) < tol {
+            p.reverse();
+            line.extend(p.into_iter().skip(1));
+        } else if b.dist(head) < tol {
+            p.pop();
+            p.extend(line);
+            line = p;
+        } else {
+            p.reverse();
+            p.pop();
+            p.extend(line);
+            line = p;
+        }
+    }
+    Some(line)
+}
+
 /// The occurrences of picked bodies (deduplicated, in pick order).
 fn occurrences(s: &Session, items: &[Sel]) -> Vec<u64> {
     let mut out = Vec::new();
@@ -1072,9 +1208,21 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 };
                 let moving: Vec<u64> = occurrences(s, sel_items(inputs, 1)).into_iter().filter(|o| o != a).collect();
                 let Some(b) = moving.first() else {
-                    return Err(if sel_items(inputs, 1).is_empty() { "select the fixed part and the moving part" } else { "select two components" }.into());
+                    return Err(
+                        if sel_items(inputs, 1).is_empty() { "select the fixed part and the moving part" } else { "select two components" }.into()
+                    );
                 };
                 let mut p = json!({"type": kind, "a": a, "b": b, "limits": limits});
+                if jk == JointKind::PinPath {
+                    let i = inputs.iter().position(|i| i.label == SLOT_PATH).ok_or("pick the slot path")?;
+                    let path = slot_path(s, &inputs[i].items).ok_or("pick the slot's centre line (sketch curves or edges, joined end to end)")?;
+                    p["path"] = json!(path.iter().map(|q| [q.x, q.y, q.z]).collect::<Vec<_>>());
+                    p["path_on"] = json!(if f.slot_on == 1 { "b" } else { "a" });
+                    // Its range is the slot's ends unless limits were set.
+                    if f.limits.iter().all(|l| !l.0) {
+                        p.as_object_mut().map(|o| o.remove("limits"));
+                    }
+                }
                 if let Some(x) = sel_items(inputs, 2).first().and_then(|x| snap_of(s, x)) {
                     p["at"] = match axis_dir(f.axis) {
                         // The point picked, its axis turned onto the one chosen.
@@ -1084,7 +1232,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 }
                 // A gripper: a joint for each finger, linked to the first; a finger across the
                 // middle (along the axis) goes the other way, so they close and open together.
-                if f.gripper == 1 && moving.len() > 1 {
+                if f.gripper == 1 && moving.len() > 1 && matches!(jk, JointKind::Slider | JointKind::Revolute) {
                     let at = sel_items(inputs, 2).first().and_then(|x| snap_of(s, x)).ok_or("pick the Position: the way the fingers move")?;
                     let dir = axis_dir(f.axis).map_or(at.z, |d| Vec3::new(d[0], d[1], d[2]));
                     let centre = |occ: u64| -> Option<Vec3> {
@@ -1224,6 +1372,11 @@ pub fn animate(app: &SolveApp, k: &Asm, cmds: &mut Vec<(String, Value)>) {
             // not slide).
             None => {
                 if let Some((_, p)) = cmds.iter_mut().find(|(c, _)| c == "joint.as_built") {
+                    // A pin in a path runs from one end of the slot to the other (owner).
+                    let values = match path_range(p).filter(|_| kind == JointKind::PinPath && !f.limits.get(1).is_some_and(|l| l.0)) {
+                        Some((lo, hi)) => vec!["0 deg".to_string(), format!("{} mm", lo + (hi - lo) * (0.5 - 0.5 * (f.phase * tau).cos()))],
+                        None => values,
+                    };
                     if p.get("name").and_then(Value::as_str).is_none() {
                         p["name"] = json!("Joint preview");
                     }
@@ -1432,7 +1585,13 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .filter_map(|(n, i)| i.items.first().and_then(|x| snap_of(&app.session, x)).map(|s| (s, if n == 0 { t.accent } else { t.warning })))
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
-        let tag = if as_built { "Position".to_string() } else if n == 0 { "Fixed part".to_string() } else { "Moving part".to_string() };
+        let tag = if as_built {
+            "Position".to_string()
+        } else if n == 0 {
+            "Fixed part".to_string()
+        } else {
+            "Moving part".to_string()
+        };
         glyph(painter, proj, s, *c, app.cam.half_height(), two.then_some(tag.as_str()));
     }
     // The snap under the cursor (found again only when the hovered item changes).

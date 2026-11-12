@@ -679,7 +679,7 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         offset,
         angle: angle.unwrap_or(0.0),
         suppressed: false,
-        exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p), ..Default::default() },
     };
     // A relation given no values starts from where its parts are: B moves no further than it must.
     if p.get("values").is_none()
@@ -733,7 +733,48 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         suppressed: false,
         exprs: Default::default(),
     };
+    let j = with_slot_path(j, &w, p, cmd)?;
     add_joint(s, j, p)
+}
+
+/// A Pin in Path joint's slot: `path` (world points along the slot's centre line, at least
+/// two) taken into the joint's frame; `path_on`: "a" (the slot on A, the default) or "b".
+/// Unless limits are given, the pin may travel from one end of the slot to the other.
+fn with_slot_path(mut j: Joint, w: &solidcraft_doc::Mat, p: &Value, cmd: &str) -> Result<Joint> {
+    if j.kind != JointKind::PinPath {
+        return Ok(j);
+    }
+    let list = p
+        .get("path")
+        .and_then(Value::as_array)
+        .ok_or_else(|| bad(cmd, "a Pin in Path joint needs `path`: the slot's centre line as [[x, y, z], …]"))?;
+    if list.len() < 2 || list.len() > 20_000 {
+        return Err(bad(cmd, "`path` must have 2…20000 points"));
+    }
+    let inv = solidcraft_doc::mat_inverse(w).ok_or_else(|| bad(cmd, "joint frame"))?;
+    let mut path: Vec<[f64; 2]> = Vec::with_capacity(list.len());
+    for v in list {
+        let q = crate::params::vec3(v).filter(|q| q.is_finite()).ok_or_else(|| bad(cmd, "`path` points must be [x, y, z] numbers"))?;
+        let l = solidcraft_doc::apply_point(&inv, q);
+        if path.last().is_none_or(|last| (last[0] - l.x).hypot(last[1] - l.y) > 1e-9) {
+            path.push([l.x, l.y]);
+        }
+    }
+    if path.len() < 2 || joints::path_length(&path) <= 1e-9 {
+        return Err(bad(cmd, "the slot's path has no length"));
+    }
+    j.exprs.path_on_b = match p.get("path_on").and_then(Value::as_str) {
+        None | Some("a") => false,
+        Some("b") => true,
+        Some(_) => return Err(bad(cmd, "`path_on` is \"a\" or \"b\"")),
+    };
+    if p.get("limits").is_none() {
+        let s0 = joints::path_start(&path);
+        let len = joints::path_length(&path);
+        j.limits = vec![None, Some((-s0, len - s0))];
+    }
+    j.exprs.path = path;
+    Ok(j)
 }
 
 fn rigid_group(s: &mut Session, p: &Value) -> Result<Value> {

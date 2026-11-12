@@ -916,3 +916,57 @@ fn drive_joints_moves_more_joints_apart() {
     let (b, c) = (x(&app, "B"), x(&app, "C"));
     assert!((b.abs() - 5.0).abs() < 1e-6 && (c.abs() - 8.0).abs() < 1e-6, "each block by its own value: {b} {c}");
 }
+
+/// Owner: Pin in Path in As-Built Joint: the slot's centre line is picked (edges here, joined
+/// end to end), only its own options show, and the moving part runs along the slot's bend.
+#[test]
+fn as_built_pin_in_path_runs_along_the_picked_slot() {
+    let mut app = two_boxes();
+    app.session.selection = ["Body1", "Body2"].iter().map(|b| Sel::Body { name: b.to_string() }).collect();
+    app.start("joint.as_built");
+    let mut d = app.dialog.clone().unwrap();
+    d.active = 2;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 10.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("{:?}", d.kind) };
+    f.kind = TYPES.iter().position(|t| *t == "pin_path").unwrap();
+    f.axis = 3;
+    crate::dialogs_assembly::sync_inputs(&mut d);
+    assert_eq!(d.inputs.last().map(|i| i.label), Some("Slot path"), "Pin in Path picks its slot");
+    // An L on A's top: (0,0)→(20,0), then (20,0)→(20,20), picked out of order.
+    let st = app.session.world_state();
+    let edges = &st.body("Body1").unwrap().mesh().edges;
+    let find = |a: Vec3, b: Vec3| {
+        let i = edges
+            .iter()
+            .position(|e| {
+                let (p, q) = (e[0], e[e.len() - 1]);
+                (p.dist(a) < 1e-6 && q.dist(b) < 1e-6) || (p.dist(b) < 1e-6 && q.dist(a) < 1e-6)
+            })
+            .unwrap();
+        Sel::Edge { body: "Body1".into(), index: i, point: (a + b) * 0.5 }
+    };
+    let slot = d.inputs.len() - 1;
+    d.inputs[slot].items =
+        vec![find(Vec3::new(20.0, 0.0, 10.0), Vec3::new(20.0, 20.0, 10.0)), find(Vec3::new(0.0, 0.0, 10.0), Vec3::new(20.0, 0.0, 10.0))];
+    drop(st);
+    let cmds = apply_commands(&app, &d).unwrap();
+    let p = &cmds[0].1;
+    assert_eq!(p["type"], "pin_path");
+    assert_eq!(p["path"].as_array().map(Vec::len), Some(3), "{p}");
+    assert_eq!(p["path_on"], "a");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let j = app.session.doc.assembly.joints.last().map(|j| j.id).unwrap();
+    let x = |app: &SolveApp| {
+        app.session.doc.occurrences.iter().find(|o| o.name.starts_with('B')).map(|o| [o.transform[3][0], o.transform[3][1]]).unwrap()
+    };
+    // The pin sits over the slot's second leg (x = 20): travel runs along +y there.
+    app.run("joint.drive", json!({"joint": j, "values": ["0 deg", "5 mm"]})).unwrap();
+    let [bx, by] = x(&app);
+    assert!(bx.abs() < 1e-6 && (by.abs() - 5.0).abs() < 1e-6, "along the slot: {bx} {by}");
+    // Back past the bend (whichever way the slot runs): onto the first leg, along -x.
+    app.run("joint.drive", json!({"joint": j, "values": ["0 deg", format!("{} mm", -20.0 * by.signum())]})).unwrap();
+    let [bx, by] = x(&app);
+    assert!((bx + 10.0).abs() < 1e-6 && (by + 10.0).abs() < 1e-6, "round the bend: {bx} {by}");
+}

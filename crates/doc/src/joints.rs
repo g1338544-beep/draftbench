@@ -222,6 +222,9 @@ pub enum JointKind {
     /// B's z axis lies in A's xy plane (`offset` off it: a cylinder's radius makes it tangent);
     /// B slides on the plane, turns about A's z and about its own axis.
     LineOnPlane,
+    /// A pin in a slot of any shape (owner: a slot that bends): the pin turns about z and
+    /// travels along the slot's centre line ([`JointExprs::path`]), on A or on B.
+    PinPath,
 }
 
 impl JointKind {
@@ -240,6 +243,7 @@ impl JointKind {
             "pointonplane" | "pointonface" => JointKind::PointOnPlane,
             "pointonline" | "pointonaxis" => JointKind::PointOnLine,
             "lineonplane" | "lineonface" => JointKind::LineOnPlane,
+            "pinpath" | "pininpath" | "pininslotpath" | "path" => JointKind::PinPath,
             _ => return None,
         })
     }
@@ -258,6 +262,7 @@ impl JointKind {
             JointKind::PointOnPlane => &["x", "y", "yaw", "pitch", "roll"],
             JointKind::PointOnLine => &["slide", "yaw", "pitch", "roll"],
             JointKind::LineOnPlane => &["x", "y", "turn", "spin"],
+            JointKind::PinPath => &["angle", "travel"],
         }
     }
     pub fn is_angle(self, i: usize) -> bool {
@@ -322,11 +327,18 @@ pub struct JointExprs {
     /// By value index, as in `Joint::values`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<Option<String>>,
+    /// A [`JointKind::PinPath`]'s slot: its centre line in the joint frame of the part with the
+    /// slot (x, y; the pin's axis is z). The pin starts where the line passes nearest the origin.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<[f64; 2]>,
+    /// The slot is on B (the pin on A): B moves along it the other way.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub path_on_b: bool,
 }
 
 impl JointExprs {
     pub fn is_empty(&self) -> bool {
-        self.offset.is_none() && self.angle.is_none() && self.values.iter().all(Option::is_none)
+        self.offset.is_none() && self.angle.is_none() && self.values.iter().all(Option::is_none) && self.path.is_empty()
     }
 
     /// The expression value `i` follows.
@@ -674,7 +686,56 @@ pub fn motion(kind: JointKind, q: &[f64]) -> Mat {
         JointKind::PointOnPlane => shift(v(0), v(1), 0.0),
         JointKind::PointOnLine => shift(0.0, 0.0, v(0)),
         JointKind::LineOnPlane => mat_mul(&shift(v(0), v(1), 0.0), &rot_z(v(2))),
+        // Along x without its slot ([`path_motion`] follows the slot).
+        JointKind::PinPath => mat_mul(&shift(v(1), 0.0, 0.0), &rot_z(v(0))),
     }
+}
+
+/// A slot's length along its centre line.
+pub fn path_length(path: &[[f64; 2]]) -> f64 {
+    path.windows(2).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum()
+}
+
+/// How far along the slot the origin (the pin's start) is: where the line passes nearest it.
+pub fn path_start(path: &[[f64; 2]]) -> f64 {
+    let (mut best, mut at, mut run) = (f64::MAX, 0.0, 0.0);
+    for w in path.windows(2) {
+        let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+        let len = dx.hypot(dy);
+        let t = if len > 1e-12 { ((-w[0][0] * dx - w[0][1] * dy) / (len * len)).clamp(0.0, 1.0) } else { 0.0 };
+        let d = (w[0][0] + dx * t).hypot(w[0][1] + dy * t);
+        if d < best {
+            best = d;
+            at = run + t * len;
+        }
+        run += len;
+    }
+    at
+}
+
+/// The point `s` along the slot (held to its ends).
+pub fn path_point(path: &[[f64; 2]], s: f64) -> [f64; 2] {
+    let mut left = if s.is_finite() { s.max(0.0) } else { 0.0 };
+    for w in path.windows(2) {
+        let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+        let len = dx.hypot(dy);
+        if left <= len && len > 0.0 {
+            return [w[0][0] + dx * left / len, w[0][1] + dy * left / len];
+        }
+        left -= len;
+    }
+    path.last().copied().unwrap_or([0.0, 0.0])
+}
+
+/// A pin in a slot: the pin `travel` along the slot from its start, turned by `angle`. With the
+/// slot on B, B moves the other way about the pin.
+fn path_motion(j: &Joint, q: &[f64]) -> Mat {
+    let v = |i: usize| q.get(i).copied().unwrap_or(0.0);
+    let path = &j.exprs.path;
+    let s0 = path_start(path);
+    let (a, b) = (path_point(path, s0), path_point(path, s0 + v(1)));
+    let m = mat_mul(&shift(b[0] - a[0], b[1] - a[1], 0.0), &rot_z(v(0)));
+    if j.exprs.path_on_b { mat_inverse(&m).unwrap_or(IDENTITY) } else { m }
 }
 
 fn turn_zyx(yaw: f64, pitch: f64, roll: f64) -> Mat {
@@ -699,7 +760,8 @@ fn tail(j: &Joint, q: &[f64]) -> Mat {
 
 /// B's joint frame in A's for the joint's values: `M(q) · Flip · tail`.
 fn link_of(j: &Joint, q: &[f64]) -> Mat {
-    mat_mul(&mat_mul(&motion(j.kind, q), &flip_of(j)), &tail(j, q))
+    let m = if j.kind == JointKind::PinPath && j.exprs.path.len() >= 2 { path_motion(j, q) } else { motion(j.kind, q) };
+    mat_mul(&mat_mul(&m, &flip_of(j)), &tail(j, q))
 }
 
 /// Bodies of a component in the model (its own frame).

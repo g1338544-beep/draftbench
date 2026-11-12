@@ -161,7 +161,12 @@ fn steps(kind: JointKind) -> Option<Vec<(Step, Vec3, usize)>> {
         JointKind::Planar => vec![(P, Vec3::X, 0), (P, Vec3::Y, 1), (R, Vec3::Z, 2)],
         JointKind::Ball => vec![(R, Vec3::Z, 0), (R, Vec3::Y, 1), (R, Vec3::Z, 2)],
         JointKind::Parallel => vec![(P, Vec3::X, 0), (P, Vec3::Y, 1), (P, Vec3::Z, 2), (R, Vec3::Z, 3)],
-        JointKind::Perpendicular | JointKind::Angle | JointKind::PointOnPlane | JointKind::PointOnLine | JointKind::LineOnPlane => return None,
+        JointKind::Perpendicular
+        | JointKind::Angle
+        | JointKind::PointOnPlane
+        | JointKind::PointOnLine
+        | JointKind::LineOnPlane
+        | JointKind::PinPath => return None,
     })
 }
 
