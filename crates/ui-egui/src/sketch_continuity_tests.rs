@@ -84,10 +84,11 @@ fn center_of_mass_shows_its_place_and_the_distance_to_the_face_clicked() {
     MARKS.with(|m| m.borrow_mut().clear());
     h.step(&json!({"start": "inspect.center_of_mass"})).unwrap();
     h.step(&json!({"click": {"world": [30, 20, 20]}})).unwrap();
+    // The tool marks every body's centre when it starts; the click adds the body's and the face's.
     let labels = marks();
-    assert_eq!(labels.len(), 2, "{labels:?} {:?}", h.app.status);
-    assert!(labels[0].starts_with("Center of mass") && labels[0].contains("20") && labels[0].contains("15"), "{labels:?}");
-    assert!(labels[1].starts_with("To face 10"), "{labels:?}");
-    let foot = MARKS.with(|m| m.borrow()[1].0);
+    let [.., centre, face] = labels.as_slice() else { panic!("{labels:?} {:?}", h.app.status) };
+    assert!(centre.starts_with("Center of mass  X 20") && centre.contains("Y 15") && centre.contains("Z 10"), "{labels:?}");
+    assert!(face.starts_with("To face 10"), "{labels:?}");
+    let foot = MARKS.with(|m| m.borrow().last().map(|m| m.0).unwrap());
     assert!(foot.dist(Vec3::new(20.0, 15.0, 20.0)) < 1e-6, "on the face above the centre: {foot:?}");
 }

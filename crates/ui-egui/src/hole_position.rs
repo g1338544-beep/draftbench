@@ -145,7 +145,13 @@ pub fn paint(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &
             painter.add(egui::Shape::convex_polygon(vec![b, b - u * 10.0 + n * 4.5, b - u * 10.0 - n * 4.5], colour, Stroke::NONE));
         }
         // Owner: clicking the dimension line puts the typing into its distance box.
+        // The focus is given on the next frame: on the click's own frame egui takes it back
+        // from every widget the click was not on (it went to the diameter by the hole).
         if line_clicked(ui, r.slot, a, b) {
+            PENDING_FOCUS.with(|p| p.set(Some(r.slot)));
+            ui.ctx().request_repaint();
+        } else if PENDING_FOCUS.with(|p| p.get()) == Some(r.slot) && !ui.input(|i| i.pointer.any_down() || i.pointer.any_released()) {
+            PENDING_FOCUS.with(|p| p.set(None));
             focus_value(ui.ctx(), r.slot);
         }
         // The box sits on the dimension line's middle, beside the line (not by the hole).
@@ -183,6 +189,8 @@ pub(crate) fn line_targets(a: Pos2, b: Pos2) -> Vec<Pos2> {
 }
 
 thread_local! {
+    /// A distance box to give the keyboard to on the next frame (its line was clicked).
+    static PENDING_FOCUS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     /// The click targets along the distance lines drawn last frame, by slot: the viewport reads
     /// them so a click on a line is not also a pick on the model under it.
     static LINE_TARGETS: std::cell::RefCell<Vec<(usize, egui::Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
