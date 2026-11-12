@@ -743,3 +743,30 @@ fn the_start_position_ghost_can_be_turned_off() {
     START_GHOST.store(true, std::sync::atomic::Ordering::Relaxed);
     assert!(on > 0 && off == 0, "{on} {off}");
 }
+
+/// Owner: an as-built joint's axis can be turned. A side face gives an axis across it; Axis Z
+/// turns the joint about Z through the same point.
+#[test]
+fn as_built_turns_its_axis_onto_the_one_chosen() {
+    let mut app = two_boxes();
+    app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Body2".into() }];
+    app.start("joint.as_built");
+    let mut d = app.dialog.clone().unwrap();
+    let labels: Vec<_> = d.inputs.iter().map(|i| i.label).collect();
+    assert_eq!(labels, ["Fixed part", "Moving part", "Position"]);
+    d.active = 2;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(30.0, 10.0, 5.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("{:?}", d.kind) };
+    f.kind = 1;
+    let picked = apply_commands(&app, &d).unwrap();
+    assert!(picked[0].1["at"].get("z").is_none(), "as picked: {}", picked[0].1);
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { unreachable!() };
+    f.axis = 3;
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["at"]["z"], json!([0.0, 0.0, 1.0]), "{}", c[0].1);
+    assert_eq!(c[0].1["at"]["occurrence"], json!(0));
+    let x = c[0].1["at"]["point"][0].as_f64().unwrap();
+    assert!((x - 30.0).abs() < 1e-6, "through the picked face's point: {}", c[0].1);
+    app.run(&c[0].0, c[0].1.clone()).unwrap();
+    assert_eq!(app.session.doc.assembly.joints.len(), 1, "the joint is made about Z");
+}

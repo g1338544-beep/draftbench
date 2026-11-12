@@ -20,3 +20,23 @@ fn clicking_an_origin_plane_target_sketches_on_that_plane() {
         }
     }
 }
+
+/// Owner: an offset plane taken off a part's face is drawn where the face was picked, not at
+/// the origin's foot on that plane (which can be far off the part, or inside another one).
+#[test]
+fn a_plane_off_a_parts_face_is_drawn_at_the_face() {
+    let script: serde_json::Value = serde_json::from_str(include_str!("../../../examples/motion/toggle-clamp-parts.json")).unwrap();
+    let mut h = Harness::new();
+    for c in script["commands"].as_array().unwrap() {
+        h.app.run(c["command"].as_str().unwrap(), c["params"].clone()).unwrap();
+    }
+    h.settle();
+    let at = solidcraft_engine::geom::Vec3::new(60.0, 40.0, 20.0);
+    let face = crate::dialogs::face_sel(&h.app.session, at).unwrap();
+    let base = crate::sketch_attachment_ui::face_plane(&h.app, &face).unwrap();
+    h.app.run("construct.plane.offset", json!({"base": base, "offset": -3, "name": "Below"})).unwrap();
+    let quads = crate::viewport::construction_quads(&h.app);
+    let (_, _, q) = quads.iter().find(|(n, _, _)| n == "Below").expect("the plane is drawn");
+    let centre = (q[0] + q[1] + q[2] + q[3]) * 0.25;
+    assert!(centre.dist(solidcraft_engine::geom::Vec3::new(60.0, 40.0, 17.0)) < 1e-6, "{centre:?}");
+}

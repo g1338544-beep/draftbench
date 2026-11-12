@@ -323,3 +323,18 @@ fn zoomed_in_ring_fill_fits_the_hover_highlight_budget() {
     }
     assert_eq!(h.app.session.doc.to_json(), baseline);
 }
+
+/// Owner: a finished sketch shows no yellow profile fill (as in NX); the sketch being drawn does.
+#[test]
+fn a_finished_sketch_shows_no_profile_fill() {
+    let mut h = Harness::new();
+    circle(&mut h);
+    let fill = |h: &Harness| {
+        let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+        crate::viewport::build_sketch_scene(&h.app, &proj).trans.len()
+    };
+    assert!(fill(&h) > 0, "the sketch being drawn shades its closed profile");
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.settle();
+    assert_eq!(fill(&h), 0, "a finished sketch is curves only");
+}

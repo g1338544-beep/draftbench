@@ -1003,7 +1003,7 @@ fn continuity_color(t: &Tokens, verdict: solidcraft_engine::kernel::SeamVerdict)
 }
 
 /// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
-fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
+pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
     let s = &app.session;
@@ -1059,10 +1059,12 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     for sid in visible_sketches(app) {
         let Some(ss) = st.sketch(sid) else { continue };
         let active = s.active_sketch == Some(sid);
-        // Closed profiles are shaded (lifted off a face they may lie on).
+        // Closed profiles are shaded (lifted off a face they may lie on) while the sketch is
+        // being drawn; a finished sketch shows its curves only, as in NX (owner's request): a
+        // profile is still shaded when hovered or picked.
         let lift = ss.plane.normal() * 0.01;
         // A Project Curve result is curves only: no shaded region comes with it.
-        let profiles = if app.ui.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile || ss.sketch.view.role == "curve" {
+        let profiles = if !active || app.ui.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile || ss.sketch.view.role == "curve" {
             &[][..]
         } else {
             &ss.profiles[..]
@@ -1338,11 +1340,30 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
     solidcraft_engine::view::construction_planes(&app.session)
         .into_iter()
         .filter(|(_, n, _)| app.session.construction_visible(n))
-        .map(|(_, name, pl)| {
-            let (o, x, y) = (pl.origin, pl.x * h, pl.y * h);
+        .map(|(id, name, pl)| {
+            // A plane taken off a face is drawn where the face was picked, not at the origin's
+            // foot on it (owner: an offset plane off a part's face seemed not to appear).
+            let o = picked_at(app, id).map_or(pl.origin, |at| at - pl.normal() * (at - pl.origin).dot(pl.normal()));
+            let (x, y) = (pl.x * h, pl.y * h);
             (name, pl.normal(), [o - x - y, o + x - y, o + x + y, o - x + y])
         })
         .collect()
+}
+
+/// Where a construction plane's face was picked, when it was built off one.
+fn picked_at(app: &SolveApp, feature: u64) -> Option<Vec3> {
+    use solidcraft_engine::doc::{FeatureKind, PlaneRef};
+    fn at(p: &PlaneRef) -> Option<Vec3> {
+        match p {
+            PlaneRef::Face { at, .. } => Some(*at),
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => at(base),
+            _ => None,
+        }
+    }
+    match &app.session.doc.feature(feature)?.kind {
+        FeatureKind::ConstructionPlane { plane } => at(plane).filter(|p| p.is_finite()),
+        _ => None,
+    }
 }
 
 /// Pick what is under `pos`: sketch points, sketch curves, vertices, edges and axes first, then

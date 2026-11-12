@@ -44,6 +44,18 @@ pub const TYPES: [&str; 13] = [
     "point_on_line",
     "line_on_plane",
 ];
+/// The As-Built joint's axis choices: as the Position gives it, or along X, Y or Z.
+const AXIS_LABELS: [&str; 4] = ["As picked", "X", "Y", "Z"];
+
+fn axis_dir(axis: usize) -> Option<[f64; 3]> {
+    match axis {
+        1 => Some([1.0, 0.0, 0.0]),
+        2 => Some([0.0, 1.0, 0.0]),
+        3 => Some([0.0, 0.0, 1.0]),
+        _ => None,
+    }
+}
+
 const TYPE_LABELS: [&str; 13] = [
     "Rigid",
     "Revolute",
@@ -136,6 +148,9 @@ pub struct JointForm {
     /// Animation phase, 0…1.
     pub phase: f64,
     pub hover: Hover,
+    /// As-built: the joint's axis as picked (0), or turned onto X, Y or Z (owner's request: a
+    /// round edge along a rod gives an axis along it, and the pin turns about Z).
+    pub axis: usize,
 }
 
 impl JointForm {
@@ -151,6 +166,7 @@ impl JointForm {
             animate: false,
             phase: 0.0,
             hover: None,
+            axis: 0,
         }
     }
 
@@ -579,6 +595,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.label("");
             });
             choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
+            if f.as_built && f.editing.is_none() {
+                choice_row(ui, "Axis", "jt_axis", &mut f.axis, &AXIS_LABELS);
+            }
             // The motion in plain words.
             let says = match f.kind {
                 0 => "Locked together: no motion",
@@ -1011,7 +1030,11 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 }
                 let mut p = json!({"type": kind, "a": a, "b": b, "limits": limits});
                 if let Some(x) = sel_items(inputs, 2).first().and_then(|x| snap_of(s, x)) {
-                    p["at"] = x.param;
+                    p["at"] = match axis_dir(f.axis) {
+                        // The point picked, its axis turned onto the one chosen.
+                        Some(z) => json!({"occurrence": 0, "point": [x.at.x, x.at.y, x.at.z], "z": z}),
+                        None => x.param,
+                    };
                 }
                 return Ok(cmd("joint.as_built", p));
             }
@@ -1269,8 +1292,10 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     if let Asm::Trace(f) = k {
         trace::overlay(painter, proj, f);
     }
-    // A joint names its two picks; a joint origin and a trace have one.
+    // A joint names its two picks; a joint origin and a trace have one. As-built picks its
+    // parts as bodies: its one snap is the joint's Position.
     let two = matches!(k, Asm::Joint(_));
+    let as_built = matches!(k, Asm::Joint(f) if f.as_built);
     let hover = match k {
         Asm::Joint(f) => Some(&mut f.hover),
         Asm::JointOrigin { hover, .. } => Some(hover),
@@ -1287,7 +1312,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .filter_map(|(n, i)| i.items.first().and_then(|x| snap_of(&app.session, x)).map(|s| (s, if n == 0 { t.accent } else { t.warning })))
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
-        let tag = if n == 0 { "Fixed part".to_string() } else { "Moving part".to_string() };
+        let tag = if as_built { "Position".to_string() } else if n == 0 { "Fixed part".to_string() } else { "Moving part".to_string() };
         glyph(painter, proj, s, *c, app.cam.half_height(), two.then_some(tag.as_str()));
     }
     // The snap under the cursor (found again only when the hovered item changes).
