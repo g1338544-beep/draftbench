@@ -862,3 +862,32 @@ fn as_built_makes_a_gripper_of_several_moving_parts() {
     let (b, c) = (x(&app, "B"), x(&app, "C"));
     assert!((b.abs() - 5.0).abs() < 1e-6 && (b + c).abs() < 1e-6, "the fingers move against each other: {b} {c}");
 }
+
+/// Owner: with two moving parts Play moved nothing (it drove the group made first). It drives
+/// the new joint, and both blocks move.
+#[test]
+fn play_moves_several_moving_parts() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| s.execute(id, &p).unwrap());
+    let mut app = SolveApp::new(s, Services::default());
+    app.session.selection = ["Body1", "Body2", "Body3"].iter().map(|b| Sel::Body { name: b.to_string() }).collect();
+    app.start("joint.as_built");
+    let mut d = app.dialog.clone().unwrap();
+    d.active = 2;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 10.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("{:?}", d.kind) };
+    f.kind = 2;
+    f.axis = 1;
+    f.animate = true;
+    f.phase = 0.25;
+    let mut cmds = apply_commands(&app, &d).unwrap();
+    let Kind::Assembly(k) = &d.kind else { unreachable!() };
+    animate(&app, k, &mut cmds);
+    let mut scratch = app.session.scratch();
+    for (id, p) in &cmds {
+        scratch.execute(id, p).unwrap();
+    }
+    let x = |s: &Session, name: &str| s.doc.occurrences.iter().find(|o| o.name.starts_with(name)).map(|o| o.transform[3][0]).unwrap();
+    let (b, c) = (x(&scratch, "B"), x(&scratch, "C"));
+    assert!(b.abs() > 1.0 && (b - c).abs() < 1e-6, "both blocks slide in the preview: {b} {c}");
+}

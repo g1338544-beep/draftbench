@@ -1174,8 +1174,20 @@ pub fn animate(app: &SolveApp, k: &Asm, cmds: &mut Vec<(String, Value)>) {
                 p["values"] = json!(values);
                 None
             }
-            // As-built joints start at zero: drive the new one after it is made.
-            None => Some(next_joint_id(&app.session)),
+            // As-built joints start at zero: drive the new one after it is made, by its name
+            // (several moving parts make a group or more joints first: owner, two blocks did
+            // not slide).
+            None => {
+                if let Some((_, p)) = cmds.iter_mut().find(|(c, _)| c == "joint.as_built") {
+                    if p.get("name").and_then(Value::as_str).is_none() {
+                        p["name"] = json!("Joint preview");
+                    }
+                    let name = p["name"].clone();
+                    cmds.push(("joint.drive".into(), json!({"joint": name, "values": values})));
+                    return;
+                }
+                Some(next_joint_id(&app.session))
+            }
         },
     };
     if let Some(id) = drive {
