@@ -97,29 +97,35 @@ def run(d):
     joint(d, 6, BASE, "Base", LINK, "Link", PIN_D, "D")
     d.caption("ครบ 4 ข้อต่อ: Base-Arm-Handle-Link ต่อกันเป็นวง (Four-bar)", "")
     d.wait(1.5)
-    d.caption("7. กด OK จบคำสั่ง ข้อต่อทั้ง 4 อยู่ใน Browser หัวข้อ Joints", "")
-    d.click(d.at(handle="dialog:OK"), settle=1.2)
-    d.wait(1.5)
+    d.caption("7. Range: ติ๊ก Keep within ให้ Link หมุนได้ -25° ถึง 20°", "")
+    tick_range(d)
+    fill(d, handle_like(d, "dialog:", "From"), "-25 deg")
+    fill(d, handle_like(d, "dialog:", "To (no"), "20 deg")
+    d.ui("ui.key", {"key": "Tab"})
+    d.wait(0.8)
     d.ui("ui.view", {"view": "iso", "animate": True})
     d.wait(1.2)
-    for step, value, says in [
-        (8, "15 deg", "8. Drive Joints: เลือก Joint1 (Base-Arm) ใส่มุม 15° กด OK ชิ้นอื่นขยับตามทั้งวง"),
-        (9, "-10 deg", "9. ลองอีกครั้ง ใส่ -10° แขนกดลง ด้ามกับ Link ขยับตาม"),
-        (10, "0 deg", "10. ใส่ 0° กลับตำแหน่งเดิม"),
-    ]:
-        d.caption(says, "")
-        d.tool("joint.drive")
-        d.wait(0.8)
-        field = handle_like(d, "dialog:", "Angle")
-        fill(d, field, value)
-        d.wait(0.6)
-        d.click(d.at(handle="dialog:OK"), settle=1.5)
-        # The loop takes a while to solve: wait for the dialog to close (the parts moved).
-        for _ in range(180):
-            if not any(h["name"] == "dialog:OK" for h in d.ui("ui.handles")):
-                break
-            time.sleep(0.5)
-        d.wait(3.0)
+    d.caption("8. กด Play: กลไกขยับต่อเนื่อง ด้ามจับโยก แขนกดยกขึ้น-ลง Link ดันตามทั้งวง", "")
+    play = handle_like(d, "Play")
+
+    # A playing joint keeps the view moving, so these clicks do not wait for it to settle.
+    def tap(at):
+        d.glide(at, 0.3)
+        d.ui("ui.click", {"x": at[0], "y": at[1]})
+        d.mark(cursor=list(at), click=True)
+
+    tap(play)
+    d.wait(8.0)
+    d.caption("   หมุนมุมมองดูรอบๆ ได้ระหว่างที่กลไกขยับ", "")
+    d.ui("ui.view", {"view": "front", "animate": True})
+    d.wait(6.0)
+    d.ui("ui.view", {"view": "iso", "animate": True})
+    d.wait(6.0)
+    tap(play)
+    d.wait(0.5)
+    d.caption("9. กด OK จบคำสั่ง ข้อต่อทั้ง 4 อยู่ใน Browser หัวข้อ Joints", "")
+    d.click(d.at(handle="dialog:OK"), settle=1.0)
+    d.wait(3.0)
     d.caption("", "")
 
 
