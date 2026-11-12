@@ -606,6 +606,10 @@ fn a_click_on_the_edge_distance_line_types_into_its_box() {
     h.frames(3);
     let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "Edge 1").map(|i| i.items.len());
     assert_eq!(picked, Some(1), "the edge is picked");
+    // Owner: the edge just picked has the keyboard for its distance at once.
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new(("sc_hole_edge_value", 0usize))), "the Edge 1 box is ready to type");
+    h.ctx.memory_mut(|m| m.surrender_focus(egui::Id::new(("sc_hole_edge_value", 0usize))));
+    h.frames(2);
     let before = format!("{:?}", h.app.dialog.as_ref().unwrap().inputs);
     let mid = screen(&mut h, Vec3::new(20.0, 7.5, 20.0));
     h.step(&json!({"click": mid})).unwrap();

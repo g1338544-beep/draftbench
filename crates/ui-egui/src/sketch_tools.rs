@@ -752,7 +752,7 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.isoparametric_curve" => "Isoparametric Curve: click a point on a face (Shift: along)",
             "inspect.curvature_comb" => "Curvature comb: click sketch curves or model edges",
             "inspect.minimum_radius" => "Minimum radius: click sketch curves, edges or faces",
-            "inspect.center_of_mass" => "Center of mass of all bodies; click a body for its own",
+            "inspect.center_of_mass" => "Center of mass of all bodies (or the ones selected first); click a face, edge or corner to measure from it",
             "inspect.mass_properties" => "Mass properties: click a body (or select bodies first)",
             "inspect.isocurve" => "Isocurves: click faces",
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
@@ -973,6 +973,33 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 mass_properties(app, vec![body]);
             }
         }
+        // Owner: from the centre of mass to what is clicked, along X, Y and Z (to put the centre
+        // where it should be). A planar face also gets its square distance. With no centre yet,
+        // a click on a body gives that body's.
+        Mode::ModelRef
+            if cmd == "inspect.center_of_mass"
+                && let Some(centre) = MARKS.with(|k| k.borrow().iter().rev().find(|m| m.1.starts_with("Center of mass")).map(|m| m.0)) =>
+        {
+            let target = hits.iter().find_map(|h| match h {
+                Hit::Vertex { point, .. } => Some((*point, None)),
+                Hit::Edge { mid, .. } => Some((*mid, None)),
+                Hit::Face { body, index, point } => Some((*point, crate::dialogs::planar_face(&app.session, body, *index))),
+                _ => None,
+            });
+            if let Some((at, plane)) = target {
+                let mm = |v: f64| crate::prefs::show_mm(app, v, 1);
+                let d = at - centre;
+                let mut label = format!("ΔX {}  ΔY {}  ΔZ {}", mm(d.x), mm(d.y), mm(d.z));
+                let mut mark_at = at;
+                if let Some((on, normal)) = plane
+                    && let Some((foot, square)) = face_distance_mark(app, centre, on, normal)
+                {
+                    label = format!("{label}  ({square})");
+                    mark_at = foot;
+                }
+                MARKS.with(|k| k.borrow_mut().push((mark_at, label)));
+            }
+        }
         Mode::ModelRef if matches!(cmd, "inspect.minimum_radius" | "inspect.center_of_mass") => {
             let params = hits.iter().find_map(|h| match (cmd, h) {
                 ("inspect.minimum_radius", Hit::SketchCurve { sketch, id, .. }) => Some(json!({"sketch": sketch, "curves": [id]})),
@@ -983,18 +1010,6 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             });
             if let Some(p) = params {
                 analysis(app, cmd, p);
-            }
-            // Owner: how far the centre of mass is from the face clicked, to centre a part on it.
-            if cmd == "inspect.center_of_mass"
-                && let Some((body, index)) = hits.iter().find_map(|h| match h {
-                    Hit::Face { body, index, .. } => Some((body.clone(), *index)),
-                    _ => None,
-                })
-                && let Some((on, normal)) = crate::dialogs::planar_face(&app.session, &body, index)
-                && let Some(centre) = MARKS.with(|k| k.borrow().last().map(|m| m.0))
-                && let Some(mark) = face_distance_mark(app, centre, on, normal)
-            {
-                MARKS.with(|k| k.borrow_mut().push(mark));
             }
         }
         Mode::ModelRef if matches!(cmd, "canvas.insert" | "canvas.decal") => {
@@ -1649,7 +1664,22 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     snap_hint(app, painter, proj);
     combs(app, painter, proj);
     if DEFERRED.with(|d| d.replace(false)) {
-        analysis(app, "inspect.center_of_mass", json!({}));
+        // The bodies selected first, or else the ones shown (owner: the hidden ones are left out).
+        let picked: Vec<String> = app
+            .session
+            .selection
+            .iter()
+            .filter_map(|x| match x {
+                solidcraft_engine::Sel::Body { name } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        let bodies = if picked.is_empty() {
+            app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|n| app.session.body_visible(n)).collect()
+        } else {
+            picked
+        };
+        analysis(app, "inspect.center_of_mass", json!({ "bodies": bodies }));
     }
     mass_cursor(app, ui, painter, proj);
     marks(app, painter, proj);

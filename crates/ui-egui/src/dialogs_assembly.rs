@@ -151,6 +151,9 @@ pub struct JointForm {
     /// As-built: the joint's axis as picked (0), or turned onto X, Y or Z (owner's request: a
     /// round edge along a rod gives an axis along it, and the pin turns about Z).
     pub axis: usize,
+    /// As-built with several moving parts: 0 they move together, 1 they open and close as a
+    /// gripper's fingers (each its own joint; the ones across the middle go the other way).
+    pub gripper: usize,
 }
 
 impl JointForm {
@@ -167,6 +170,7 @@ impl JointForm {
             phase: 0.0,
             hover: None,
             axis: 0,
+            gripper: 0,
         }
     }
 
@@ -598,6 +602,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
             if f.as_built && f.editing.is_none() {
                 choice_row(ui, "Axis", "jt_axis", &mut f.axis, &AXIS_LABELS);
+                crate::ui_kit::caption(
+                    ui,
+                    "Axis",
+                    crate::i18n::tr_label("As picked: along a round edge, square to a face. X, Y, Z turn it when the motion goes the wrong way."),
+                );
+                if sel_items(inputs, 1).len() > 1 {
+                    choice_row(ui, "Moving parts", "jt_gripper", &mut f.gripper, &["Together", "Gripper (in / out)"]);
+                }
             }
             // The motion in plain words.
             let says = match f.kind {
@@ -1033,6 +1045,39 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                         Some(z) => json!({"occurrence": 0, "point": [x.at.x, x.at.y, x.at.z], "z": z}),
                         None => x.param,
                     };
+                }
+                // A gripper: a joint for each finger, linked to the first; a finger across the
+                // middle (along the axis) goes the other way, so they close and open together.
+                if f.gripper == 1 && moving.len() > 1 {
+                    let at = sel_items(inputs, 2).first().and_then(|x| snap_of(s, x)).ok_or("pick the Position: the way the fingers move")?;
+                    let dir = axis_dir(f.axis).map_or(at.z, |d| Vec3::new(d[0], d[1], d[2]));
+                    let centre = |occ: u64| -> Option<Vec3> {
+                        let st = s.world_state();
+                        let bodies: Vec<Vec3> = sel_items(inputs, 1)
+                            .iter()
+                            .filter_map(body_of)
+                            .filter(|b| occurrence_of_body(s, b) == Some(occ))
+                            .filter_map(|b| st.body(b).map(|m| m.mesh().bounds().center()))
+                            .collect();
+                        (!bodies.is_empty()).then(|| bodies.iter().fold(Vec3::ZERO, |a, b| a + *b) * (1.0 / bodies.len() as f64))
+                    };
+                    let centres: Vec<Vec3> = moving.iter().map(|o| centre(*o).unwrap_or(at.at)).collect();
+                    let middle = centres.iter().fold(Vec3::ZERO, |a, b| a + *b) * (1.0 / centres.len() as f64);
+                    let side = |c: Vec3| if (c - middle).dot(dir) < 0.0 { -1.0 } else { 1.0 };
+                    let n = s.doc.assembly.joints.len() + 1;
+                    let names: Vec<String> = (1..=moving.len()).map(|k| format!("Gripper{n}-{k}")).collect();
+                    let mut out = Vec::new();
+                    for (k, occ) in moving.iter().enumerate() {
+                        let mut q = p.clone();
+                        q["b"] = json!(occ);
+                        q["name"] = json!(names[k]);
+                        out.push(("joint.as_built".to_string(), q));
+                    }
+                    for k in 1..moving.len() {
+                        let ratio = side(centres[k]) * side(centres[0]);
+                        out.push(("joint.motion_link".to_string(), json!({"a": names[0], "b": names[k], "ratio": ratio})));
+                    }
+                    return Ok(out);
                 }
                 // Several moving parts: held together first, then the joint moves them as one.
                 let mut out = Vec::new();

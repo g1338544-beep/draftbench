@@ -771,6 +771,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if radius_spline_handles(app, ui, painter, proj, d) {
         dir = None;
     }
+    let is_hole = matches!(d.kind, Kind::Hole { .. });
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() { Some(0.0) } else { app.session.doc.eval(value, kind).ok().filter(|v| v.is_finite()) }
@@ -799,7 +800,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             box_at = ts + vec2(14.0, -12.0);
         }
     }
-    value_box(ui, label, value, box_at, focus || *value != before);
+    // A hole's edge distance box keeps the keyboard it was given (owner: it went back here).
+    let keep = is_hole && crate::hole_position::has_keyboard(ui.ctx());
+    value_box(ui, label, value, box_at, !keep && (focus || *value != before));
     if *value != before
         && let Kind::Extrude { all, .. } = &mut d.kind
     {

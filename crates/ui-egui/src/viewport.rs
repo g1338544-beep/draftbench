@@ -4055,19 +4055,27 @@ pub(crate) fn edge_readout(app: &SolveApp, st: &solidcraft_engine::doc::ModelSta
     }
     let mm = |v: f64| crate::prefs::show_mm(app, v, 1);
     let mut total = 0.0;
-    let mut one = None;
+    let mut all = Vec::new();
     for (body, index) in &edges {
         let b = st.body(body)?;
         let mesh = b.mesh();
         let pts = mesh.edges.get(*index)?;
         let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
         total += len;
-        one = Some(pts.clone());
+        all.extend_from_slice(pts);
     }
+    // Several edges on one circle (a hole's rim kept as two halves, picked as a chain): the
+    // circle, as one edge would give it (owner: a click on a hole should say its size).
     if edges.len() > 1 {
-        return Some(format!("{} edges  Length {}", edges.len(), mm(total)));
+        return match circle_of(&all) {
+            Some((r, _)) if (total - std::f64::consts::TAU * r).abs() <= 1e-2 * total.max(1.0) => {
+                Some(format!("Circle  Ø {}  (R {})", mm(2.0 * r), mm(r)))
+            }
+            Some((r, _)) => Some(format!("Arc  Ø {}  R {}  Length {}", mm(2.0 * r), mm(r), mm(total))),
+            None => Some(format!("{} edges  Length {}", edges.len(), mm(total))),
+        };
     }
-    let pts = one?;
+    let pts = all;
     match circle_of(&pts) {
         Some((r, closed)) if closed => Some(format!("Circle  Ø {}  (R {})", mm(2.0 * r), mm(r))),
         // A circle is often kept as two half arcs: an arc gives its circle's diameter too.
@@ -7905,4 +7913,5 @@ mod standalone_point_tests {
         };
         assert!(cylinder_side_lines(&flat).is_empty());
     }
+
 }

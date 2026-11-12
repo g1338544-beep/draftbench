@@ -378,6 +378,19 @@ fn a_picked_edge_says_its_size() {
     h.app.session.selection = pick("Pin", &|e| e.len() > 4);
     let text = edge_readout(&h.app, &st).unwrap();
     assert!(text.contains("Ø 10.00 mm") && text.contains("R 5.00 mm"), "{text}");
+    // Both halves of the rim, as a click on a hole picks them: the circle.
+    let b = st.body("Pin").unwrap();
+    let mesh = b.mesh();
+    let top: Vec<Sel> = mesh
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.len() > 4 && e.iter().all(|p| (p.z - 10.0).abs() < 1e-6))
+        .map(|(index, _)| Sel::Edge { body: "Pin".into(), index, point: Vec3::ZERO })
+        .collect();
+    h.app.session.selection = top;
+    let text = edge_readout(&h.app, &st).unwrap();
+    assert!(text.starts_with("Circle  Ø 10.00 mm"), "{text}");
     h.app.session.selection.clear();
     assert!(edge_readout(&h.app, &st).is_none());
 }

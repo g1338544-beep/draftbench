@@ -74,21 +74,35 @@ fn only_edges_light_up_under_the_tool() {
     assert!(matches!(h.app.viewport.hover, Some(Hit::Edge { .. })), "{:?}", h.app.viewport.hover);
 }
 
-/// Owner: Center of Mass says where the centre is and how far it is from the face clicked, to
-/// centre a part on it. A 40 × 30 × 20 box clicked on its top: 10 mm down to the centre.
+/// Owner: Center of Mass says where the centre is and how far what is clicked is from it, along
+/// X, Y and Z (to put the centre where it should be). A 40 × 30 × 20 box clicked on its top.
 #[test]
-fn center_of_mass_shows_its_place_and_the_distance_to_the_face_clicked() {
+fn center_of_mass_measures_from_the_centre_to_what_is_clicked() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
     h.settle();
     MARKS.with(|m| m.borrow_mut().clear());
     h.step(&json!({"start": "inspect.center_of_mass"})).unwrap();
-    h.step(&json!({"click": {"world": [30, 20, 20]}})).unwrap();
-    // The tool marks every body's centre when it starts; the click adds the body's and the face's.
     let labels = marks();
-    let [.., centre, face] = labels.as_slice() else { panic!("{labels:?} {:?}", h.app.status) };
-    assert!(centre.starts_with("Center of mass  X 20") && centre.contains("Y 15") && centre.contains("Z 10"), "{labels:?}");
-    assert!(face.starts_with("To face 10"), "{labels:?}");
+    assert!(labels.first().is_some_and(|c| c.starts_with("Center of mass  X 20") && c.contains("Y 15") && c.contains("Z 10")), "{labels:?}");
+    h.step(&json!({"click": {"world": [30, 20, 20]}})).unwrap();
+    let labels = marks();
+    let last = labels.last().unwrap();
+    assert!(last.starts_with("ΔX 10.00 mm  ΔY 5.00 mm  ΔZ 10.00 mm") && last.contains("To face 10.00 mm"), "{labels:?}");
     let foot = MARKS.with(|m| m.borrow().last().map(|m| m.0).unwrap());
     assert!(foot.dist(Vec3::new(20.0, 15.0, 20.0)) < 1e-6, "on the face above the centre: {foot:?}");
+}
+
+/// Owner: the centre of mass is of the bodies shown; a hidden one is left out.
+#[test]
+fn center_of_mass_leaves_hidden_bodies_out() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [200, 0, 0], "body_name": "Far"})).unwrap();
+    h.app.session.visibility.hidden_bodies.push("Far".into());
+    h.settle();
+    MARKS.with(|m| m.borrow_mut().clear());
+    h.step(&json!({"start": "inspect.center_of_mass"})).unwrap();
+    let labels = marks();
+    assert!(labels.first().is_some_and(|c| c.starts_with("Center of mass  X 20.00 mm")), "the far body is hidden: {labels:?}");
 }

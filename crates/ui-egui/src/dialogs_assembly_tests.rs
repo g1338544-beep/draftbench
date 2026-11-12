@@ -833,3 +833,32 @@ fn motion_link_moves_the_second_slider_with_the_first() {
     let (b, c) = (x(&app, "B"), x(&app, "C"));
     assert!((b.abs() - 5.0).abs() < 1e-6 && (b + c).abs() < 1e-6, "the second block goes the other way: {b} {c} {r}");
 }
+
+/// Owner: several moving parts can also open and close as a gripper's fingers: each its own
+/// joint, the one across the middle going the other way.
+#[test]
+fn as_built_makes_a_gripper_of_several_moving_parts() {
+    let mut s = Session::default();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| s.execute(id, &p).unwrap());
+    let mut app = SolveApp::new(s, Services::default());
+    app.session.selection = ["Body1", "Body2", "Body3"].iter().map(|b| Sel::Body { name: b.to_string() }).collect();
+    app.start("joint.as_built");
+    let mut d = app.dialog.clone().unwrap();
+    d.active = 2;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 10.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("{:?}", d.kind) };
+    f.kind = 2;
+    f.axis = 1;
+    f.gripper = 1;
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["joint.as_built", "joint.as_built", "joint.motion_link"]);
+    assert_eq!(cmds[2].1["ratio"], json!(-1.0), "the two fingers are either side of the middle");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let x = |app: &SolveApp, name: &str| app.session.doc.occurrences.iter().find(|o| o.name.starts_with(name)).map(|o| o.transform[3][0]).unwrap();
+    let first = app.session.doc.assembly.joints.iter().find(|j| j.name.ends_with("-1")).map(|j| j.id).unwrap();
+    app.run("joint.drive", json!({"joint": first, "value": "5 mm"})).unwrap();
+    let (b, c) = (x(&app, "B"), x(&app, "C"));
+    assert!((b.abs() - 5.0).abs() < 1e-6 && (b + c).abs() < 1e-6, "the fingers move against each other: {b} {c}");
+}

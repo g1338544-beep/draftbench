@@ -121,11 +121,27 @@ pub fn store(extra: &mut serde_json::Map<String, Value>, inputs: &[SelInput], st
 pub fn paint(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
     LINE_TARGETS.with(|t| t.borrow_mut().clear());
     if !matches!(d.kind, Kind::Hole { .. }) {
+        SEEN_SLOTS.with(|s| s.borrow_mut().clear());
         return;
     }
-    let Some(st) = setup(app, &d.inputs) else { return };
+    let Some(st) = setup(app, &d.inputs) else {
+        SEEN_SLOTS.with(|s| s.borrow_mut().clear());
+        return;
+    };
     if st.references.is_empty() {
         return;
+    }
+    // Owner: an edge just picked gets the keyboard for its distance, ready to type.
+    let slots: Vec<usize> = st.references.iter().map(|r| r.slot).collect();
+    let fresh = SEEN_SLOTS.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        let new = slots.iter().copied().filter(|s| !seen.contains(s)).last();
+        *seen = slots.clone();
+        new
+    });
+    if let Some(slot) = fresh {
+        PENDING_FOCUS.with(|p| p.set(Some(slot)));
+        ui.ctx().request_repaint();
     }
     let before = texts(&mut d.extra, &d.inputs, &st);
     let mut text = before.clone();
@@ -189,11 +205,19 @@ pub(crate) fn line_targets(a: Pos2, b: Pos2) -> Vec<Pos2> {
 }
 
 thread_local! {
+    /// The edges picked when the distances were last drawn (a new one gets the keyboard).
+    static SEEN_SLOTS: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
     /// A distance box to give the keyboard to on the next frame (its line was clicked).
     static PENDING_FOCUS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     /// The click targets along the distance lines drawn last frame, by slot: the viewport reads
     /// them so a click on a line is not also a pick on the model under it.
     static LINE_TARGETS: std::cell::RefCell<Vec<(usize, egui::Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Whether an edge distance box has the keyboard or is about to (its line was clicked): the
+/// diameter box by the hole must not take it back.
+pub fn has_keyboard(ctx: &egui::Context) -> bool {
+    PENDING_FOCUS.with(|p| p.get()).is_some() || ctx.memory(|m| m.focused()).is_some_and(|f| (0..LABELS.len()).any(|slot| f == value_id(slot)))
 }
 
 /// The distance line under `pos`, if any (its slot).
