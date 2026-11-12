@@ -246,12 +246,10 @@ mod tests {
     fn a_click_on_a_distance_line_is_found_before_the_model() {
         let ctx = egui::Context::default();
         let mut found = None;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                LINE_TARGETS.with(|t| t.borrow_mut().clear());
-                line_clicked(ui, 1, pos2(100.0, 100.0), pos2(100.0, 160.0));
-                found = Some((line_at(pos2(103.0, 130.0)), line_at(pos2(130.0, 130.0))));
-            });
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            LINE_TARGETS.with(|t| t.borrow_mut().clear());
+            line_clicked(ui, 1, pos2(100.0, 100.0), pos2(100.0, 160.0));
+            found = Some((line_at(pos2(103.0, 130.0)), line_at(pos2(130.0, 130.0))));
         });
         assert_eq!(found, Some((Some(1), None)));
     }
