@@ -2947,7 +2947,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !held
             && app.dialog.is_none()
             && crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked());
-        if resp.clicked() && !held && !reference_pick {
+        // A click on a hole's distance line puts the typing there (hole_position), not a pick.
+        let on_hole_line =
+            app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Hole { .. })) && crate::hole_position::line_at(p).is_some();
+        if resp.clicked() && !held && !reference_pick && !on_hole_line {
             if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {

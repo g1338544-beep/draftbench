@@ -122,6 +122,7 @@ pub fn store(extra: &mut serde_json::Map<String, Value>, inputs: &[SelInput], st
 
 /// The dimensions on the model: a line from the hole to each picked edge, with a field for it.
 pub fn paint(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
+    LINE_TARGETS.with(|t| t.borrow_mut().clear());
     if !matches!(d.kind, Kind::Hole { .. }) {
         return;
     }
@@ -184,19 +185,27 @@ pub(crate) fn line_targets(a: Pos2, b: Pos2) -> Vec<Pos2> {
     (0..=n).map(|i| a + (b - a) * (i as f32 / n as f32)).collect()
 }
 
-/// Was the dimension line clicked? Small click targets along it, on top of the viewport, so the
-/// click is not also a pick on the model.
+thread_local! {
+    /// The click targets along the distance lines drawn last frame, by slot: the viewport reads
+    /// them so a click on a line is not also a pick on the model under it.
+    static LINE_TARGETS: std::cell::RefCell<Vec<(usize, egui::Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The distance line under `pos`, if any (its slot).
+pub fn line_at(pos: egui::Pos2) -> Option<usize> {
+    LINE_TARGETS.with(|t| t.borrow().iter().find(|(_, r)| r.contains(pos)).map(|(slot, _)| *slot))
+}
+
+/// Was the dimension line clicked? Small targets along it; the click is read from the pointer
+/// itself (the viewport underneath would otherwise take it as a pick on the model).
 fn line_clicked(ui: &egui::Ui, slot: usize, a: Pos2, b: Pos2) -> bool {
-    let mut clicked = false;
-    for (i, p) in line_targets(a, b).into_iter().enumerate() {
-        let r = egui::Rect::from_center_size(p, vec2(12.0, 12.0));
-        let resp = ui.interact(r, egui::Id::new(("sc_hole_edge_line", slot, i)), egui::Sense::click());
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        clicked |= resp.clicked();
+    let rects: Vec<egui::Rect> = line_targets(a, b).into_iter().map(|p| egui::Rect::from_center_size(p, vec2(12.0, 12.0))).collect();
+    LINE_TARGETS.with(|t| t.borrow_mut().extend(rects.iter().map(|r| (slot, *r))));
+    let (hover, click) = ui.input(|i| (i.pointer.hover_pos(), i.pointer.primary_clicked().then(|| i.pointer.interact_pos()).flatten()));
+    if hover.is_some_and(|p| rects.iter().any(|r| r.contains(p))) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    clicked
+    click.is_some_and(|p| rects.iter().any(|r| r.contains(p)))
 }
 
 fn edge_box(ui: &mut egui::Ui, slot: usize, value: &mut String, at: Pos2) {
@@ -229,5 +238,21 @@ mod tests {
         assert!(t.windows(2).all(|w| (w[1] - w[0]).length() <= 12.0), "{t:?}");
         // A line too short to see still has a target.
         assert!(!line_targets(pos2(5.0, 5.0), pos2(5.0, 5.0)).is_empty());
+    }
+
+    /// Owner: a click on a distance line still went to the model under it (a new pick), which
+    /// gave the keyboard back to the diameter. The viewport asks for the line first.
+    #[test]
+    fn a_click_on_a_distance_line_is_found_before_the_model() {
+        let ctx = egui::Context::default();
+        let mut found = None;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                LINE_TARGETS.with(|t| t.borrow_mut().clear());
+                line_clicked(ui, 1, pos2(100.0, 100.0), pos2(100.0, 160.0));
+                found = Some((line_at(pos2(103.0, 130.0)), line_at(pos2(130.0, 130.0))));
+            });
+        });
+        assert_eq!(found, Some((Some(1), None)));
     }
 }
