@@ -636,3 +636,37 @@ fn motion_trace_keeps_the_picked_point_path() {
     };
     assert!(drawn.dist(shown) < 1e-6, "{drawn:?} wants {shown:?}");
 }
+
+/// Owner: the web app froze on the toggle clamp's third As-Built Joint (handle and link, picked
+/// on the link's pin). The preview of each joint must come quickly.
+#[test]
+fn the_clamps_joint_previews_come_quickly() {
+    let script: serde_json::Value = serde_json::from_str(include_str!("../../../examples/motion/toggle-clamp-parts.json")).unwrap();
+    let mut s = Session::default();
+    for c in script["commands"].as_array().unwrap() {
+        s.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
+    }
+    let mut app = SolveApp::new(s, Services::default());
+    let colors = crate::preview::Colors { body: [1, 1, 1, 255], added: [2, 2, 2, 255], new_body: [2, 2, 2, 255], removed: [3, 3, 3, 100], edge: [0, 0, 0, 255] };
+    let pins = [("Base", "Arm", [2.5, 0.0, 14.0]), ("Arm", "Handle", [2.5, 40.0, 20.0]), ("Handle", "Link", [32.5, 40.0, 20.0]), ("Base", "Link", [42.5, 0.0, 14.0])];
+    for (a, b, at) in pins {
+        app.session.selection = vec![Sel::Body { name: a.into() }, Sel::Body { name: b.into() }];
+        app.start("joint.as_built");
+        let mut d = app.dialog.clone().unwrap();
+        if let Some(sel) = face_sel(&app.session, Vec3::new(at[0] - 1.0, at[1], at[2])) {
+            d.active = 1;
+            d.pick(&app.session, sel);
+        }
+        let t = std::time::Instant::now();
+        let cmds = preview_commands(&app, &d).unwrap();
+        let shown = world_preview(&app.session, &cmds, colors);
+        let took = t.elapsed();
+        eprintln!("{a}-{b}: preview {took:?} ok={:?}", shown.as_ref().map(|r| r.is_ok()));
+        assert!(took.as_secs_f64() < 3.0, "{a}-{b}: {took:?}");
+        for (id, p) in apply_commands(&app, &d).unwrap() {
+            app.run(&id, p).unwrap();
+        }
+        app.dialog = None;
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 4);
+}
