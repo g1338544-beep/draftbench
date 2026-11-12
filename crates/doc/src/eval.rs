@@ -6687,7 +6687,46 @@ fn drawn_tools_digest(doc: &Document, f: &Feature) -> u64 {
     if (!targets && f.participants.is_empty()) || (doc.occurrences.is_empty() && doc.body_offsets.is_empty()) {
         return 0;
     }
-    placements_hash(doc)
+    // What the tools meet is each named body where it sits as seen from this feature's
+    // component: their relative placement, not every occurrence's. Moving an assembly about
+    // (driving its joints) leaves a join or cut within one part alone, rather than rebuilding
+    // every such feature on each step of the motion (the toggle clamp took seconds a step).
+    let names = match &f.kind {
+        FeatureKind::Extrude { targets, .. }
+        | FeatureKind::Revolve { targets, .. }
+        | FeatureKind::Loft { targets, .. }
+        | FeatureKind::Sweep { targets, .. }
+        | FeatureKind::Pipe { targets, .. }
+        | FeatureKind::Coil { targets, .. }
+            if !targets.is_empty() =>
+        {
+            targets.iter().map(|t| t.0.clone()).collect()
+        }
+        _ => f.participants.clone(),
+    };
+    relative_placements_digest(doc, f, &names).unwrap_or_else(|| placements_hash(doc))
+}
+
+/// The placements of the bodies `names` relative to `f`'s component, with their offsets: `None`
+/// when one can't be told (all bodies, or a body no earlier feature names), so the caller falls
+/// back to every placement.
+fn relative_placements_digest(doc: &Document, f: &Feature, names: &[String]) -> Option<u64> {
+    let frame = crate::mat_inverse(&doc.component_transform(f.component))?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for name in names {
+        if name == "*" {
+            return None;
+        }
+        let component = match doc.body_components.get(name) {
+            Some(c) => *c,
+            None => doc.features.iter().take_while(|g| g.id != f.id).find(|g| g.body_names.iter().any(|n| n == name))?.component,
+        };
+        name.hash(&mut h);
+        component.hash(&mut h);
+        crate::mat_mul(&frame, &doc.component_transform(component)).iter().flatten().for_each(|x| ((x * 1e9).round() as i64).hash(&mut h));
+        serde_json::to_string(&doc.body_offsets.get(name)).unwrap_or_default().hash(&mut h);
+    }
+    Some(h.finish())
 }
 
 /// The matrix taking the evaluated feature's drawn tools into body `name`'s frame (`None`: the
