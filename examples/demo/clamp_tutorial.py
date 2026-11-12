@@ -114,6 +114,11 @@ def run(d):
         fill(d, field, value)
         d.wait(0.6)
         d.click(d.at(handle="dialog:OK"), settle=1.5)
+        # The loop takes a while to solve: wait for the dialog to close (the parts moved).
+        for _ in range(180):
+            if not any(h["name"] == "dialog:OK" for h in d.ui("ui.handles")):
+                break
+            time.sleep(0.5)
         d.wait(3.0)
     d.caption("", "")
 
