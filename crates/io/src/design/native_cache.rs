@@ -17,6 +17,14 @@ const MAX_MANIFEST: usize = 32 << 20;
 
 /// The build that computed a cache: the same source, compiled for the same platform, computes the
 /// same numbers, so only its own caches are its results.
+/// The evaluation a saved model belongs to. A cache is used by any build of this app version
+/// with this epoch, not only the build that wrote it: the web app is deployed many times a day,
+/// and a cache kept for one commit only made every design rebuild in full on open (owner: the web
+/// page froze for half a minute opening a small clamp). [`solidcraft_doc::Model::adopt`] still
+/// checks every feature's fingerprint against the document. Bump this when a change makes the
+/// same document evaluate to different geometry.
+const EPOCH: &str = "1";
+
 fn build() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_SOURCE_COMMIT"), std::env::consts::ARCH, std::env::consts::OS)
 }
@@ -72,7 +80,7 @@ pub(super) fn encode_model(model: &SavedModel, document: &[u8]) -> Result<(Vec<u
         });
     }
     let manifest = serde_json::to_vec(&json!({
-        "format": FORMAT, "producer": PRODUCER, "app": env!("CARGO_PKG_VERSION"), "build": build(),
+        "format": FORMAT, "producer": PRODUCER, "app": env!("CARGO_PKG_VERSION"), "build": build(), "epoch": EPOCH,
         "document": digest(document), "payload": digest(&data),
         "slices": slices, "shares": share_body, "bodies": table, "model": model.records,
     }))
@@ -98,7 +106,8 @@ fn current(manifest: &Value, document: &[u8]) -> bool {
     is("format", FORMAT)
         && is("producer", PRODUCER)
         && is("app", env!("CARGO_PKG_VERSION"))
-        && is("build", &build())
+        // The build that wrote it is kept for diagnosis; a cache from before epochs is epoch 1.
+        && manifest.get("epoch").map_or(EPOCH == "1", |e| e.as_str() == Some(EPOCH))
         && is("document", &digest(document))
         // A development build of unknown source never trusts a cache.
         && env!("SOLIDCRAFT_SOURCE_COMMIT") != "unknown"

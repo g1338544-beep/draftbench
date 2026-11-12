@@ -890,7 +890,7 @@ mod tests {
         let doc = document();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
         let original = parts(&bytes);
-        for key in ["format", "producer", "app", "build", "document", "payload"] {
+        for key in ["format", "producer", "app", "epoch", "document", "payload"] {
             let mut entries = original.clone();
             let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
             manifest[key] = json!("unsupported-or-stale");
@@ -900,6 +900,13 @@ mod tests {
             assert!(read_design_preview(&bytes).is_none());
             assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         }
+        // Another build of this version (the next web deploy) uses the cache: opening a design
+        // must not rebuild it in full on every deploy.
+        let mut entries = original.clone();
+        let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
+        manifest["build"] = json!("0123456789abcdef/wasm32-");
+        entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+        assert!(read_design_geometry(&package(&entries)).is_some(), "another build's cache is used");
         let mut entries = original;
         entries.get_mut("cache/bodies.bin").unwrap()[0] ^= 1;
         let bytes = package(&entries);
