@@ -214,7 +214,10 @@ pub fn mass_properties(app: &mut SolveApp, bodies: Vec<String>) {
 fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     let Ok(v) = app.run(cmd, p) else { return };
     let mark = match cmd {
-        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, "Center of mass".to_string())),
+        "inspect.center_of_mass" => v3(&v["center"]).map(|c| {
+            let mm = |x: f64| crate::prefs::show_mm(app, x, 1);
+            (c, format!("Center of mass  X {}  Y {}  Z {}", mm(c.x), mm(c.y), mm(c.z)))
+        }),
         _ => v3(&v["at"]).zip(v["min_radius"].as_f64()).map(|(c, r)| (c, format!("R min {}", crate::prefs::show_mm(app, r, 1)))),
     };
     if let Some(m) = mark {
@@ -222,6 +225,14 @@ fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     } else if cmd == "inspect.minimum_radius" {
         app.set_status("Minimum radius: it is straight (no curvature)", false);
     }
+}
+
+/// The centre of mass's distance from a planar face, as a marker where the perpendicular from
+/// the centre meets the face.
+fn face_distance_mark(app: &SolveApp, centre: Vec3, on: Vec3, normal: Vec3) -> Option<(Vec3, String)> {
+    let n = normal.normalized()?;
+    let d = (centre - on).dot(n);
+    d.is_finite().then(|| (centre - n * d, format!("To face {}", crate::prefs::show_mm(app, d.abs(), 1))))
 }
 
 /// A seam from an `inspect.continuity` reply as a marker label: its class and the measure that
@@ -972,6 +983,18 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             });
             if let Some(p) = params {
                 analysis(app, cmd, p);
+            }
+            // Owner: how far the centre of mass is from the face clicked, to centre a part on it.
+            if cmd == "inspect.center_of_mass"
+                && let Some((body, index)) = hits.iter().find_map(|h| match h {
+                    Hit::Face { body, index, .. } => Some((body.clone(), *index)),
+                    _ => None,
+                })
+                && let Some((on, normal)) = crate::dialogs::planar_face(&app.session, &body, index)
+                && let Some(centre) = MARKS.with(|k| k.borrow().last().map(|m| m.0))
+                && let Some(mark) = face_distance_mark(app, centre, on, normal)
+            {
+                MARKS.with(|k| k.borrow_mut().push(mark));
             }
         }
         Mode::ModelRef if matches!(cmd, "canvas.insert" | "canvas.decal") => {
