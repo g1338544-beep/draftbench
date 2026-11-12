@@ -306,4 +306,15 @@ mod tests {
         assert!(report.events.iter().all(|event| event.strategy == BooleanStrategy::PlanarFallback));
         assert!(report.warning().unwrap().contains("capped"));
     }
+
+    /// A report without rejected candidates is written without the list and read back (a saved
+    /// model with a fallback was refused, so the design rebuilt in full on every open).
+    #[test]
+    fn a_report_without_rejected_candidates_reads_back() {
+        let mut report = BooleanDiagnostics::default();
+        report.push(BooleanFallback::new(BooleanStrategy::PlanarFallback));
+        let text = serde_json::to_string(&report).unwrap();
+        assert!(!text.contains("rejected"), "{text}");
+        assert_eq!(serde_json::from_str::<BooleanDiagnostics>(&text).unwrap(), report);
+    }
 }
