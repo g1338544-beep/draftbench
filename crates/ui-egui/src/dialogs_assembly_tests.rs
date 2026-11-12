@@ -700,3 +700,23 @@ fn the_clamps_third_joint_previews_quickly_from_any_face_of_the_pin() {
         assert!(took.as_secs_f64() < 3.0, "{at:?}: {took:?}");
     }
 }
+
+/// Owner: the yellow start position can be turned off while the joint plays.
+#[test]
+fn the_start_position_ghost_can_be_turned_off() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let colors = crate::preview::Colors { body: [1, 1, 1, 255], added: [2, 2, 2, 255], new_body: [2, 2, 2, 255], removed: [3, 3, 3, 100], edge: [0, 0, 0, 255] };
+    let cmds = preview_commands(&app, &d).unwrap();
+    let ghost = |on: bool| {
+        START_GHOST.store(on, std::sync::atomic::Ordering::Relaxed);
+        let b = world_preview(&app.session, &cmds, colors).unwrap().unwrap();
+        b.scene.ghost.len()
+    };
+    let (on, off) = (ghost(true), ghost(false));
+    START_GHOST.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(on > 0 && off == 0, "{on} {off}");
+}

@@ -2677,6 +2677,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let body = |ui: &mut egui::Ui| {
                 d.sync_fillet_chain(&app.session);
                 enter |= dense::rows(app, ctx, &mut d, ui);
+                if crate::dialogs_assembly::take_save_video() {
+                    crate::dialogs_assembly::save_video(app, &d);
+                }
                 d.sync_fillet_chain(&app.session);
                 if cell_enter {
                     ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));

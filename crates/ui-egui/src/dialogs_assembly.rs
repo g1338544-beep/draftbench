@@ -615,6 +615,19 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         ui.data_mut(|d| d.insert_temp(id, speed));
                     });
                 });
+                // Owner: the yellow start position can be turned off while watching the motion.
+                let mut ghost = START_GHOST.load(std::sync::atomic::Ordering::Relaxed);
+                crate::ui_kit::options(ui, "joint_ghost", &mut [("Show the start position", &mut ghost)]);
+                START_GHOST.store(ghost, std::sync::atomic::Ordering::Relaxed);
+                // Owner: a way to keep the motion as a video to show (the dialog saves it).
+                form_row(ui, "", |ui| {
+                    if crate::ui_kit::button(ui, crate::i18n::tr_label("Save Video…"), crate::ui_kit::Button::Normal)
+                        .on_hover_text(crate::i18n::tr_label("Save the joint's motion back and forth as an animated GIF, seen as the view shows it"))
+                        .clicked()
+                    {
+                        SAVE_VIDEO.with(|v| v.set(true));
+                    }
+                });
                 // How far it may go: open by default, in plain words.
                 crate::ui_kit::section(ui, "joint_limits", "Range", true, |ui| {
                     for (i, (on, lo, hi)) in f.limits.iter_mut().enumerate() {
@@ -1087,6 +1100,60 @@ pub fn animate(app: &SolveApp, k: &Asm, cmds: &mut Vec<(String, Value)>) {
     }
 }
 
+/// Joint and drive previews show where the moved parts were (a yellow ghost); off, only where
+/// they go. Kept while the app runs.
+static START_GHOST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+thread_local! {
+    /// Save Video… was pressed in the joint dialog; [`save_video`] runs it with the dialog.
+    static SAVE_VIDEO: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Was Save Video… pressed (once)?
+pub fn take_save_video() -> bool {
+    SAVE_VIDEO.with(|v| v.replace(false))
+}
+
+/// The joint the dialog makes (or edits), driven back and forth over its range (or ±45° / ±20 mm)
+/// and saved as an animated GIF from the view's camera. Drawn on a copy: the design is not
+/// changed, and the joint need not be made first.
+pub fn save_video(app: &mut SolveApp, d: &Dialog) {
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return };
+    let cmds = match crate::dialogs::apply_commands(app, d) {
+        Ok(c) => c,
+        Err(e) => {
+            app.set_status(e, true);
+            return;
+        }
+    };
+    let kind = f.joint_kind();
+    let (lo, hi) = match f.limits.first() {
+        Some((true, lo, hi)) => (lo.clone(), hi.clone()),
+        _ if kind.is_angle(0) => ("-45 deg".to_string(), "45 deg".to_string()),
+        _ => ("-20 mm".to_string(), "20 mm".to_string()),
+    };
+    let joint = f.editing.unwrap_or_else(|| next_joint_id(&app.session));
+    let (camera, guides) = (app.cam, crate::control::window_guides(app));
+    app.pick_save("Joint motion.gif", &["gif"], move |app, path| {
+        let Some(mut path) = path else { return };
+        if !path.to_ascii_lowercase().ends_with(".gif") {
+            path.push_str(".gif");
+        }
+        let mut sc = app.session.scratch();
+        sc.section = app.session.section;
+        let made = cmds.iter().try_for_each(|(c, p)| sc.execute(c, p).map(|_| ())).and_then(|()| {
+            sc.execute(
+                "motion.export_animation",
+                &json!({"joint": joint, "from": lo, "to": hi, "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes, "back_and_forth": true}),
+            )
+        });
+        match made {
+            Ok(_) => app.set_status(crate::i18n::format("ui.saved_to", &[("path", &path)]), false),
+            Err(e) => app.set_status(e.to_string(), true),
+        }
+    });
+}
+
 fn next_joint_id(s: &Session) -> u64 {
     s.doc.assembly.joints.iter().map(|j| j.id).max().unwrap_or(0) + 1
 }
@@ -1113,8 +1180,10 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         })
         .map(|(_, r)| r.clone());
     let (before, after) = (preview.before, preview.after);
-    // A moved component looks like itself (no new surface), with its old place as the ghost.
-    let colors = Colors { added: colors.body, new_body: colors.body, ..colors };
+    // A moved component looks like itself (no new surface), with its old place as the ghost
+    // (yellow) unless that is turned off in the joint dialog (owner).
+    let removed = if START_GHOST.load(std::sync::atomic::Ordering::Relaxed) { colors.removed } else { [0, 0, 0, 0] };
+    let colors = Colors { added: colors.body, new_body: colors.body, removed, ..colors };
     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(&before, &after, colors)));
     Some(match built {
         Ok(mut b) => {

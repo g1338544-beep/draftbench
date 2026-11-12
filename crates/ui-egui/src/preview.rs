@@ -640,7 +640,8 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             continue;
         }
         let m = b.mesh();
-        for t in &m.triangles {
+        // A see-through colour draws no ghost at all (the start position turned off).
+        for t in m.triangles.iter().filter(|_| c.removed[3] > 0) {
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {

@@ -1308,6 +1308,42 @@ mod tests {
         assert!(h.app.session.doc.assembly.studies.is_empty(), "exporting saves no study");
     }
 
+    /// Owner: "how do I save a video of it?" The joint dialog's Save Video… saves the joint it
+    /// is making, driven back and forth, as a GIF, before the joint is even made.
+    #[test]
+    fn the_joint_dialog_saves_its_motion_as_a_gif() {
+        #[cfg(not(target_arch = "wasm32"))]
+        if solidcraft_engine::capture::installed().is_none() {
+            solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
+                let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                Ok(solidcraft_engine::capture::Picture { rgba, renderer })
+            }));
+        }
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 30)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Body1".into() }, solidcraft_engine::Sel::Body { name: "Body2".into() }];
+        h.app.start("joint.as_built");
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"dialog:Type"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Type:Revolute"}})).unwrap();
+        let dir = h.dir.clone();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert_eq!((name, extensions), ("Joint motion.gif", &["gif"][..]));
+            Box::pin(std::future::ready(Some(dir.join("joint").to_string_lossy().into_owned())))
+        }));
+        h.frames(2);
+        h.step(&json!({"widget": "Save Video…"})).unwrap();
+        h.frames(3);
+        let gif = std::fs::read(h.dir.join("joint.gif")).unwrap();
+        assert!(gif.starts_with(b"GIF89a"), "{:?}", h.app.status);
+        assert!(h.app.session.doc.assembly.joints.is_empty(), "saving the video makes no joint");
+        assert!(h.app.dialog.is_some(), "the dialog stays open");
+    }
+
     #[test]
     fn study_keys_by_joint_id() {
         let mut s = Session::default();
