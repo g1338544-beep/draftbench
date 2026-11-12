@@ -634,13 +634,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         {
                             f.animate = !f.animate;
                         }
-                        // How fast Play goes (kept while the app runs).
-                        let id = egui::Id::new("joint_animate_speed");
-                        let mut speed = ui.data(|d| d.get_temp::<usize>(id)).unwrap_or(2);
+                        // How fast Play goes (kept while the app runs), and the saved video too.
+                        let mut speed = SPEED.load(std::sync::atomic::Ordering::Relaxed);
                         let names: Vec<String> = crate::dialogs_motion::SPEEDS.iter().map(|x| format!("{x}×")).collect();
                         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
                         ui.allocate_ui(egui::vec2(t.form_label_width, t.control_height), |ui| combo(ui, "jt_speed", &refs, &mut speed));
-                        ui.data_mut(|d| d.insert_temp(id, speed));
+                        SPEED.store(speed, std::sync::atomic::Ordering::Relaxed);
                     });
                 });
                 // Owner: the yellow start position can be turned off while watching the motion.
@@ -675,10 +674,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             if f.animate {
                 // One small step a frame (120 over a cycle), never a jump: a slow preview slows the
                 // motion down instead of skipping ahead, so it can be followed by eye.
-                let speed = ui
-                    .data(|d| d.get_temp::<usize>(egui::Id::new("joint_animate_speed")))
-                    .and_then(|i| crate::dialogs_motion::SPEEDS.get(i).copied())
-                    .unwrap_or(1.0);
+                let speed = speed_factor();
                 f.phase = (f.phase + speed / 120.0).fract();
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(40));
             }
@@ -1136,6 +1132,19 @@ pub fn animate(app: &SolveApp, k: &Asm, cmds: &mut Vec<(String, Value)>) {
 
 /// Joint and drive previews show where the moved parts were (a yellow ghost); off, only where
 /// they go. Kept while the app runs.
+/// The joint dialog's Animate speed: an index into [`crate::dialogs_motion::SPEEDS`] (1× first).
+static SPEED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(2);
+
+fn speed_factor() -> f64 {
+    crate::dialogs_motion::SPEEDS.get(SPEED.load(std::sync::atomic::Ordering::Relaxed)).copied().unwrap_or(1.0)
+}
+
+/// Frames of one way of the saved video at the dialog's speed (owner: the GIF was slow). At 25
+/// frames a second, 1× takes 2.4 s each way, as Play does; 4× takes 0.6 s.
+pub(crate) fn video_frames(speed: f64) -> u32 {
+    (60.0 / speed.max(0.25)).round().clamp(6.0, 240.0) as u32
+}
+
 static START_GHOST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 thread_local! {
@@ -1168,6 +1177,7 @@ pub fn save_video(app: &mut SolveApp, d: &Dialog) {
     };
     let joint = f.editing.unwrap_or_else(|| next_joint_id(&app.session));
     let (camera, guides) = (app.cam, crate::control::window_guides(app));
+    let samples = video_frames(speed_factor());
     app.pick_save("Joint motion.gif", &["gif"], move |app, path| {
         let Some(mut path) = path else { return };
         if !path.to_ascii_lowercase().ends_with(".gif") {
@@ -1178,7 +1188,7 @@ pub fn save_video(app: &mut SolveApp, d: &Dialog) {
         let made = cmds.iter().try_for_each(|(c, p)| sc.execute(c, p).map(|_| ())).and_then(|()| {
             sc.execute(
                 "motion.export_animation",
-                &json!({"joint": joint, "from": lo, "to": hi, "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes, "back_and_forth": true}),
+                &json!({"joint": joint, "from": lo, "to": hi, "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes, "back_and_forth": true, "samples": samples, "fps": 25}),
             )
         });
         match made {

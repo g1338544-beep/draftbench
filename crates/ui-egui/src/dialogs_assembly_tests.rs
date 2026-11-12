@@ -770,3 +770,12 @@ fn as_built_turns_its_axis_onto_the_one_chosen() {
     app.run(&c[0].0, c[0].1.clone()).unwrap();
     assert_eq!(app.session.doc.assembly.joints.len(), 1, "the joint is made about Z");
 }
+
+/// Owner: the saved GIF was slow. It plays at the dialog's Animate speed: 4× is a quarter of
+/// the frames (at the same rate), so a quarter of the time.
+#[test]
+fn the_saved_video_follows_the_animate_speed() {
+    assert_eq!(video_frames(1.0), 60);
+    assert_eq!(video_frames(4.0), 15);
+    assert!(video_frames(16.0) >= 6 && video_frames(0.25) <= 240);
+}
