@@ -1795,6 +1795,16 @@ fn zz_timing_clamp_drive() {
     let _ = solidcraft_doc::joints::solve_holding(&s.doc, &st, &held);
     eprintln!("solve_holding: {:?}", t.elapsed());
     let t = std::time::Instant::now();
+    let id = s.doc.assembly.joints.iter().find(|j| j.name == "J1").unwrap().id;
+    let _ = crate::cmd::motion::drive_joint(&mut s, id, vec![0.2], 1);
+    eprintln!("drive_joint only: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    s.model.evaluate(&s.doc);
+    eprintln!("evaluate after: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    let _ = crate::cmd::motion::positions(&s);
+    eprintln!("positions: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
     run(&mut s, "joint.drive", json!({"joint": "J1", "value": "15 deg"}));
     eprintln!("drive: {:?}", t.elapsed());
 }
