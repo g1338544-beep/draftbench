@@ -133,3 +133,43 @@ fn angle_and_align_mark_their_point_and_angle_takes_a_flat_face_as_its_vector() 
     }
     assert!(inputs(ROTATE)[1].accept & PLANAR_FACES != 0, "the vector may be a flat face");
 }
+
+/// The next Move opens in the type the last one used, with that type's picks (owner's report:
+/// after OK, Move opened as Point to Point with Free's Pivot pick), and Apply keeps the window
+/// as it was: only the bodies clear.
+#[test]
+fn apply_keeps_the_move_type_and_its_points() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    h.settle();
+    h.app.start("solid.move");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.kind = kind(POINT_TO_POINT);
+        d.inputs = inputs(POINT_TO_POINT);
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+        for key in ["from_xyz", "to_xyz"] {
+            d.extra.insert(format!("{key}_pick"), json!("None"));
+        }
+        d.extra.insert("from_xyz".into(), json!(["0 mm", "0 mm", "0 mm"]));
+        d.extra.insert("to_xyz".into(), json!(["10 mm", "0 mm", "0 mm"]));
+    }
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:apply"}})).unwrap();
+    h.frames(3);
+    let x = h.app.session.model.state().body("Body1").unwrap().mesh().bounds().min.x;
+    assert!((x - 10.0).abs() < 1e-6, "Apply moved the box: {x}");
+    let d = h.app.dialog.clone().expect("Apply keeps the window open");
+    assert!(matches!(d.kind, Kind::Move { mode: POINT_TO_POINT, .. }), "still Point to Point");
+    let labels: Vec<_> = d.inputs.iter().map(|i| i.label).collect();
+    assert_eq!(labels, ["Bodies", "From", "To"]);
+    assert_eq!(d.extra.get("to_xyz"), Some(&json!(["10 mm", "0 mm", "0 mm"])), "the To point stays");
+    assert!(d.inputs[0].items.is_empty(), "the bodies clear for the next ones");
+    // The next Move opens as this one was left: Point to Point with its own picks.
+    crate::dialogs::cancel(&mut h.app);
+    h.app.dialog = None;
+    h.app.start("solid.move");
+    let d = h.app.dialog.clone().unwrap();
+    let labels: Vec<_> = d.inputs.iter().map(|i| i.label).collect();
+    assert!(matches!(d.kind, Kind::Move { mode: POINT_TO_POINT, .. }) && labels == ["Bodies", "From", "To"], "{labels:?}");
+}

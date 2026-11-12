@@ -221,7 +221,13 @@ fn tone_colour(c: Color32, tone: [f32; 3]) -> Color32 {
     let (mut h, mut s) = (0.0_f32, 0.0_f32);
     if d > 1e-6 {
         s = d / (1.0 - (2.0 * l - 1.0).abs()).max(1e-6);
-        h = if mx == r { ((g - b) / d).rem_euclid(6.0) } else if mx == g { (b - r) / d + 2.0 } else { (r - g) / d + 4.0 } * 60.0;
+        h = if mx == r {
+            ((g - b) / d).rem_euclid(6.0)
+        } else if mx == g {
+            (b - r) / d + 2.0
+        } else {
+            (r - g) / d + 4.0
+        } * 60.0;
     }
     let h = (h + tone[0]).rem_euclid(360.0);
     let s = (s * tone[1]).clamp(0.0, 1.0);

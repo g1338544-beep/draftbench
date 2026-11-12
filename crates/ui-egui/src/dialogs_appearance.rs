@@ -47,7 +47,8 @@ pub(crate) fn builtin() -> Vec<Look> {
         };
         PbrParameters::new(metallic, roughness, 1.5).ok()
     };
-    let l = |cat: &str, name: &str, c: [u8; 3], o: f64| Look { name: name.into(), category: cat.into(), color: c, opacity: o, pbr: optics(cat, name, o) };
+    let l =
+        |cat: &str, name: &str, c: [u8; 3], o: f64| Look { name: name.into(), category: cat.into(), color: c, opacity: o, pbr: optics(cat, name, o) };
     vec![
         l("Metal", "Aluminum - Satin", [196, 199, 204], 1.0),
         l("Metal", "Steel - Brushed", [160, 164, 170], 1.0),

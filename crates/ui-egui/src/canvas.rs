@@ -170,7 +170,15 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                                 .take(200)
                                 .collect();
                             let others_key = others.iter().fold(0u64, |h, i| h.wrapping_mul(1_000_003).wrapping_add(*i as u64 + 1));
-                            let key = (body.clone(), *index, *mode + if *chain { 10 } else { 0 }, angle.clone(), *flip, face_pt.map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]), (m.triangles.len() as u64) ^ others_key.rotate_left(17));
+                            let key = (
+                                body.clone(),
+                                *index,
+                                *mode + if *chain { 10 } else { 0 },
+                                angle.clone(),
+                                *flip,
+                                face_pt.map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]),
+                                (m.triangles.len() as u64) ^ others_key.rotate_left(17),
+                            );
                             if let Some(cached) = PROBE.with(|c| c.borrow().get(&key).copied()) {
                                 if let Some(v) = cached {
                                     return Some(v);
@@ -180,18 +188,14 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                                 let mut picks = vec![at];
                                 picks.extend(others.iter().filter_map(|i| m.edges.get(*i).map(|e| crate::selection::polyline_mid(e))));
                                 if *chain {
-                                    picks.extend(m.tangent_chain(*index, 2f64.to_radians()).into_iter().filter(|i| *i != *index).filter_map(|i| m.edges.get(i).map(|e| crate::selection::polyline_mid(e))));
+                                    picks.extend(
+                                        m.tangent_chain(*index, 2f64.to_radians())
+                                            .into_iter()
+                                            .filter(|i| *i != *index)
+                                            .filter_map(|i| m.edges.get(i).map(|e| crate::selection::polyline_mid(e))),
+                                    );
                                 }
-                                let probed = solidcraft_engine::doc::ruled_probe_dir(
-                                    b,
-                                    at,
-                                    &picks,
-                                    *mode,
-                                    a,
-                                    dir3,
-                                    *flip,
-                                    face_pt,
-                                );
+                                let probed = solidcraft_engine::doc::ruled_probe_dir(b, at, &picks, *mode, a, dir3, *flip, face_pt);
                                 PROBE.with(|c| {
                                     let mut c = c.borrow_mut();
                                     if c.len() > 64 {
@@ -210,12 +214,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                                     let a = app.session.doc.eval(angle, ValueKind::Angle).unwrap_or(0.0);
                                     face_n * a.cos() + out * a.sin()
                                 }
-                                3 => d
-                                    .inputs
-                                    .get(2)
-                                    .and_then(|i| i.items.first())
-                                    .and_then(|x| crate::dialogs::axis_of(app, x))
-                                    .map_or(out, |a| a.1),
+                                3 => d.inputs.get(2).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map_or(out, |a| a.1),
                                 _ => out,
                             };
                             let dir = if *flip { -dir } else { dir };
@@ -509,7 +508,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
                 painter.circle_filled(s, 5.0, accent);
                 painter.circle_stroke(s, 7.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
                 // The point's distance from the origin along each axis, so it can be read off and typed.
-                painter.text(s + vec2(9.0, -9.0), egui::Align2::LEFT_BOTTOM, format!("{name}  {}", coords_text(*p)), egui::FontId::proportional(Tokens::get().font_body), accent);
+                painter.text(
+                    s + vec2(9.0, -9.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{name}  {}", coords_text(*p)),
+                    egui::FontId::proportional(Tokens::get().font_body),
+                    accent,
+                );
             }
         }
         if let Some(h) = crate::dialogs_move::hover_point(app, &d)
@@ -524,8 +529,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         {
             painter.line_segment([sa, sb], egui::Stroke::new(1.5, accent));
             let (dx, dy, dz) = (b.x - a.x, b.y - a.y, b.z - a.z);
-            let text = format!("Move  X {}  Y {}  Z {}  (length {})", mm_text(dx), mm_text(dy), mm_text(dz), mm_text((dx * dx + dy * dy + dz * dz).sqrt()));
-            painter.text(sa.lerp(sb, 0.5) + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, text, egui::FontId::proportional(Tokens::get().font_body), accent);
+            let text =
+                format!("Move  X {}  Y {}  Z {}  (length {})", mm_text(dx), mm_text(dy), mm_text(dz), mm_text((dx * dx + dy * dy + dz * dz).sqrt()));
+            painter.text(
+                sa.lerp(sb, 0.5) + vec2(8.0, 8.0),
+                egui::Align2::LEFT_TOP,
+                text,
+                egui::FontId::proportional(Tokens::get().font_body),
+                accent,
+            );
         }
         // Read the triad again after the drag, so the box follows it in the same frame. Move
         // types with no triad (Rotate, Point to Point, Point to Position) put the box on the

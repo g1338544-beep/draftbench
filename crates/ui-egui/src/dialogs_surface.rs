@@ -12,7 +12,9 @@ use solidcraft_engine::geom::Vec3;
 
 use crate::SolveApp;
 use crate::dialogs::{Kind, OP_LABELS, OPS, combo, form_row, op_index};
-use crate::selection::{AXES, BODIES, CURVES, EDGES, FACES, ORIGIN, PLANES, PROFILES, SelInput, SelectionExt as _, VERTICES, items, point_value as pt};
+use crate::selection::{
+    AXES, BODIES, CURVES, EDGES, FACES, ORIGIN, PLANES, PROFILES, SelInput, SelectionExt as _, VERTICES, items, point_value as pt,
+};
 use crate::ui_kit;
 
 crate::dialog_descriptor::dialog_descriptors! {
@@ -203,7 +205,14 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             SelInput::new("Keep of the other surface", FACES, true).places(),
         ],
         Surf::Untrim { .. } => vec![SelInput::new("Face", FACES, false), SelInput::new("Holes (edges on them)", EDGES, true)],
-        Surf::SplitFace => vec![SelInput::new("1. Faces to divide (click the faces)", FACES, true), SelInput::new("2. What divides them: click a plane, a face of another body that cuts through, or sketch curves", PLANES | FACES | CURVES, false)],
+        Surf::SplitFace => vec![
+            SelInput::new("1. Faces to divide (click the faces)", FACES, true),
+            SelInput::new(
+                "2. What divides them: click a plane, a face of another body that cuts through, or sketch curves",
+                PLANES | FACES | CURVES,
+                false,
+            ),
+        ],
         _ => k.simple_inputs(),
     }
 }
@@ -1122,7 +1131,13 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 (None, None) => tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
             };
             (
-                Surf::Trim { extend: *extend, stitch: *stitch, direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)), remove: *remove, mutual: with.is_some() },
+                Surf::Trim {
+                    extend: *extend,
+                    stitch: *stitch,
+                    direction: curves.as_ref().and_then(|c| c.direction.map(|d| d.0)),
+                    remove: *remove,
+                    mutual: with.is_some(),
+                },
                 vec![
                     vec![Sel::Body { name: body.to_string() }],
                     tools,

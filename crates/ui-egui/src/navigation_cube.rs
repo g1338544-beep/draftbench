@@ -201,7 +201,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             .on_hover_text(format!("{} view. Drag to orbit{}.", face.label, if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }));
         if ui.input(|i| i.pointer.primary_clicked()) {
             // A moved WCS: look along the face's WCS direction, given back in the cube's own frame.
-            let dir = if CUBE_WCS.with(std::cell::Cell::get).is_some() { app.cam.to_frame(cube_world(&app.cam, face.direction)) } else { face.direction };
+            let dir =
+                if CUBE_WCS.with(std::cell::Cell::get).is_some() { app.cam.to_frame(cube_world(&app.cam, face.direction)) } else { face.direction };
             navigate(app, None, Some(dir));
         }
     }

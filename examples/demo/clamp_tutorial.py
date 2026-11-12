@@ -79,7 +79,7 @@ def open_as_built(d):
 
 
 def joint(d, step, a, a_name, b, b_name, pin, pin_name):
-    d.caption(f"{step}. Components: คลิก {a_name} แล้วคลิก {b_name} (สองชิ้นที่ต่อกัน)", "")
+    d.caption(f"{step}. Fixed part: คลิก {a_name} (ชิ้นที่อยู่กับที่)  Moving part: คลิก {b_name} (ชิ้นที่ขยับ)", "")
     d.click(d.at(world=a), settle=0.6)
     d.click(d.at(world=b), settle=0.8)
     d.wait(0.6)

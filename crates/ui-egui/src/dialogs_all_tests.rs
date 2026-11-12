@@ -48,7 +48,7 @@ fn representative(h: &Harness, command: &str) -> Dialog {
                 vec![profiles[0].clone()]
             }
         } else if input.accept & BODIES != 0 {
-            if matches!(command, "joint.as_built" | "joint.rigid_group") {
+            if command == "joint.rigid_group" {
                 vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Body2".into() }]
             } else {
                 vec![Sel::Body { name: name.into() }]

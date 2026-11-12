@@ -127,7 +127,15 @@ pub enum Mod {
 
 impl Mod {
     pub fn previews(&self) -> bool {
-        matches!(self, Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. } | Self::ProjectCurve { .. })
+        matches!(
+            self,
+            Self::Mirror
+                | Self::PatternRect { .. }
+                | Self::PatternCirc { .. }
+                | Self::Offset { .. }
+                | Self::Corner { .. }
+                | Self::ProjectCurve { .. }
+        )
     }
 
     pub fn title(&self) -> &'static str {
@@ -165,7 +173,10 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         Mod::Offset { .. } => vec![SelInput::new("Curves", CURVES, true)],
         Mod::ProjectCurve { .. } => {
             // Sketch curves (2D) and edges of the model (3D) both project.
-            vec![SelInput::new("Curves to project", CURVES | EDGES, true), SelInput::new("Objects to project to (faces, a body or a plane)", FACES | BODIES | PLANES, true)]
+            vec![
+                SelInput::new("Curves to project", CURVES | EDGES, true),
+                SelInput::new("Objects to project to (faces, a body or a plane)", FACES | BODIES | PLANES, true),
+            ]
         }
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Mirror line", AXES, false)],
@@ -877,7 +888,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 let state = app.session.world_state();
                 let mut refs: Vec<Value> = Vec::new();
                 if !curves.is_empty() {
-                    let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
+                    let holding: Vec<u64> =
+                        state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
                     let picked = extra.get("tool_sketch").and_then(Value::as_u64);
                     let sketch = match picked {
                         Some(k) if holding.contains(&k) => k,
@@ -903,7 +915,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             };
             if let Some(body) = whole {
                 let state = app.session.world_state();
-                let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
+                let holding: Vec<u64> =
+                    state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
                 let direction = if *dir == 0 { "normal" } else { "sketch" };
                 // Model edges (alone or with curves): copied flat into a sketch facing the view, then that sketch's
                 // curves are projected onto every face of the body.
@@ -986,7 +999,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 let state = app.session.world_state();
                 let mut refs: Vec<Value> = Vec::new();
                 if !curves.is_empty() {
-                    let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
+                    let holding: Vec<u64> =
+                        state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
                     let picked = extra.get("tool_sketch").and_then(Value::as_u64);
                     let sketch = match picked {
                         Some(k) if holding.contains(&k) => k,
@@ -998,7 +1012,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 refs.extend(edges.iter().map(|(b, p)| json!({"edge": [p.x, p.y, p.z], "body": b})));
                 let project = json!({"refs": refs});
                 return Ok(finish_first(vec![
-                    ("sketch.create".to_string(), json!({"plane": {"face": [point.x, point.y, point.z], "body": body, "index": index}, "name": "Projected curves", "role": "curve"})),
+                    (
+                        "sketch.create".to_string(),
+                        json!({"plane": {"face": [point.x, point.y, point.z], "body": body, "index": index}, "name": "Projected curves", "role": "curve"}),
+                    ),
                     ("sketch.project".to_string(), project),
                     ("sketch.finish".to_string(), json!({})),
                 ]));
@@ -1017,13 +1034,15 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 let direction = if *dir == 0 { "normal" } else { "sketch" };
                 let n = state.sketches.len() + 1;
                 let faces: Vec<Value> = face_points.iter().map(|q| json!([q.x, q.y, q.z])).collect();
-                let mut steps = vec![("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"}))];
+                let mut steps =
+                    vec![("sketch.create".to_string(), json!({"plane": plane, "name": format!("Projected curves {n}"), "role": "curve"}))];
                 steps.push((
                     "sketch.project_to_surface".to_string(),
                     json!({"edges": refs, "faces": faces, "body": body, "direction": direction, "associative": associative}),
                 ));
                 if !curves.is_empty() {
-                    let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
+                    let holding: Vec<u64> =
+                        state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
                     let picked = extra.get("tool_sketch").and_then(Value::as_u64);
                     let sketch = match picked {
                         Some(k) if holding.contains(&k) => k,
@@ -1041,7 +1060,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             // The sketch the curves belong to: the one a pick came from, else the only one holding them.
             let state = app.session.world_state();
-            let holding: Vec<u64> = state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
+            let holding: Vec<u64> =
+                state.sketches.iter().filter(|s| curves.iter().all(|c| s.sketch.curve_index(c).is_some())).map(|s| s.feature).collect();
             let picked = extra.get("tool_sketch").and_then(Value::as_u64);
             let sketch = match picked {
                 Some(k) if holding.contains(&k) => k,

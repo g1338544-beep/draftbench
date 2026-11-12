@@ -6,8 +6,8 @@ use egui::{Align2, FontId, Painter, Pos2, Rect, Stroke};
 use serde_json::json;
 use solidcraft_engine::geom::Vec3;
 
-use crate::viewport::{Hit, Proj};
 use crate::SolveApp;
+use crate::viewport::{Hit, Proj};
 
 /// A rotation handle being turned: about axis `k`, in the plane of the other two as they stood when
 /// the press happened.
@@ -96,15 +96,16 @@ pub fn angle_window(app: &mut SolveApp, ctx: &egui::Context) {
     let name = ["XC", "YC", "ZC"].get(e.k).copied().unwrap_or("ZC");
     let title = format!("Turn about {name}");
     let mut commit = false;
-    let (closed, _) = crate::ui_kit::Window::new(egui::Id::new("sc_wcs_angle"), "settings", &title).actions("", "Close", None).show(ctx, true, |ui| {
-        crate::ui_kit::row(ui, crate::i18n::tr_label("Angle"), |ui| {
-            let (enter, _) = crate::ui_kit::text_field(ui, &mut e.angle, "deg");
-            commit |= enter;
+    let (closed, _) =
+        crate::ui_kit::Window::new(egui::Id::new("sc_wcs_angle"), "settings", &title).actions("", "Close", None).show(ctx, true, |ui| {
+            crate::ui_kit::row(ui, crate::i18n::tr_label("Angle"), |ui| {
+                let (enter, _) = crate::ui_kit::text_field(ui, &mut e.angle, "deg");
+                commit |= enter;
+            });
+            crate::ui_kit::row(ui, "Snap", |ui| {
+                crate::ui_kit::text_field(ui, &mut e.snap, "deg");
+            });
         });
-        crate::ui_kit::row(ui, "Snap", |ui| {
-            crate::ui_kit::text_field(ui, &mut e.snap, "deg");
-        });
-    });
     if let Some(step) = crate::wcs_rotate::parse_angle(&e.snap).filter(|v| *v > 0.0 && *v <= 180.0) {
         SNAP_DEG.with(|s| s.set(step));
     }
@@ -544,14 +545,20 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
         if v.length() > 1.0 {
             let u = v / v.length();
             let side = egui::vec2(-u.y, u.x);
-            painter.add(egui::Shape::convex_polygon(vec![tip + u * 7.0, tip - u * 4.0 + side * 4.5, tip - u * 4.0 - side * 4.5], colour, Stroke::NONE));
+            painter.add(egui::Shape::convex_polygon(
+                vec![tip + u * 7.0, tip - u * 4.0 + side * 4.5, tip - u * 4.0 - side * 4.5],
+                colour,
+                Stroke::NONE,
+            ));
         }
         painter.text(tip + v / v.length().max(1.0) * 12.0, Align2::CENTER_CENTER, label, FontId::proportional(13.0), colour);
     }
     let orange = egui::Color32::from_rgb(240, 150, 40);
     // Rotation handles: an arc between each pair of axes with a dot in the middle; dragging the dot
     // turns the WCS about the third axis (45° steps, Alt for free turning).
-    for (k, colour) in [(0usize, egui::Color32::from_rgb(220, 70, 70)), (1, egui::Color32::from_rgb(70, 170, 70)), (2, egui::Color32::from_rgb(70, 110, 230))] {
+    for (k, colour) in
+        [(0usize, egui::Color32::from_rgb(220, 70, 70)), (1, egui::Color32::from_rgb(70, 170, 70)), (2, egui::Color32::from_rgb(70, 110, 230))]
+    {
         let (a, b) = plane_axes(&w, k);
         let r = len * 0.6;
         let pts: Vec<Pos2> = (0..=16)
@@ -569,7 +576,13 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
         }
     }
     if let Some((at, angle)) = ROT_READ.with(Cell::get) {
-        painter.text(at + egui::vec2(14.0, -14.0), Align2::LEFT_BOTTOM, format!("Angle {angle:.1}°   Snap {:.0}°  (Alt: free)", snap_deg()), FontId::proportional(13.0), orange);
+        painter.text(
+            at + egui::vec2(14.0, -14.0),
+            Align2::LEFT_BOTTOM,
+            format!("Angle {angle:.1}°   Snap {:.0}°  (Alt: free)", snap_deg()),
+            FontId::proportional(13.0),
+            orange,
+        );
     }
     // The picked axis: a ring on its tip; and the WCS as it would stand under the pointer.
     if let Some(k) = ARMED.with(Cell::get) {
@@ -583,12 +596,24 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
             for (d, label) in ghost {
                 if let Some(tip) = proj.to_screen(next.origin + d * len) {
                     painter.line_segment([o, tip], Stroke::new(2.0, orange));
-                    painter.text(tip + (tip - o) / (tip - o).length().max(1.0) * 10.0, Align2::CENTER_CENTER, label, FontId::proportional(12.0), orange);
+                    painter.text(
+                        tip + (tip - o) / (tip - o).length().max(1.0) * 10.0,
+                        Align2::CENTER_CENTER,
+                        label,
+                        FontId::proportional(12.0),
+                        orange,
+                    );
                 }
             }
             painter.text(o + egui::vec2(14.0, 14.0), Align2::LEFT_TOP, format!("click: axis follows the {what}"), FontId::proportional(12.0), orange);
         } else {
-            painter.text(o + egui::vec2(14.0, 14.0), Align2::LEFT_TOP, "move over a face or a straight edge (Esc ends)", FontId::proportional(12.0), orange);
+            painter.text(
+                o + egui::vec2(14.0, 14.0),
+                Align2::LEFT_TOP,
+                "move over a face or a straight edge (Esc ends)",
+                FontId::proportional(12.0),
+                orange,
+            );
         }
     }
     if PICK_ORIGIN.with(Cell::get) {
@@ -607,7 +632,13 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
             painter.circle_filled(q, 3.5, orange);
             painter.text(q + egui::vec2(12.0, -12.0), Align2::LEFT_BOTTOM, what, FontId::proportional(12.0), orange);
         }
-        painter.text(o + egui::vec2(14.0, 14.0), Align2::LEFT_TOP, "click a point, a circle or a middle to put the origin there (Esc ends)", FontId::proportional(12.0), orange);
+        painter.text(
+            o + egui::vec2(14.0, 14.0),
+            Align2::LEFT_TOP,
+            "click a point, a circle or a middle to put the origin there (Esc ends)",
+            FontId::proportional(12.0),
+            orange,
+        );
     }
     painter.circle_filled(o, 6.0, orange);
     painter.circle_stroke(o, 6.0, Stroke::new(1.5, egui::Color32::WHITE));

@@ -36,33 +36,35 @@ pub fn parse_angle(text: &str) -> Option<f64> {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut w) = app.wcs_rotate.take() else { return };
     let mut turn: Option<f64> = None;
-    let (closed, _) = ui_kit::Window::new(egui::Id::new("sc_wcs_rotate"), "settings", crate::i18n::tr_label("Rotate WCS")).actions("", "Close", None).show(ctx, true, |ui| {
-        ui.horizontal(|ui| {
-            for (i, (name, _)) in AXES.iter().enumerate() {
-                if ui.selectable_label(w.axis == i, *name).clicked() {
-                    w.axis = i;
+    let (closed, _) = ui_kit::Window::new(egui::Id::new("sc_wcs_rotate"), "settings", crate::i18n::tr_label("Rotate WCS"))
+        .actions("", "Close", None)
+        .show(ctx, true, |ui| {
+            ui.horizontal(|ui| {
+                for (i, (name, _)) in AXES.iter().enumerate() {
+                    if ui.selectable_label(w.axis == i, *name).clicked() {
+                        w.axis = i;
+                    }
+                }
+            });
+            ui_kit::row(ui, crate::i18n::tr_label("Angle"), |ui| ui_kit::text_field(ui, &mut w.angle, "deg"));
+            let angle = parse_angle(&w.angle);
+            ui.horizontal(|ui| {
+                if ui_kit::button(ui, "Rotate  −", ui_kit::Button::Enabled(angle.is_some())).clicked() {
+                    turn = angle.map(|a| -a);
+                }
+                if ui_kit::button(ui, "Rotate  +", ui_kit::Button::Enabled(angle.is_some())).clicked() {
+                    turn = angle;
+                }
+            });
+            for quick in [15.0, 45.0, 90.0, 180.0] {
+                if ui_kit::button(ui, &format!("{quick}°"), ui_kit::Button::Small).clicked() {
+                    w.angle = format!("{quick}");
                 }
             }
-        });
-        ui_kit::row(ui, crate::i18n::tr_label("Angle"), |ui| ui_kit::text_field(ui, &mut w.angle, "deg"));
-        let angle = parse_angle(&w.angle);
-        ui.horizontal(|ui| {
-            if ui_kit::button(ui, "Rotate  −", ui_kit::Button::Enabled(angle.is_some())).clicked() {
-                turn = angle.map(|a| -a);
-            }
-            if ui_kit::button(ui, "Rotate  +", ui_kit::Button::Enabled(angle.is_some())).clicked() {
-                turn = angle;
+            if let Some(e) = &w.error {
+                ui_kit::text(ui, e, ui_kit::Text::Report("error", true));
             }
         });
-        for quick in [15.0, 45.0, 90.0, 180.0] {
-            if ui_kit::button(ui, &format!("{quick}°"), ui_kit::Button::Small).clicked() {
-                w.angle = format!("{quick}");
-            }
-        }
-        if let Some(e) = &w.error {
-            ui_kit::text(ui, e, ui_kit::Text::Report("error", true));
-        }
-    });
     w.error = None;
     if let Some(a) = turn {
         let id = AXES.get(w.axis).map_or("wcs.rotate_z", |(_, c)| c);

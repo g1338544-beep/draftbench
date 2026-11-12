@@ -34,32 +34,34 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let layers: Vec<(String, usize, bool)> = app.session.visibility.layers.iter().map(|l| (l.name.clone(), l.items.len(), l.visible)).collect();
     let selected = crate::context_menu::selected_names(app);
     let mut todo: Vec<(&str, serde_json::Value)> = Vec::new();
-    let (closed, _) = ui_kit::Window::new(egui::Id::new("sc_layer_window"), "settings", crate::i18n::tr_label("Layer Settings")).actions("", "Close", None).show(ctx, true, |ui| {
-        if layers.is_empty() {
-            ui_kit::text(ui, "No layers yet. Select objects and make a new layer from them.", ui_kit::Text::Note("layers_empty"));
-        }
-        for (name, count, visible) in &layers {
-            ui.horizontal(|ui| {
-                let mut on = *visible;
-                if ui_kit::checkbox(ui, &format!("{name} ({count})"), &mut on).changed() {
-                    todo.push(("layer.visibility", json!({"name": name, "visible": on})));
-                }
-                if ui_kit::button(ui, "Move here", ui_kit::Button::Enabled(!selected.is_empty())).clicked() {
-                    todo.push(("layer.assign", json!({"name": name, "items": selected})));
-                }
-                if ui_kit::button(ui, "Delete", ui_kit::Button::Small).clicked() {
-                    todo.push(("layer.delete", json!({"name": name})));
-                }
-            });
-        }
-        ui_kit::row(ui, crate::i18n::tr_label("Name"), |ui| ui_kit::text_field(ui, &mut w.name, ""));
-        if ui_kit::button(ui, "New Layer", ui_kit::Button::Enabled(!w.name.trim().is_empty())).clicked() {
-            todo.push(("layer.create", json!({"name": w.name.trim(), "items": selected})));
-        }
-        if let Some(e) = &w.error {
-            ui_kit::text(ui, e, ui_kit::Text::Report("error", true));
-        }
-    });
+    let (closed, _) = ui_kit::Window::new(egui::Id::new("sc_layer_window"), "settings", crate::i18n::tr_label("Layer Settings"))
+        .actions("", "Close", None)
+        .show(ctx, true, |ui| {
+            if layers.is_empty() {
+                ui_kit::text(ui, "No layers yet. Select objects and make a new layer from them.", ui_kit::Text::Note("layers_empty"));
+            }
+            for (name, count, visible) in &layers {
+                ui.horizontal(|ui| {
+                    let mut on = *visible;
+                    if ui_kit::checkbox(ui, &format!("{name} ({count})"), &mut on).changed() {
+                        todo.push(("layer.visibility", json!({"name": name, "visible": on})));
+                    }
+                    if ui_kit::button(ui, "Move here", ui_kit::Button::Enabled(!selected.is_empty())).clicked() {
+                        todo.push(("layer.assign", json!({"name": name, "items": selected})));
+                    }
+                    if ui_kit::button(ui, "Delete", ui_kit::Button::Small).clicked() {
+                        todo.push(("layer.delete", json!({"name": name})));
+                    }
+                });
+            }
+            ui_kit::row(ui, crate::i18n::tr_label("Name"), |ui| ui_kit::text_field(ui, &mut w.name, ""));
+            if ui_kit::button(ui, "New Layer", ui_kit::Button::Enabled(!w.name.trim().is_empty())).clicked() {
+                todo.push(("layer.create", json!({"name": w.name.trim(), "items": selected})));
+            }
+            if let Some(e) = &w.error {
+                ui_kit::text(ui, e, ui_kit::Text::Report("error", true));
+            }
+        });
     w.error = None;
     for (id, params) in todo {
         if let Err(e) = app.run(id, params) {
@@ -97,4 +99,3 @@ mod tests {
         assert_eq!(h.app.session.visibility.layers.len(), 1);
     }
 }
-

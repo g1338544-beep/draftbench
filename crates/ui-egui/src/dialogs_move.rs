@@ -260,8 +260,16 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
         }
         ALIGN_AXIS => {
             let flip = |key: &str, v: Vec3| if d.extra.get(key).and_then(Value::as_bool).unwrap_or(false) { -v } else { v };
-            let from = items(d, 1).first().and_then(|s| vector_of(app, s)).map(|v| flip("reverse_from", v)).ok_or("select the From vector first (an axis, a straight edge or a flat face)")?;
-            let to = items(d, 3).first().and_then(|s| vector_of(app, s)).map(|v| flip("reverse_to", v)).ok_or("select the To vector first (an axis, a straight edge or a flat face)")?;
+            let from = items(d, 1)
+                .first()
+                .and_then(|s| vector_of(app, s))
+                .map(|v| flip("reverse_from", v))
+                .ok_or("select the From vector first (an axis, a straight edge or a flat face)")?;
+            let to = items(d, 3)
+                .first()
+                .and_then(|s| vector_of(app, s))
+                .map(|v| flip("reverse_to", v))
+                .ok_or("select the To vector first (an axis, a straight edge or a flat face)")?;
             let piv = sel_point(app, items(d, 2).first()).or_else(|| bodies_center(app, d)).ok_or("select bodies first")?;
             let (axis, th) = align_turn(from, to).ok_or("the vectors need a direction")?;
             let r = gizmo::rotation(axis, th);

@@ -989,32 +989,33 @@ fn tab_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let mut start: Option<&'static str> = None;
     let mut toggle: Option<&'static str> = None;
     let here = app.ui.tab.clone();
-    let area = Container::new(ctx, Surface::Popup).area(egui::Id::new("sc_tab_menu_area")).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| {
-        section_frame(ui).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.set_min_width(200.0);
-            let row_w = dropdown_width(app, ui, &all);
-            ui.set_width(row_w);
-            let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
-            egui::ScrollArea::vertical().id_salt("tab_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
-                for (panel, cmds, _) in &lists {
-                    if cmds.is_empty() {
-                        continue;
-                    }
-                    section_heading(ui, app.tr_label(panel), row_w);
-                    for c in cmds {
-                        let pinned = crate::toolbar_custom::pinned_on(app, &here, c.id).is_some();
-                        match dropdown_row(app, ui, c, row_w, pinned) {
-                            RowAction::Start => start = Some(c.id),
-                            RowAction::TogglePin => toggle = Some(c.id),
-                            RowAction::Menu(_) | RowAction::None => {}
+    let area =
+        Container::new(ctx, Surface::Popup).area(egui::Id::new("sc_tab_menu_area")).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| {
+            section_frame(ui).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.set_min_width(200.0);
+                let row_w = dropdown_width(app, ui, &all);
+                ui.set_width(row_w);
+                let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
+                egui::ScrollArea::vertical().id_salt("tab_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
+                    for (panel, cmds, _) in &lists {
+                        if cmds.is_empty() {
+                            continue;
+                        }
+                        section_heading(ui, app.tr_label(panel), row_w);
+                        for c in cmds {
+                            let pinned = crate::toolbar_custom::pinned_on(app, &here, c.id).is_some();
+                            match dropdown_row(app, ui, c, row_w, pinned) {
+                                RowAction::Start => start = Some(c.id),
+                                RowAction::TogglePin => toggle = Some(c.id),
+                                RowAction::Menu(_) | RowAction::None => {}
+                            }
                         }
                     }
-                }
+                });
+                section_footer(ui);
             });
-            section_footer(ui);
         });
-    });
     crate::scenario::publish_rect("tab_menu", area.response.rect);
     if let Some(id) = toggle {
         crate::toolbar_custom::toggle(app, &here, id);
@@ -1028,7 +1029,10 @@ fn tab_menu(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(id) = start {
         tab_menu_close(ctx);
         app.start(id);
-    } else if dropped || ctx.input(|i| i.key_pressed(egui::Key::Escape)) || (area.response.clicked_elsewhere() && !dragging && !ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y < at.y))) {
+    } else if dropped
+        || ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        || (area.response.clicked_elsewhere() && !dragging && !ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y < at.y)))
+    {
         tab_menu_close(ctx);
     }
 }
@@ -1341,8 +1345,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let selected = family.and_then(|f| app.preferences.sketch_variants.selected(f)).unwrap_or(c);
                 let free_key = format!("{tab}/{}", c.id);
                 let moved = app.toolbar_custom.offsets.get(&free_key).copied().unwrap_or([0.0, 0.0]);
-                let whole = Rect::from_min_size(pos2(button_x, top + 2.0 + row_inset + row as f32 * (button_height + 1.0)), vec2(button_width, button_height))
-                    .translate(vec2(moved[0], moved[1]));
+                let whole = Rect::from_min_size(
+                    pos2(button_x, top + 2.0 + row_inset + row as f32 * (button_height + 1.0)),
+                    vec2(button_width, button_height),
+                )
+                .translate(vec2(moved[0], moved[1]));
                 let mut br = whole;
                 if family.is_some() {
                     if labels {
@@ -1394,7 +1401,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.rect_filled(whole, t.radius_sm, t.hover);
                 }
                 let icon = if selected.id == "sketch.finish" { "finish" } else { selected.icon };
-                let side = if icon_rows > 1 { 22.0 } else if finish { 30.0 } else { 26.0 };
+                let side = if icon_rows > 1 {
+                    22.0
+                } else if finish {
+                    30.0
+                } else {
+                    26.0
+                };
                 let icon_rect =
                     Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
                 icons::paint_icon(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });
@@ -1553,7 +1566,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 })
             });
             if !over_button && ui.rect_contains_pointer(panel_rect) && egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()).is_some() {
-                painter.line_segment([pos2(px + width - 4.0, top + 4.0), pos2(px + width - 4.0, top + 2.0 + grid_height.max(36.0))], Stroke::new(2.0, t.accent));
+                painter.line_segment(
+                    [pos2(px + width - 4.0, top + 4.0), pos2(px + width - 4.0, top + 2.0 + grid_height.max(36.0))],
+                    Stroke::new(2.0, t.accent),
+                );
                 if ui.input(|input| input.pointer.any_released())
                     && let Some(d) = egui::DragAndDrop::take_payload::<ToolbarDrag>(ui.ctx())
                 {
@@ -2670,8 +2686,18 @@ mod home_tests {
             let name = if cmd { format!("Ctrl+{key}") } else { key.to_string() };
             actions.push((name, Box::new(move |h| drop(h.call("ui.key", json!({"key": key, "cmd": cmd}))))));
         }
-        for item in ["Insert STEP…", "Insert Mesh…", "Save", "Save As…", "Export STL…", "Export STEP…", "Export IGES…", "Export 3MF…", "Export OBJ…", "Export URDF…"]
-        {
+        for item in [
+            "Insert STEP…",
+            "Insert Mesh…",
+            "Save",
+            "Save As…",
+            "Export STL…",
+            "Export STEP…",
+            "Export IGES…",
+            "Export 3MF…",
+            "Export OBJ…",
+            "Export URDF…",
+        ] {
             actions.push((
                 format!("File › {item}"),
                 Box::new(move |h| {

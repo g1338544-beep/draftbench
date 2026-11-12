@@ -488,7 +488,10 @@ thread_local! {
 
 /// `mesh` with each thread's round face replaced by its teeth ([`thread_view`]): the face's
 /// triangles left out, the teeth (and the plain rest of the face) added on that face.
-fn threaded_mesh(mesh: std::sync::Arc<solidcraft_engine::geom::Mesh>, threads: &[&solidcraft_engine::doc::ThreadInfo]) -> std::sync::Arc<solidcraft_engine::geom::Mesh> {
+fn threaded_mesh(
+    mesh: std::sync::Arc<solidcraft_engine::geom::Mesh>,
+    threads: &[&solidcraft_engine::doc::ThreadInfo],
+) -> std::sync::Arc<solidcraft_engine::geom::Mesh> {
     use solidcraft_engine::doc::thread_view;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     serde_json::to_string(threads).unwrap_or_default().hash(&mut h);
@@ -4485,8 +4488,15 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             // The part colour as a swatch with a line under it as thick as the edges.
             let sw = br.shrink(6.0);
             let col = parse_hex_colour(&app.preferences.part_colour).map_or(t.body, |c| egui::Color32::from_rgb(c[0], c[1], c[2]));
-            painter.rect(Rect::from_min_size(sw.min, vec2(sw.width(), sw.height() - 5.0)), 2.0, col, Stroke::new(1.0, t.icon), egui::StrokeKind::Inside);
-            painter.line_segment([pos2(sw.left(), sw.bottom() - 1.0), pos2(sw.right(), sw.bottom() - 1.0)], Stroke::new(edge_width().min(4.0), t.icon));
+            painter.rect(
+                Rect::from_min_size(sw.min, vec2(sw.width(), sw.height() - 5.0)),
+                2.0,
+                col,
+                Stroke::new(1.0, t.icon),
+                egui::StrokeKind::Inside,
+            );
+            painter
+                .line_segment([pos2(sw.left(), sw.bottom() - 1.0), pos2(sw.right(), sw.bottom() - 1.0)], Stroke::new(edge_width().min(4.0), t.icon));
         } else {
             icons::paint_icon(&painter, br.shrink(4.0), icon, f32::from(t.icon.a()) / 255.0);
         }
@@ -4593,7 +4603,9 @@ pub(crate) fn picked_parts(app: &SolveApp) -> (Vec<String>, Vec<u64>) {
         .selection
         .iter()
         .filter_map(|x| match x {
-            solidcraft_engine::Sel::Occurrence { path } => path.last().and_then(|id| app.session.doc.occurrences.iter().find(|o| o.id == *id)).map(|o| o.component),
+            solidcraft_engine::Sel::Occurrence { path } => {
+                path.last().and_then(|id| app.session.doc.occurrences.iter().find(|o| o.id == *id)).map(|o| o.component)
+            }
             _ => None,
         })
         .collect();
@@ -4620,7 +4632,13 @@ fn look_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
                     let (r, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
                     let hex = format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
                     let chosen = app.preferences.part_colour.eq_ignore_ascii_case(&hex);
-                    ui.painter().rect(r, 4.0, egui::Color32::from_rgb(c[0], c[1], c[2]), Stroke::new(if chosen { 2.5 } else { 1.0 }, if chosen { t.accent } else { t.border }), egui::StrokeKind::Inside);
+                    ui.painter().rect(
+                        r,
+                        4.0,
+                        egui::Color32::from_rgb(c[0], c[1], c[2]),
+                        Stroke::new(if chosen { 2.5 } else { 1.0 }, if chosen { t.accent } else { t.border }),
+                        egui::StrokeKind::Inside,
+                    );
                     crate::scenario::publish_handle(&format!("look:swatch:{k}"), r.center());
                     if resp.on_hover_text(&hex).clicked() {
                         paint_part(app, hex);
@@ -4633,7 +4651,9 @@ fn look_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
                 if ui.color_edit_button_srgb(&mut rgb).changed() {
                     paint_part(app, format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]));
                 }
-                if !app.preferences.part_colour.is_empty() && crate::ui_kit::button(ui, crate::i18n::tr_label("Theme"), crate::ui_kit::Button::Small).clicked() {
+                if !app.preferences.part_colour.is_empty()
+                    && crate::ui_kit::button(ui, crate::i18n::tr_label("Theme"), crate::ui_kit::Button::Small).clicked()
+                {
                     app.preferences.part_colour.clear();
                 }
             });
@@ -4646,7 +4666,13 @@ fn look_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
                 if chosen || resp.hovered() {
                     ui.painter().rect_filled(r, 3.0, if chosen { t.accent_soft } else { t.hover });
                 }
-                ui.painter().text(r.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, format!("{mm:.2} mm"), egui::FontId::proportional(t.font_body), t.text);
+                ui.painter().text(
+                    r.left_center() + vec2(6.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    format!("{mm:.2} mm"),
+                    egui::FontId::proportional(t.font_body),
+                    t.text,
+                );
                 ui.painter().line_segment([pos2(r.left() + 80.0, r.center().y), pos2(r.right() - 8.0, r.center().y)], Stroke::new(px, t.text));
                 crate::scenario::publish_handle(&format!("look:weight:{k}"), r.center());
                 if resp.clicked() {

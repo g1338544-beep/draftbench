@@ -262,8 +262,8 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
                     app.run("sketch.spline3d", json!({ "points": q }))
                 } else {
                     match (on_plane(app, a), on_plane(app, p)) {
-                    (Some(qa), Some(qb)) => app.run("sketch.line", json!({"points": [[qa.x, qa.y], [qb.x, qb.y]], "infer": true})),
-                    _ => app.run("sketch.line3d", json!({"points": [[a.x, a.y, a.z], [p.x, p.y, p.z]]})),
+                        (Some(qa), Some(qb)) => app.run("sketch.line", json!({"points": [[qa.x, qa.y], [qb.x, qb.y]], "infer": true})),
+                        _ => app.run("sketch.line3d", json!({"points": [[a.x, a.y, a.z], [p.x, p.y, p.z]]})),
                     }
                 };
                 report(app, r);
@@ -371,12 +371,21 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             painter.circle_stroke(at, 9.0, Stroke::new(if on { 2.0 } else { 1.0 }, col));
             painter.text(at, egui::Align2::CENTER_CENTER, name, egui::FontId::proportional(tk.font_small), col);
             if on {
-                painter.text(o + vec2(12.0, -26.0), egui::Align2::LEFT_BOTTOM, format!("{name} axis"), egui::FontId::proportional(tk.font_small), col);
+                painter.text(
+                    o + vec2(12.0, -26.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{name} axis"),
+                    egui::FontId::proportional(tk.font_small),
+                    col,
+                );
             }
         }
     }
     let (arc_on, _, t0) = ARC.with(|x| *x.borrow());
-    let arc = (t.cmd == "sketch.line" && arc_on).then_some(()).and_then(|()| Some((pts.last().copied()?, t0?, hover?.0))).and_then(|(a, t0, h)| arc3d(a, t0, h));
+    let arc = (t.cmd == "sketch.line" && arc_on)
+        .then_some(())
+        .and_then(|()| Some((pts.last().copied()?, t0?, hover?.0)))
+        .and_then(|(a, t0, h)| arc3d(a, t0, h));
     if let Some((curve, _)) = arc {
         let mut poly: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
         poly.extend(curve.into_iter().filter_map(|p| proj.to_screen(p)));

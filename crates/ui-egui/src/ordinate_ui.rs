@@ -107,7 +107,8 @@ impl OrdState {
             self.drag_bend = true;
             return true;
         }
-        let at_end = |i: usize| self.items.get(i).is_some_and(|(p, axis, level, ang, jog)| (end_of(*p, *axis, *level, *ang, *jog) - s).length() <= tol);
+        let at_end =
+            |i: usize| self.items.get(i).is_some_and(|(p, axis, level, ang, jog)| (end_of(*p, *axis, *level, *ang, *jog) - s).length() <= tol);
         let pick = self.sel.filter(|i| at_end(*i)).or_else(|| (0..self.items.len()).rev().find(|i| at_end(*i)));
         // Or anywhere along the leader (while the tool is on or it is selected): the end then follows the
         // pointer, so the leader stretches, shortens and leans freely.
@@ -175,7 +176,11 @@ impl OrdState {
     /// The saved form, which is also what the engine takes (`null` while there is no datum).
     pub fn to_json(&self) -> Value {
         let Some(o) = self.origin else { return Value::Null };
-        let items: Vec<Value> = self.items.iter().map(|(p, axis, at, ang, jog)| json!({"p": [p.x, p.y], "axis": if *axis == 1 { "y" } else { "x" }, "at": at, "ang": ang, "jog": jog})).collect();
+        let items: Vec<Value> = self
+            .items
+            .iter()
+            .map(|(p, axis, at, ang, jog)| json!({"p": [p.x, p.y], "axis": if *axis == 1 { "y" } else { "x" }, "at": at, "ang": ang, "jog": jog}))
+            .collect();
         json!({"o": [o.x, o.y], "items": items})
     }
 
@@ -197,7 +202,10 @@ impl OrdState {
         self.set = [true; 2];
         if let Some(list) = v.get("items").and_then(Value::as_array) {
             for it in list.iter().take(MAX_ORDINATES) {
-                let (Some(p), Some(at)) = (it.get("p").and_then(pt), it.get("at").and_then(Value::as_f64).filter(|a| a.is_finite() && a.abs() < 1e5)) else { continue };
+                let (Some(p), Some(at)) = (it.get("p").and_then(pt), it.get("at").and_then(Value::as_f64).filter(|a| a.is_finite() && a.abs() < 1e5))
+                else {
+                    continue;
+                };
                 let axis = u8::from(it.get("axis").and_then(Value::as_str) == Some("y"));
                 let ang = it.get("ang").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0).clamp(-75.0, 75.0);
                 let jog = it.get("jog").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0).clamp(0.0, 1e4);
@@ -263,27 +271,28 @@ pub(super) fn editor(app: &mut SolveApp, ctx: &egui::Context) -> bool {
     let Some(&(p, axis, level, ang, jog)) = app.drawing.ord.items.get(i) else { return false };
     let (mut ang_now, mut len, mut jog_now) = (ang, (if axis == 1 { level - p.x } else { level - p.y }).abs(), jog);
     let mut remove = false;
-    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_ordinate_leader"), "ordinate", "Ordinate leader").fields().show_body(ctx, |ui| {
-        ui.label("Angle (off square)");
-        ui.horizontal(|ui| {
-            crate::ui_kit::number_field(ui, &mut ang_now, -75.0..=75.0, 1.0, "°");
-            for (label, d) in [("−15°", -15.0), ("+15°", 15.0)] {
-                if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small).clicked() {
-                    ang_now = (ang_now + d).clamp(-75.0, 75.0);
+    let closed =
+        crate::ui_kit::Window::new(egui::Id::new("sc_drawing_ordinate_leader"), "ordinate", "Ordinate leader").fields().show_body(ctx, |ui| {
+            ui.label("Angle (off square)");
+            ui.horizontal(|ui| {
+                crate::ui_kit::number_field(ui, &mut ang_now, -75.0..=75.0, 1.0, "°");
+                for (label, d) in [("−15°", -15.0), ("+15°", 15.0)] {
+                    if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small).clicked() {
+                        ang_now = (ang_now + d).clamp(-75.0, 75.0);
+                    }
                 }
-            }
-            if crate::ui_kit::button(ui, "0°", crate::ui_kit::Button::Small).clicked() {
-                ang_now = 0.0;
+                if crate::ui_kit::button(ui, "0°", crate::ui_kit::Button::Small).clicked() {
+                    ang_now = 0.0;
+                }
+            });
+            ui.label("Length (mm on the sheet)");
+            crate::ui_kit::number_field(ui, &mut len, 2.0..=400.0, 1.0, "mm");
+            ui.label("Bend after (mm square from the point, 0 = none)");
+            crate::ui_kit::number_field(ui, &mut jog_now, 0.0..=400.0, 1.0, "mm");
+            if crate::ui_kit::button(ui, "Delete", crate::ui_kit::Button::Small).clicked() {
+                remove = true;
             }
         });
-        ui.label("Length (mm on the sheet)");
-        crate::ui_kit::number_field(ui, &mut len, 2.0..=400.0, 1.0, "mm");
-        ui.label("Bend after (mm square from the point, 0 = none)");
-        crate::ui_kit::number_field(ui, &mut jog_now, 0.0..=400.0, 1.0, "mm");
-        if crate::ui_kit::button(ui, "Delete", crate::ui_kit::Button::Small).clicked() {
-            remove = true;
-        }
-    });
     if remove {
         app.drawing.ord.items.remove(i);
         app.drawing.ord.sel = None;
@@ -385,7 +394,11 @@ pub(super) fn tool_input(app: &mut SolveApp, ui: &egui::Ui, response: &egui::Res
     if !app.drawing.ord.set[ax] || ctrl {
         app.drawing.ord.set_datum(ax, s);
         let moved = app.drawing.ord.items.iter().any(|it| it.1 as usize == ax);
-        let msg = if ax == 1 { "Datum 0y set. Click the points to measure; pick X in the Ordinate window and click once for 0x. Backspace undoes, Esc ends." } else { "Datum 0x set. Click the points to measure; pick Y in the Ordinate window and click once for 0y. Backspace undoes, Esc ends." };
+        let msg = if ax == 1 {
+            "Datum 0y set. Click the points to measure; pick X in the Ordinate window and click once for 0x. Backspace undoes, Esc ends."
+        } else {
+            "Datum 0x set. Click the points to measure; pick Y in the Ordinate window and click once for 0y. Backspace undoes, Esc ends."
+        };
         app.set_status(msg.to_string(), false);
         return moved;
     }
@@ -433,7 +446,13 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, to_screen: &dyn Fn(
             let dir = (end - bend).normalized();
             let guide = Stroke::new(1.5, Color32::from_rgb(60, 190, 90));
             painter.line_segment([to_screen(bend - dir * 6.0), to_screen(end + dir * 14.0)], guide);
-            painter.text(to_screen(end + dir * 16.0), egui::Align2::LEFT_CENTER, "0° straight", egui::FontId::proportional(12.0), Color32::from_rgb(60, 190, 90));
+            painter.text(
+                to_screen(end + dir * 16.0),
+                egui::Align2::LEFT_CENTER,
+                "0° straight",
+                egui::FontId::proportional(12.0),
+                Color32::from_rgb(60, 190, 90),
+            );
         }
     }
     if st.tool
@@ -450,7 +469,13 @@ mod tests {
 
     #[test]
     fn the_bend_of_a_leader_can_be_pulled_with_the_mouse_and_the_end_stays() {
-        let mut st = OrdState { origin: Some(pos2(0.0, 0.0)), set: [true, true], items: vec![(pos2(30.0, 30.0), 0, 80.0, 30.0, 20.0)], sel: Some(0), ..Default::default() };
+        let mut st = OrdState {
+            origin: Some(pos2(0.0, 0.0)),
+            set: [true, true],
+            items: vec![(pos2(30.0, 30.0), 0, 80.0, 30.0, 20.0)],
+            sel: Some(0),
+            ..Default::default()
+        };
         let end = end_of(pos2(30.0, 30.0), 0, 80.0, 30.0, 20.0);
         assert!(st.start_drag(pos2(30.0, 50.0), 2.0) && st.drag_bend, "the elbow is taken");
         st.drag_to(pos2(30.0, 60.0));
@@ -492,7 +517,13 @@ mod tests {
 
     #[test]
     fn a_leader_can_be_grabbed_along_its_line_and_dragged_to_stretch_it() {
-        let mut st = OrdState { origin: Some(pos2(0.0, 0.0)), set: [true, true], tool: true, items: vec![(pos2(30.0, 30.0), 0, 50.0, 0.0, 0.0)], ..Default::default() };
+        let mut st = OrdState {
+            origin: Some(pos2(0.0, 0.0)),
+            set: [true, true],
+            tool: true,
+            items: vec![(pos2(30.0, 30.0), 0, 50.0, 0.0, 0.0)],
+            ..Default::default()
+        };
         assert!(st.start_drag(pos2(30.0, 40.0), 2.0) && st.drag == Some(0), "on the line, away from its end");
         st.drag_to(pos2(34.0, 80.0));
         assert_eq!(st.items.first().map(|it| it.2), Some(80.0), "longer");

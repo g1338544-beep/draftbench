@@ -169,7 +169,14 @@ impl SymState {
         if self.items.len() >= MAX_SYMBOLS {
             return false;
         }
-        self.items.push(SymItem { id: sym.id.to_string(), x: (at.x * 10.0).round() / 10.0, y: (at.y * 10.0).round() / 10.0, k: 1.0, rot: 0.0, text: sym.text.to_string() });
+        self.items.push(SymItem {
+            id: sym.id.to_string(),
+            x: (at.x * 10.0).round() / 10.0,
+            y: (at.y * 10.0).round() / 10.0,
+            k: 1.0,
+            rot: 0.0,
+            text: sym.text.to_string(),
+        });
         self.sel = Some(self.items.len() - 1);
         self.edit = true;
         true
@@ -184,22 +191,32 @@ fn paint_prims(painter: &egui::Painter, prims: &[Prim], to: &dyn Fn(f64, f64) ->
                 painter.line_segment([to(a.x, a.y), to(b.x, b.y)], stroke);
             }
             Prim::Circle(c, r) => {
-                let pts: Vec<Pos2> = (0..=36).map(|i| {
-                    let a = f64::from(i) * std::f64::consts::TAU / 36.0;
-                    to(c.x + r * a.cos(), c.y + r * a.sin())
-                }).collect();
+                let pts: Vec<Pos2> = (0..=36)
+                    .map(|i| {
+                        let a = f64::from(i) * std::f64::consts::TAU / 36.0;
+                        to(c.x + r * a.cos(), c.y + r * a.sin())
+                    })
+                    .collect();
                 painter.add(egui::Shape::line(pts, stroke));
             }
             Prim::Arc(c, r, a0, a1) => {
                 let n = 24;
-                let pts: Vec<Pos2> = (0..=n).map(|i| {
-                    let a = (a0 + (a1 - a0) * f64::from(i) / f64::from(n)).to_radians();
-                    to(c.x + r * a.cos(), c.y + r * a.sin())
-                }).collect();
+                let pts: Vec<Pos2> = (0..=n)
+                    .map(|i| {
+                        let a = (a0 + (a1 - a0) * f64::from(i) / f64::from(n)).to_radians();
+                        to(c.x + r * a.cos(), c.y + r * a.sin())
+                    })
+                    .collect();
                 painter.add(egui::Shape::line(pts, stroke));
             }
             Prim::Text(c, h, t) => {
-                painter.text(to(c.x, c.y), egui::Align2::CENTER_BOTTOM, t, egui::FontId::proportional((*h as f32 * px).clamp(5.0, 60.0)), stroke.color);
+                painter.text(
+                    to(c.x, c.y),
+                    egui::Align2::CENTER_BOTTOM,
+                    t,
+                    egui::FontId::proportional((*h as f32 * px).clamp(5.0, 60.0)),
+                    stroke.color,
+                );
             }
         }
     }
@@ -257,7 +274,12 @@ pub(super) fn palette(app: &mut SolveApp, ctx: &egui::Context) -> Option<(usize,
                 let on = armed == Some(index);
                 let fill = if on { t.selected_bg } else { t.control_fill };
                 ui.painter().rect_filled(rect, t.control_radius, fill);
-                ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(1.0, if on || resp.hovered() { t.accent } else { t.control_border }), egui::StrokeKind::Inside);
+                ui.painter().rect_stroke(
+                    rect,
+                    t.control_radius,
+                    Stroke::new(1.0, if on || resp.hovered() { t.accent } else { t.control_border }),
+                    egui::StrokeKind::Inside,
+                );
                 let prims = eng::prims(sym.id, sym.text);
                 let (x0, y0, x1, y1) = unit_box(&prims);
                 let area = Rect::from_min_max(rect.min + vec2(6.0, 4.0), pos2(rect.right() - 6.0, rect.bottom() - 15.0));
@@ -266,7 +288,13 @@ pub(super) fn palette(app: &mut SolveApp, ctx: &egui::Context) -> Option<(usize,
                 let (mx, my) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
                 let to = move |x: f64, y: f64| pos2(c.x + (x - mx) as f32 * s, c.y - (y - my) as f32 * s);
                 paint_prims(&ui.painter().with_clip_rect(rect), &prims, &to, s, Stroke::new(1.3, ui.visuals().text_color()));
-                ui.painter().text(pos2(rect.center().x, rect.bottom() - 2.0), egui::Align2::CENTER_BOTTOM, sym.label, egui::FontId::proportional(9.5), t.form_dim);
+                ui.painter().text(
+                    pos2(rect.center().x, rect.bottom() - 2.0),
+                    egui::Align2::CENTER_BOTTOM,
+                    sym.label,
+                    egui::FontId::proportional(9.5),
+                    t.form_dim,
+                );
                 let _ = resp.clone().on_hover_text(sym.label);
                 if resp.clicked() {
                     armed = if on { None } else { Some(index) };
@@ -322,7 +350,12 @@ pub(super) fn editor(app: &mut SolveApp, ctx: &egui::Context) -> bool {
             crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_symbol_words", i)), &mut t.text, "", false, 60);
         }
         ui.label("Size");
-        crate::ui_kit::slider(ui, &mut t.k, 0.3..=4.0, crate::ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0}%", v * 100.0), ..Default::default() });
+        crate::ui_kit::slider(
+            ui,
+            &mut t.k,
+            0.3..=4.0,
+            crate::ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0}%", v * 100.0), ..Default::default() },
+        );
         ui.label("Angle");
         ui.horizontal(|ui| {
             crate::ui_kit::number_field(ui, &mut t.rot, -360.0..=360.0, 1.0, "°");

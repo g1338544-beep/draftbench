@@ -309,7 +309,8 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
         let mut selected = usize::MAX;
         let mut drawn = 0;
         let pages = [
-            WindowPage { group: "",
+            WindowPage {
+                group: "",
                 icon: "settings",
                 label: "ui.general",
                 handle: "test:page:general",
@@ -319,7 +320,8 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
                     text(ui, "General", Text::Inline);
                 },
             },
-            WindowPage { group: "",
+            WindowPage {
+                group: "",
                 icon: "orbit",
                 label: "ui.navigation",
                 handle: "test:page:navigation",

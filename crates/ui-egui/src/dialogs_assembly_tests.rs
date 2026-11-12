@@ -647,14 +647,25 @@ fn the_clamps_joint_previews_come_quickly() {
         s.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
     }
     let mut app = SolveApp::new(s, Services::default());
-    let colors = crate::preview::Colors { body: [1, 1, 1, 255], added: [2, 2, 2, 255], new_body: [2, 2, 2, 255], removed: [3, 3, 3, 100], edge: [0, 0, 0, 255] };
-    let pins = [("Base", "Arm", [2.5, 0.0, 14.0]), ("Arm", "Handle", [2.5, 40.0, 20.0]), ("Handle", "Link", [32.5, 40.0, 20.0]), ("Base", "Link", [42.5, 0.0, 14.0])];
+    let colors = crate::preview::Colors {
+        body: [1, 1, 1, 255],
+        added: [2, 2, 2, 255],
+        new_body: [2, 2, 2, 255],
+        removed: [3, 3, 3, 100],
+        edge: [0, 0, 0, 255],
+    };
+    let pins = [
+        ("Base", "Arm", [2.5, 0.0, 14.0]),
+        ("Arm", "Handle", [2.5, 40.0, 20.0]),
+        ("Handle", "Link", [32.5, 40.0, 20.0]),
+        ("Base", "Link", [42.5, 0.0, 14.0]),
+    ];
     for (a, b, at) in pins {
         app.session.selection = vec![Sel::Body { name: a.into() }, Sel::Body { name: b.into() }];
         app.start("joint.as_built");
         let mut d = app.dialog.clone().unwrap();
         if let Some(sel) = face_sel(&app.session, Vec3::new(at[0] - 1.0, at[1], at[2])) {
-            d.active = 1;
+            d.active = 2;
             d.pick(&app.session, sel);
         }
         let t = std::time::Instant::now();
@@ -684,14 +695,20 @@ fn the_clamps_third_joint_previews_quickly_from_any_face_of_the_pin() {
         s.execute("joint.as_built", &json!({"type": "revolute", "a": a, "b": b, "at": {"occurrence": 0, "point": at, "z": [0, 0, 1]}})).unwrap();
     }
     let app = SolveApp::new(s, Services::default());
-    let colors = crate::preview::Colors { body: [1, 1, 1, 255], added: [2, 2, 2, 255], new_body: [2, 2, 2, 255], removed: [3, 3, 3, 100], edge: [0, 0, 0, 255] };
+    let colors = crate::preview::Colors {
+        body: [1, 1, 1, 255],
+        added: [2, 2, 2, 255],
+        new_body: [2, 2, 2, 255],
+        removed: [3, 3, 3, 100],
+        edge: [0, 0, 0, 255],
+    };
     for at in [[31.5, 40.0, 20.0], [32.5, 40.0, 17.0], [34.5, 40.0, 14.0], [36.0, 40.0, 11.0], [30.0, 46.0, 11.0], [24.0, 40.0, 11.0]] {
         let mut app2 = SolveApp::new(app.session.scratch(), Services::default());
         app2.session.selection = vec![Sel::Body { name: "Handle".into() }, Sel::Body { name: "Link".into() }];
         app2.start("joint.as_built");
         let mut d = app2.dialog.clone().unwrap();
         let Some(sel) = face_sel(&app2.session, Vec3::new(at[0], at[1], at[2])) else { continue };
-        d.active = 1;
+        d.active = 2;
         d.pick(&app2.session, sel.clone());
         let t = std::time::Instant::now();
         let shown = preview_commands(&app2, &d).map(|cmds| world_preview(&app2.session, &cmds, colors));
@@ -709,7 +726,13 @@ fn the_start_position_ghost_can_be_turned_off() {
     let mut d = app.dialog.clone().unwrap();
     d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
     d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
-    let colors = crate::preview::Colors { body: [1, 1, 1, 255], added: [2, 2, 2, 255], new_body: [2, 2, 2, 255], removed: [3, 3, 3, 100], edge: [0, 0, 0, 255] };
+    let colors = crate::preview::Colors {
+        body: [1, 1, 1, 255],
+        added: [2, 2, 2, 255],
+        new_body: [2, 2, 2, 255],
+        removed: [3, 3, 3, 100],
+        edge: [0, 0, 0, 255],
+    };
     let cmds = preview_commands(&app, &d).unwrap();
     let ghost = |on: bool| {
         START_GHOST.store(on, std::sync::atomic::Ordering::Relaxed);

@@ -179,7 +179,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     let material_bodies: Vec<String> = if matches!(d.kind, Kind::Material { .. }) {
         d.inputs
             .first()
-            .map(|i| i.items.iter().filter_map(|x| if let Sel::Body { name } | Sel::Face { body: name, .. } = x { Some(name.clone()) } else { None }).collect())
+            .map(|i| {
+                i.items
+                    .iter()
+                    .filter_map(|x| if let Sel::Body { name } | Sel::Face { body: name, .. } = x { Some(name.clone()) } else { None })
+                    .collect()
+            })
             .unwrap_or_default()
     } else {
         Vec::new()
@@ -217,7 +222,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
                 // A sketch can always be started: a face that cannot keep an attachment (a stretched
                 // surface, a reshaped face) takes the sketch on a fixed plane at once.
-                if d.error.as_deref().is_some_and(|e| e.contains("attachment")) && d.extra.get("fixed_plane").and_then(serde_json::Value::as_bool) != Some(true) {
+                if d.error.as_deref().is_some_and(|e| e.contains("attachment"))
+                    && d.extra.get("fixed_plane").and_then(serde_json::Value::as_bool) != Some(true)
+                {
                     d.extra.insert("fixed_plane".into(), json!(true));
                 }
             }
@@ -547,12 +554,28 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                         &mut d.extra,
                         "bolt",
                         "hole_size",
-                        &[("Custom", "custom"), ("M3", "M3"), ("M4", "M4"), ("M5", "M5"), ("M6", "M6"), ("M8", "M8"), ("M10", "M10"), ("M12", "M12"), ("M16", "M16")],
+                        &[
+                            ("Custom", "custom"),
+                            ("M3", "M3"),
+                            ("M4", "M4"),
+                            ("M5", "M5"),
+                            ("M6", "M6"),
+                            ("M8", "M8"),
+                            ("M10", "M10"),
+                            ("M12", "M12"),
+                            ("M16", "M16"),
+                        ],
                     );
                 });
                 if d.extra.contains_key("hole_size") {
                     form_row(ui, "Fit", |ui| {
-                        extra_choice(ui, &mut d.extra, "fit", "hole_fit", &[("Normal", "normal"), ("Close", "close"), ("Loose", "loose"), ("Tap drill", "tap")]);
+                        extra_choice(
+                            ui,
+                            &mut d.extra,
+                            "fit",
+                            "hole_fit",
+                            &[("Normal", "normal"), ("Close", "close"), ("Loose", "loose"), ("Tap drill", "tap")],
+                        );
                     });
                     // Choosing a size or fit fills the diameter with the ISO 273 clearance hole; the
                     // field stays editable afterwards.
@@ -561,7 +584,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     let key = format!("{size}/{fit}");
                     if d.extra.get("bolt_sync").and_then(Value::as_str) != Some(key.as_str()) {
                         // "Tap drill" is the hole a thread of that size is cut in (M5 → 4.2).
-                        let tap = (fit == "tap").then(|| solidcraft_engine::doc::parse_metric_thread(&size).map(|(d, p)| ((d - p) * 100.0).round() / 100.0)).flatten();
+                        let tap = (fit == "tap")
+                            .then(|| solidcraft_engine::doc::parse_metric_thread(&size).map(|(d, p)| ((d - p) * 100.0).round() / 100.0))
+                            .flatten();
                         if let Some(v) = tap.or_else(|| iso_clearance(&size, &fit)) {
                             *diameter = format!("{v} mm");
                         }
@@ -794,7 +819,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                         .collect()
                 })
                 .unwrap_or_default();
-            let (surfaces, lines, points) = (kinds.iter().filter(|k| **k == 0).count(), kinds.iter().filter(|k| **k == 1).count(), kinds.iter().filter(|k| **k == 2).count());
+            let (surfaces, lines, points) =
+                (kinds.iter().filter(|k| **k == 0).count(), kinds.iter().filter(|k| **k == 1).count(), kinds.iter().filter(|k| **k == 2).count());
             let made = match (surfaces, lines, points) {
                 (0, 0, 0) => "Click a plane or face, two lines, a line and a point, or three points.",
                 (1, 0, 0) => "Offset plane: set the distance below.",
@@ -882,7 +908,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::ResizeFace { diameter } => {
             // How many round faces of the picked size there are, measured when the picks change.
-            let points: Vec<Value> = d.inputs.first().map(|i| i.items.iter().filter_map(|x| if let Sel::Face { point, .. } = x { Some(json!([point.x, point.y, point.z])) } else { None }).collect()).unwrap_or_default();
+            let points: Vec<Value> = d
+                .inputs
+                .first()
+                .map(|i| {
+                    i.items
+                        .iter()
+                        .filter_map(|x| if let Sel::Face { point, .. } = x { Some(json!([point.x, point.y, point.z])) } else { None })
+                        .collect()
+                })
+                .unwrap_or_default();
             let key = json!(points).to_string();
             if d.extra.get("rz_key").and_then(Value::as_str) != Some(key.as_str()) {
                 d.extra.insert("rz_key".into(), json!(key));
@@ -982,7 +1017,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                     d.extra.insert("cut".into(), json!(cut));
                 }
                 if cut && !solidcraft_engine::doc::heavy_work::modelled_threads() {
-                    crate::ui_kit::caption(ui, "Modeled", crate::i18n::tr_label("In the browser a modelled thread shows as a cosmetic thread; the desktop app cuts it."));
+                    crate::ui_kit::caption(
+                        ui,
+                        "Modeled",
+                        crate::i18n::tr_label("In the browser a modelled thread shows as a cosmetic thread; the desktop app cuts it."),
+                    );
                 }
             }
             if full != was_full {
@@ -1002,7 +1041,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             // Start / End: how the solid meets the first and last profile (not with guide curves).
             let railed = d.inputs.get(1).is_some_and(|i| !i.items.is_empty());
             if !railed {
-                extra_options(ui, "loft_ends", &mut d.extra, &[("Start: leave square to the first profile", "start_normal"), ("End: arrive square to the last profile", "end_normal")]);
+                extra_options(
+                    ui,
+                    "loft_ends",
+                    &mut d.extra,
+                    &[("Start: leave square to the first profile", "start_normal"), ("End: arrive square to the last profile", "end_normal")],
+                );
             }
         }
         Kind::Sweep { operation, opts } => {
@@ -1445,7 +1489,6 @@ fn iso_clearance(size: &str, fit: &str) -> Option<f64> {
     })
 }
 
-
 /// The hole types as buttons showing the hole in section: simple, counterbore, countersink, tapered.
 fn hole_type_buttons(ui: &mut egui::Ui, kind: &mut usize) {
     use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
@@ -1454,8 +1497,20 @@ fn hole_type_buttons(ui: &mut egui::Ui, kind: &mut usize) {
         for (i, label) in HOLE_LABELS.iter().enumerate() {
             let (rect, response) = ui.allocate_exact_size(vec2(t.control_height * 1.5, t.control_height * 1.25), Sense::click());
             let on = *kind == i;
-            let bg = if on { t.accent_soft } else if response.hovered() { t.hover } else { Color32::TRANSPARENT };
-            ui.painter().rect(rect, t.control_radius, bg, Stroke::new(if on { 1.5 } else { 1.0 }, if on { t.accent } else { t.control_border }), egui::StrokeKind::Inside);
+            let bg = if on {
+                t.accent_soft
+            } else if response.hovered() {
+                t.hover
+            } else {
+                Color32::TRANSPARENT
+            };
+            ui.painter().rect(
+                rect,
+                t.control_radius,
+                bg,
+                Stroke::new(if on { 1.5 } else { 1.0 }, if on { t.accent } else { t.control_border }),
+                egui::StrokeKind::Inside,
+            );
             let b = rect.shrink2(vec2(rect.width() * 0.16, rect.height() * 0.16));
             let (cx, w, h) = (b.center().x, b.width(), b.height());
             let ink = if on { t.form_ink } else { t.form_dim };
@@ -1465,11 +1520,21 @@ fn hole_type_buttons(ui: &mut egui::Ui, kind: &mut usize) {
             let n = w * 0.14;
             let cut: Vec<Vec<Pos2>> = match i {
                 1 => vec![
-                    vec![pos2(cx - w * 0.30, b.top()), pos2(cx + w * 0.30, b.top()), pos2(cx + w * 0.30, b.top() + h * 0.34), pos2(cx - w * 0.30, b.top() + h * 0.34)],
+                    vec![
+                        pos2(cx - w * 0.30, b.top()),
+                        pos2(cx + w * 0.30, b.top()),
+                        pos2(cx + w * 0.30, b.top() + h * 0.34),
+                        pos2(cx - w * 0.30, b.top() + h * 0.34),
+                    ],
                     vec![pos2(cx - n, b.top() + h * 0.34), pos2(cx + n, b.top() + h * 0.34), pos2(cx + n, bottom), pos2(cx - n, bottom)],
                 ],
                 2 => vec![
-                    vec![pos2(cx - w * 0.30, b.top()), pos2(cx + w * 0.30, b.top()), pos2(cx + n, b.top() + h * 0.30), pos2(cx - n, b.top() + h * 0.30)],
+                    vec![
+                        pos2(cx - w * 0.30, b.top()),
+                        pos2(cx + w * 0.30, b.top()),
+                        pos2(cx + n, b.top() + h * 0.30),
+                        pos2(cx - n, b.top() + h * 0.30),
+                    ],
                     vec![pos2(cx - n, b.top() + h * 0.30), pos2(cx + n, b.top() + h * 0.30), pos2(cx + n, bottom), pos2(cx - n, bottom)],
                 ],
                 3 => vec![vec![pos2(cx - w * 0.22, b.top()), pos2(cx + w * 0.22, b.top()), pos2(cx + n * 0.5, bottom), pos2(cx - n * 0.5, bottom)]],
@@ -1480,8 +1545,24 @@ fn hole_type_buttons(ui: &mut egui::Ui, kind: &mut usize) {
             }
             // Outline of the hole walls (the open top stays open).
             let outline: Vec<Pos2> = match i {
-                1 => vec![pos2(cx - w * 0.30, b.top()), pos2(cx - w * 0.30, b.top() + h * 0.34), pos2(cx - n, b.top() + h * 0.34), pos2(cx - n, bottom), pos2(cx + n, bottom), pos2(cx + n, b.top() + h * 0.34), pos2(cx + w * 0.30, b.top() + h * 0.34), pos2(cx + w * 0.30, b.top())],
-                2 => vec![pos2(cx - w * 0.30, b.top()), pos2(cx - n, b.top() + h * 0.30), pos2(cx - n, bottom), pos2(cx + n, bottom), pos2(cx + n, b.top() + h * 0.30), pos2(cx + w * 0.30, b.top())],
+                1 => vec![
+                    pos2(cx - w * 0.30, b.top()),
+                    pos2(cx - w * 0.30, b.top() + h * 0.34),
+                    pos2(cx - n, b.top() + h * 0.34),
+                    pos2(cx - n, bottom),
+                    pos2(cx + n, bottom),
+                    pos2(cx + n, b.top() + h * 0.34),
+                    pos2(cx + w * 0.30, b.top() + h * 0.34),
+                    pos2(cx + w * 0.30, b.top()),
+                ],
+                2 => vec![
+                    pos2(cx - w * 0.30, b.top()),
+                    pos2(cx - n, b.top() + h * 0.30),
+                    pos2(cx - n, bottom),
+                    pos2(cx + n, bottom),
+                    pos2(cx + n, b.top() + h * 0.30),
+                    pos2(cx + w * 0.30, b.top()),
+                ],
                 3 => vec![pos2(cx - w * 0.22, b.top()), pos2(cx - n * 0.5, bottom), pos2(cx + n * 0.5, bottom), pos2(cx + w * 0.22, b.top())],
                 _ => vec![pos2(cx - n, b.top()), pos2(cx - n, bottom), pos2(cx + n, bottom), pos2(cx + n, b.top())],
             };

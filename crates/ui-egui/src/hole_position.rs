@@ -113,10 +113,7 @@ pub fn store(extra: &mut serde_json::Map<String, Value>, inputs: &[SelInput], st
     if (p - st.point).len() < 1e-9 {
         extra.remove("position_exprs");
     } else {
-        extra.insert(
-            "position_exprs".into(),
-            json!({"at": [shown(p.x), shown(p.y), shown(p.z)], "point": crate::selection::point_value(st.point)}),
-        );
+        extra.insert("position_exprs".into(), json!({"at": [shown(p.x), shown(p.y), shown(p.z)], "point": crate::selection::point_value(st.point)}));
     }
 }
 
@@ -211,17 +208,19 @@ fn line_clicked(ui: &egui::Ui, slot: usize, a: Pos2, b: Pos2) -> bool {
 fn edge_box(ui: &mut egui::Ui, slot: usize, value: &mut String, at: Pos2) {
     use crate::ui_kit::{Container, Surface};
     let t = crate::theme::Tokens::get();
-    Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new(("sc_hole_edge_area", slot))).fixed_pos(at).pivot(egui::Align2::LEFT_CENTER).order(egui::Order::Foreground).show(
-        ui.ctx(),
-        |ui| {
+    Container::new(ui.ctx(), Surface::Canvas)
+        .area(egui::Id::new(("sc_hole_edge_area", slot)))
+        .fixed_pos(at)
+        .pivot(egui::Align2::LEFT_CENTER)
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
             Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(format!("Edge {}", slot + 1)).color(t.text_dim).size(t.font_caption));
                     crate::ui_kit::canvas_value_field(ui, value_id(slot), value);
                 });
             });
-        },
-    );
+        });
 }
 
 #[cfg(test)]

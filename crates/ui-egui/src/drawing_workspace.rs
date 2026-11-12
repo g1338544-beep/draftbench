@@ -10,10 +10,10 @@ use solidcraft_engine::render::Camera;
 
 use crate::{SolveApp, theme::Tokens};
 
-#[path = "drawing_symbols_ui.rs"]
-mod symbols_ui;
 #[path = "ordinate_ui.rs"]
 mod ordinate_ui;
+#[path = "drawing_symbols_ui.rs"]
+mod symbols_ui;
 
 const PAPERS: [&str; 5] = ["A0", "A1", "A2", "A3", "A4"];
 const SIZES: [(f32, f32); 5] = [(1189.0, 841.0), (841.0, 594.0), (594.0, 420.0), (420.0, 297.0), (297.0, 210.0)];
@@ -53,8 +53,15 @@ fn colour_of(index: u8) -> Color32 {
 const VIEWS: [(&str, &str); 7] =
     [("front", "Front"), ("top", "Top"), ("right", "Right"), ("left", "Left"), ("back", "Back"), ("bottom", "Bottom"), ("iso", "Isometric (3D)")];
 
-const DIM_KINDS: [(&str, &str); 7] =
-    [("horizontal", "Horizontal"), ("vertical", "Vertical"), ("aligned", "Aligned"), ("diameter", "Diameter (click a circle)"), ("radius", "Radius (click an arc or circle)"), ("balloon", "Balloon (click a part, then the balloon)"), ("note", "Note with arrow (click the spot, then the note)")];
+const DIM_KINDS: [(&str, &str); 7] = [
+    ("horizontal", "Horizontal"),
+    ("vertical", "Vertical"),
+    ("aligned", "Aligned"),
+    ("diameter", "Diameter (click a circle)"),
+    ("radius", "Radius (click an arc or circle)"),
+    ("balloon", "Balloon (click a part, then the balloon)"),
+    ("note", "Note with arrow (click the spot, then the note)"),
+];
 
 /// A dimension the user placed, in sheet mm.
 #[derive(Clone)]
@@ -704,7 +711,12 @@ impl State {
         let design = if self.owner.is_empty() { design } else { self.owner.as_str() };
         let mut designs = self.saved_designs.clone();
         let pages = self.all_pages();
-        if !design.is_empty() && pages.iter().any(|p| p.get("views").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty()) || p.get("dims").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty())) {
+        if !design.is_empty()
+            && pages.iter().any(|p| {
+                p.get("views").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty())
+                    || p.get("dims").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty())
+            })
+        {
             designs.insert(design.chars().take(120).collect(), json!({"pages": pages}));
         }
         while designs.len() > 40 {
@@ -809,7 +821,13 @@ impl State {
                 .iter()
                 .take(MAX_FREE_LINES)
                 .filter_map(|l| {
-                    let n: Vec<f32> = l.as_array()?.iter().filter_map(serde_json::Value::as_f64).filter(|x| x.is_finite() && x.abs() < 1e5).map(|x| x as f32).collect();
+                    let n: Vec<f32> = l
+                        .as_array()?
+                        .iter()
+                        .filter_map(serde_json::Value::as_f64)
+                        .filter(|x| x.is_finite() && x.abs() < 1e5)
+                        .map(|x| x as f32)
+                        .collect();
                     if let [a, b, c, d] = n[..] { Some([a, b, c, d]) } else { None }
                 })
                 .collect();
@@ -831,7 +849,10 @@ impl State {
     fn switch_owner(&mut self, design: &str) {
         if !self.owner.is_empty() && self.owner != design {
             let pages = self.all_pages();
-            let has_content = pages.iter().any(|p| p.get("views").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty()) || p.get("dims").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty()));
+            let has_content = pages.iter().any(|p| {
+                p.get("views").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty())
+                    || p.get("dims").and_then(serde_json::Value::as_array).is_some_and(|v| !v.is_empty())
+            });
             if has_content {
                 self.saved_designs.insert(self.owner.chars().take(120).collect(), json!({"pages": pages}));
             }
@@ -934,9 +955,10 @@ impl State {
                         let (y, p) = (a.first()?.as_f64()?, a.get(1)?.as_f64()?);
                         (y.is_finite() && p.is_finite()).then_some((y, p))
                     }),
-                    align: v.get("align").and_then(serde_json::Value::as_array).and_then(|a| {
-                        Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?))
-                    }),
+                    align: v
+                        .get("align")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|a| Some((a.first()?.as_u64()? as usize, a.get(1)?.as_bool()?))),
                     axis: v.get("axis").and_then(serde_json::Value::as_array).and_then(|a| {
                         let (p, x, y) = (a.first()?.as_u64()? as usize, a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32);
                         (x.is_finite() && y.is_finite()).then_some((p, x, y))
@@ -946,7 +968,12 @@ impl State {
                     label: v.get("label").and_then(serde_json::Value::as_str).map(|t| t.chars().take(80).collect()),
                     letter: v.get("letter").and_then(serde_json::Value::as_str).map(|t| t.chars().take(1).collect()).unwrap_or_default(),
                     colour: v.get("colour").and_then(serde_json::Value::as_bool).unwrap_or(false),
-                    cap: v.get("cap").and_then(serde_json::Value::as_array).and_then(|a| Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32))).filter(|(x, y)| x.is_finite() && y.is_finite()).unwrap_or((0.0, 0.0)),
+                    cap: v
+                        .get("cap")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|a| Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32)))
+                        .filter(|(x, y)| x.is_finite() && y.is_finite())
+                        .unwrap_or((0.0, 0.0)),
                     letter_off: v
                         .get("letter_off")
                         .and_then(serde_json::Value::as_array)
@@ -1015,7 +1042,11 @@ impl State {
             for m in list.iter().take(2000) {
                 let Some(a) = m.as_array() else { continue };
                 let v = a.first().and_then(serde_json::Value::as_i64);
-                let k: Vec<i64> = a.get(1).and_then(serde_json::Value::as_array).map(|k| k.iter().filter_map(serde_json::Value::as_i64).collect()).unwrap_or_default();
+                let k: Vec<i64> = a
+                    .get(1)
+                    .and_then(serde_json::Value::as_array)
+                    .map(|k| k.iter().filter_map(serde_json::Value::as_i64).collect())
+                    .unwrap_or_default();
                 let c = a.get(2).and_then(serde_json::Value::as_u64);
                 if let (Some(v), [k0, k1, k2, k3], Some(c)) = (v, &k[..], c)
                     && [*k0, *k1, *k2, *k3].iter().all(|t| t.abs() < 100_000_000)
@@ -1103,7 +1134,13 @@ impl State {
                 .iter()
                 .take(MAX_FREE_LINES)
                 .filter_map(|l| {
-                    let n: Vec<f32> = l.as_array()?.iter().filter_map(serde_json::Value::as_f64).filter(|x| x.is_finite() && x.abs() < 1e5).map(|x| x as f32).collect();
+                    let n: Vec<f32> = l
+                        .as_array()?
+                        .iter()
+                        .filter_map(serde_json::Value::as_f64)
+                        .filter(|x| x.is_finite() && x.abs() < 1e5)
+                        .map(|x| x as f32)
+                        .collect();
                     if let [a, b, c, e] = n[..] { Some([a, b, c, e]) } else { None }
                 })
                 .collect();
@@ -1143,7 +1180,21 @@ impl State {
 
 /// Where the picture of a shaded view is kept: its camera, size and the state of the design.
 fn shaded_key(app: &SolveApp, v: &ShadedView) -> String {
-    format!("{:.4}/{:.4}/{:.2}/{:.3}/{}/{}/{:.3}/{:.3}/{:.3}/{:.3}/{:?}/{}", v.yaw, v.pitch, v.w, v.ratio, v.bg, v.style, v.zoom, v.world_half, v.centre.map_or(0.0, |c| c.0), v.centre.map_or(0.0, |c| c.1), v.cut, app.session.log.len())
+    format!(
+        "{:.4}/{:.4}/{:.2}/{:.3}/{}/{}/{:.3}/{:.3}/{:.3}/{:.3}/{:?}/{}",
+        v.yaw,
+        v.pitch,
+        v.w,
+        v.ratio,
+        v.bg,
+        v.style,
+        v.zoom,
+        v.world_half,
+        v.centre.map_or(0.0, |c| c.0),
+        v.centre.map_or(0.0, |c| c.1),
+        v.cut,
+        app.session.log.len()
+    )
 }
 
 /// The picture of a shaded view, drawn now if it is not in the cache. One CPU render of the whole
@@ -1203,7 +1254,8 @@ fn shaded_picture_now(app: &mut SolveApp, v: &ShadedView) -> Option<Picture> {
         let toward_eye = if n.dot(cam.basis().2) < 0.0 { n * -1.0 } else { n };
         (Vec3::new(o[0], o[1], o[2]), toward_eye)
     });
-    let mut scene = solidcraft_engine::view::scene_with_guides(&app.session, &cam, section, solidcraft_engine::view::Guides { grid: false, axes: false });
+    let mut scene =
+        solidcraft_engine::view::scene_with_guides(&app.session, &cam, section, solidcraft_engine::view::Guides { grid: false, axes: false });
     // A section's colour shows what the lines show: only the bodies the cut plane goes through. A body
     // wholly behind the plane (another part further back) is no part of the section and would show
     // as colour outside the cut outline.
@@ -1588,7 +1640,13 @@ fn params(st: &State) -> Value {
     }
     p["frame_on"] = json!(st.frame_on);
     p["block_on"] = json!(st.block_on);
-    p["block_template"] = json!(if st.block_free { "free" } else if st.block_detail { "detail" } else { "" });
+    p["block_template"] = json!(if st.block_free {
+        "free"
+    } else if st.block_detail {
+        "detail"
+    } else {
+        ""
+    });
     if let Ok(k) = st.block_h.trim().parse::<f64>()
         && k.is_finite()
     {
@@ -1638,7 +1696,13 @@ fn parse(v: &Value) -> Option<Sheet> {
         } else if let Some(a) = it.get("arc").and_then(Value::as_array) {
             Shape::Arc(pt(a.first()?)?, a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32, a.get(3)?.as_f64()? as f32)
         } else if let Some(t) = it.get("text").and_then(Value::as_str) {
-            Shape::Text(pt(it.get("at")?)?, it.get("h")?.as_f64()? as f32, t.replace("%%c", "Ø").replace("%%C", "Ø"), it.get("angle").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0) as f32, it.get("font").and_then(Value::as_u64).filter(|f| *f <= 4).unwrap_or(0) as u8)
+            Shape::Text(
+                pt(it.get("at")?)?,
+                it.get("h")?.as_f64()? as f32,
+                t.replace("%%c", "Ø").replace("%%C", "Ø"),
+                it.get("angle").and_then(Value::as_f64).filter(|a| a.is_finite()).unwrap_or(0.0) as f32,
+                it.get("font").and_then(Value::as_u64).filter(|f| *f <= 4).unwrap_or(0) as u8,
+            )
         } else {
             continue;
         };
@@ -1665,9 +1729,22 @@ fn parse(v: &Value) -> Option<Sheet> {
     let centres = v
         .pointer("/summary/boxes")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|b| Some((b.get("index")?.as_u64()? as usize, b.get("cx")?.as_f64()? as f32, b.get("cy")?.as_f64()? as f32))).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|b| Some((b.get("index")?.as_u64()? as usize, b.get("cx")?.as_f64()? as f32, b.get("cy")?.as_f64()? as f32)))
+                .collect()
+        })
         .unwrap_or_default();
-    Some(Sheet { width: v.get("width")?.as_f64()? as f32, height: v.get("height")?.as_f64()? as f32, note, items, boxes, scales, centres, rounds: std::sync::OnceLock::new() })
+    Some(Sheet {
+        width: v.get("width")?.as_f64()? as f32,
+        height: v.get("height")?.as_f64()? as f32,
+        note,
+        items,
+        boxes,
+        scales,
+        centres,
+        rounds: std::sync::OnceLock::new(),
+    })
 }
 
 /// Start an Update: the model first, then each placed view, one stage per frame.
@@ -1734,7 +1811,11 @@ fn run_sheet_command(app: &mut SolveApp, command: &str, p: Value) -> Result<Valu
 fn refresh(app: &mut SolveApp) {
     let mut p = params(&app.drawing);
     // Until Update, the sheet keeps the model it was last computed from, whatever changed in 3D since.
-    if !app.drawing.updating && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == app.session.doc.name && app.drawing.cache_vis == app.drawing.drawn_visibility {
+    if !app.drawing.updating
+        && app.drawing.drawn_rev != 0
+        && app.drawing.drawn_design == app.session.doc.name
+        && app.drawing.cache_vis == app.drawing.drawn_visibility
+    {
         p["freeze"] = json!(true);
     }
     match run_sheet(app, p) {
@@ -1785,7 +1866,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
     let n = app.drawing.placed.len();
     let (col, row) = ((n % 3) as f32, (n / 3) as f32);
     app.drawing.placed.push(PlacedView {
-            spin: 0.0,
+        spin: 0.0,
         view,
         x: f64::from(w * (0.22 + 0.28 * col)),
         y: f64::from(h * (0.68 - 0.3 * row.min(1.0))),
@@ -1853,7 +1934,7 @@ fn section_spot(d: egui::Vec2, (x, y, w, h): (f32, f32, f32, f32)) -> Pos2 {
 fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option<Sheet> {
     let name = VIEWS.get(view)?.0;
     app.drawing.placed.push(PlacedView {
-            spin: 0.0,
+        spin: 0.0,
         view,
         x: 150.0,
         y: 150.0,
@@ -1973,7 +2054,8 @@ fn scale_custom(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
     let mut text: String = ui.data_mut(|d| d.get_temp::<String>(slot)).unwrap_or_default();
     let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0).hint_text("1:3"));
     ui.data_mut(|d| d.insert_temp(slot, text.clone()));
-    let apply = crate::ui_kit::button(ui, "Apply", crate::ui_kit::Button::Small).clicked() || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+    let apply = crate::ui_kit::button(ui, "Apply", crate::ui_kit::Button::Small).clicked()
+        || (field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
     if apply && let Some(k) = parse_scale(&text) {
         *value = format!("{k}");
         return true;
@@ -2167,7 +2249,12 @@ fn track_history(app: &mut SolveApp, ui: &egui::Ui) {
         return;
     }
     let d = &app.drawing;
-    let busy = d.drag.is_some() || d.drag_dim.is_some() || d.drag_end.is_some() || d.erase.is_some() || d.cl_drag.is_some() || ui.input(|i| i.pointer.any_down());
+    let busy = d.drag.is_some()
+        || d.drag_dim.is_some()
+        || d.drag_end.is_some()
+        || d.erase.is_some()
+        || d.cl_drag.is_some()
+        || ui.input(|i| i.pointer.any_down());
     if busy || d.sheet.is_none() {
         return;
     }
@@ -2298,8 +2385,18 @@ fn stretch_cutting_line(placed: &[PlacedView], sheet: &Sheet, old: (Pos2, Pos2),
 
 /// The hand-drawn line under a sheet point: a line, or the rim of a circle or arc.
 fn hand_hit(d: &State, s: Pos2, tol: f32) -> Option<(bool, usize)> {
-    let line = d.vlines.iter().enumerate().filter(|(_, c)| c.iter().all(|v| v.is_finite())).map(|(i, c)| (dist_to_segment(s, (pos2(c[0], c[1]), pos2(c[2], c[3]))), (false, i)));
-    let curve = d.vcurves.iter().enumerate().filter(|(_, c)| c.iter().all(|v| v.is_finite())).map(|(i, c)| (((s - pos2(c[0], c[1])).length() - c[2]).abs(), (true, i)));
+    let line = d
+        .vlines
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.iter().all(|v| v.is_finite()))
+        .map(|(i, c)| (dist_to_segment(s, (pos2(c[0], c[1]), pos2(c[2], c[3]))), (false, i)));
+    let curve = d
+        .vcurves
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.iter().all(|v| v.is_finite()))
+        .map(|(i, c)| (((s - pos2(c[0], c[1])).length() - c[2]).abs(), (true, i)));
     line.chain(curve).filter(|(dist, _)| *dist <= tol).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, k)| k)
 }
 
@@ -2335,13 +2432,21 @@ fn centre_segments(app: &SolveApp, r: [f32; 4]) -> Vec<((Pos2, Pos2), bool)> {
             match shape {
                 Shape::Line(a, b) if segment_in_rect(*a, *b, r) => out.push(((*a, *b), false)),
                 Shape::Poly(points) => {
-                    out.extend(points.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).filter(|(a, b)| segment_in_rect(*a, *b, r)).map(|seg| (seg, false)));
+                    out.extend(
+                        points
+                            .windows(2)
+                            .filter_map(|w| Some((*w.first()?, *w.get(1)?)))
+                            .filter(|(a, b)| segment_in_rect(*a, *b, r))
+                            .map(|seg| (seg, false)),
+                    );
                 }
                 _ => {}
             }
         }
     }
-    out.extend(app.drawing.clines.iter().map(|c| (pos2(c[0], c[1]), pos2(c[2], c[3]))).filter(|(a, b)| segment_in_rect(*a, *b, r)).map(|seg| (seg, true)));
+    out.extend(
+        app.drawing.clines.iter().map(|c| (pos2(c[0], c[1]), pos2(c[2], c[3]))).filter(|(a, b)| segment_in_rect(*a, *b, r)).map(|seg| (seg, true)),
+    );
     out
 }
 
@@ -2370,7 +2475,8 @@ fn free_in_box(app: &SolveApp, r: [f32; 4]) -> (Vec<usize>, Vec<usize>, Vec<usiz
             }
         }
     }
-    let texts = app.drawing.texts.iter().enumerate().filter(|(_, t)| t.x >= r[0] && t.x <= r[2] && t.y >= r[1] && t.y <= r[3]).map(|(i, _)| i).collect();
+    let texts =
+        app.drawing.texts.iter().enumerate().filter(|(_, t)| t.x >= r[0] && t.x <= r[2] && t.y >= r[1] && t.y <= r[3]).map(|(i, _)| i).collect();
     (lines, texts, cells)
 }
 
@@ -2413,14 +2519,25 @@ fn ring_in_rect(c: Pos2, rad: f32, r: [f32; 4]) -> bool {
     let nx = c.x.clamp(r[0], r[2]);
     let ny = c.y.clamp(r[1], r[3]);
     let near = ((nx - c.x).powi(2) + (ny - c.y).powi(2)).sqrt();
-    let far = [(r[0], r[1]), (r[0], r[3]), (r[2], r[1]), (r[2], r[3])].iter().map(|(x, y)| ((x - c.x).powi(2) + (y - c.y).powi(2)).sqrt()).fold(0.0_f32, f32::max);
+    let far = [(r[0], r[1]), (r[0], r[3]), (r[2], r[1]), (r[2], r[3])]
+        .iter()
+        .map(|(x, y)| ((x - c.x).powi(2) + (y - c.y).powi(2)).sqrt())
+        .fold(0.0_f32, f32::max);
     near <= rad && rad <= far
 }
 
 /// How many centre lines, marks, free lines and free texts the frame `r` holds.
 fn centre_in_box(app: &SolveApp, r: [f32; 4]) -> usize {
     let (fl, ft, fc) = free_in_box(app, r);
-    fl.len() + ft.len() + fc.len() + app.drawing.ccircles.iter().filter(|c| ring_in_rect(pos2(c[0], c[1]), c[2], r)).count() + centre_segments(app, r).len() + app.drawing.vlines.iter().filter(|c| segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r)).count() + app.drawing.vcurves.iter().filter(|c| ring_in_rect(pos2(c[0], c[1]), c[2], r)).count() + app.drawing.dims.iter().filter(|d| dim_parts(d).into_iter().any(|(a, b)| segment_in_rect(a, b, r))).count() + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
+    fl.len()
+        + ft.len()
+        + fc.len()
+        + app.drawing.ccircles.iter().filter(|c| ring_in_rect(pos2(c[0], c[1]), c[2], r)).count()
+        + centre_segments(app, r).len()
+        + app.drawing.vlines.iter().filter(|c| segment_in_rect(pos2(c[0], c[1]), pos2(c[2], c[3]), r)).count()
+        + app.drawing.vcurves.iter().filter(|c| ring_in_rect(pos2(c[0], c[1]), c[2], r)).count()
+        + app.drawing.dims.iter().filter(|d| dim_parts(d).into_iter().any(|(a, b)| segment_in_rect(a, b, r))).count()
+        + app.drawing.marks.iter().filter(|m| m[0] >= r[0] && m[0] <= r[2] && m[1] >= r[1] && m[1] <= r[3]).count()
 }
 
 /// Erase exactly one centre line (its ends), leaving any line that crosses it.
@@ -2497,7 +2614,10 @@ fn arrow_hit(sheet: &Sheet, placed: &[PlacedView], s: Pos2) -> Option<usize> {
             let Shape::Text(at, _, text, _, _) = t else { continue };
             let mut chars = text.chars();
             let (Some(c), None) = (chars.next(), chars.next()) else { continue };
-            if c.is_ascii_alphanumeric() && (at.distance(*a) < 28.0 || at.distance(*b) < 28.0) && let Some(i) = section_view_for(placed, c) {
+            if c.is_ascii_alphanumeric()
+                && (at.distance(*a) < 28.0 || at.distance(*b) < 28.0)
+                && let Some(i) = section_view_for(placed, c)
+            {
                 return Some(i);
             }
         }
@@ -2653,7 +2773,11 @@ pub fn ribbon(app: &mut SolveApp, id: &str) {
             app.drawing.mark_tool = false;
             app.drawing.erase_tool = false;
             if app.drawing.ord.tool {
-                let msg = if app.drawing.ord.set != [false; 2] { "Ordinate: pick X or Y in the window, click points; the first click of each axis sets its 0 (0x / 0y). Drag a 0 to move it; Ctrl+click sets it again. Backspace undoes, Delete clears, Esc ends." } else { "Ordinate: pick X or Y in the window; the first click sets that axis's 0 (0x or 0y), then click the points to dimension." };
+                let msg = if app.drawing.ord.set != [false; 2] {
+                    "Ordinate: pick X or Y in the window, click points; the first click of each axis sets its 0 (0x / 0y). Drag a 0 to move it; Ctrl+click sets it again. Backspace undoes, Delete clears, Esc ends."
+                } else {
+                    "Ordinate: pick X or Y in the window; the first click sets that axis's 0 (0x or 0y), then click the points to dimension."
+                };
                 app.set_status(msg.to_string(), false);
             }
         }
@@ -2976,7 +3100,13 @@ fn load_cells(cells: &mut Vec<String>, saved: &[serde_json::Value]) {
 /// The dividers of the title block as fractions of its width, from "40,70" (percent): sorted,
 /// at least 6 % apart, at most five.
 fn parse_cols(text: &str) -> Vec<f32> {
-    let mut v: Vec<f32> = text.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).filter(|p| p.is_finite()).map(|p| p / 100.0).filter(|f| (0.08..=0.92).contains(f)).collect();
+    let mut v: Vec<f32> = text
+        .split(',')
+        .filter_map(|t| t.trim().parse::<f32>().ok())
+        .filter(|p| p.is_finite())
+        .map(|p| p / 100.0)
+        .filter(|f| (0.08..=0.92).contains(f))
+        .collect();
     v.sort_by(f32::total_cmp);
     let mut out: Vec<f32> = Vec::new();
     for f in v {
@@ -3072,7 +3202,14 @@ fn explode_detail_block(app: &mut SolveApp) -> bool {
         if body.trim().is_empty() {
             continue;
         }
-        st.texts.push(FreeText { x: bx0 + *x as f32, y: by0 + *y as f32, k: (*h as f32 / th).clamp(0.2, 8.0), font: 0, text: body.chars().take(120).collect(), rot: 0.0 });
+        st.texts.push(FreeText {
+            x: bx0 + *x as f32,
+            y: by0 + *y as f32,
+            k: (*h as f32 / th).clamp(0.2, 8.0),
+            font: 0,
+            text: body.chars().take(120).collect(),
+            rot: 0.0,
+        });
     }
     st.block_free = true;
     st.block_detail = false;
@@ -3290,9 +3427,21 @@ fn open_cell(app: &mut SolveApp, s: Pos2) -> bool {
 fn section_icon(ui: &mut egui::Ui, on: bool) -> egui::Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(t.control_height * 1.3, t.control_height * 1.3), Sense::click());
-    let bg = if on { t.accent_soft } else if response.hovered() { t.hover } else { Color32::TRANSPARENT };
+    let bg = if on {
+        t.accent_soft
+    } else if response.hovered() {
+        t.hover
+    } else {
+        Color32::TRANSPARENT
+    };
     let p = ui.painter();
-    p.rect(rect, t.control_radius, bg, Stroke::new(if on { 1.5 } else { 1.0 }, if on { t.accent } else { t.control_border }), egui::StrokeKind::Inside);
+    p.rect(
+        rect,
+        t.control_radius,
+        bg,
+        Stroke::new(if on { 1.5 } else { 1.0 }, if on { t.accent } else { t.control_border }),
+        egui::StrokeKind::Inside,
+    );
     let ink = if on { t.form_ink } else { t.form_dim };
     let b = rect.shrink(rect.width() * 0.2);
     let (w, h) = (b.width(), b.height());
@@ -3307,13 +3456,22 @@ fn section_icon(ui: &mut egui::Ui, on: bool) -> egui::Response {
     }
     // The left half is outlined only (removed material), with the cutting line between the halves.
     let gone = Rect::from_min_max(pos2(b.left(), face.top()), pos2(face.left(), face.bottom()));
-    p.extend(egui::Shape::dashed_line(&[gone.left_top(), gone.right_top(), gone.right_bottom(), gone.left_bottom(), gone.left_top()], Stroke::new(1.0, ink.gamma_multiply(0.6)), 2.0, 2.0));
+    p.extend(egui::Shape::dashed_line(
+        &[gone.left_top(), gone.right_top(), gone.right_bottom(), gone.left_bottom(), gone.left_top()],
+        Stroke::new(1.0, ink.gamma_multiply(0.6)),
+        2.0,
+        2.0,
+    ));
     let x = face.left();
     p.line_segment([pos2(x, b.top()), pos2(x, b.bottom())], Stroke::new(1.5, t.accent));
     // Viewing arrows at both ends of the cutting line, pointing right.
     for y in [b.top() + 1.0, b.bottom() - 1.0] {
         p.line_segment([pos2(x, y), pos2(x + w * 0.22, y)], Stroke::new(1.5, t.accent));
-        p.add(egui::Shape::convex_polygon(vec![pos2(x + w * 0.3, y), pos2(x + w * 0.18, y - 2.5), pos2(x + w * 0.18, y + 2.5)], t.accent, Stroke::NONE));
+        p.add(egui::Shape::convex_polygon(
+            vec![pos2(x + w * 0.3, y), pos2(x + w * 0.18, y - 2.5), pos2(x + w * 0.18, y + 2.5)],
+            t.accent,
+            Stroke::NONE,
+        ));
     }
     response.on_hover_text("Section view")
 }
@@ -3328,8 +3486,20 @@ fn view_buttons(ui: &mut egui::Ui, view: &mut usize) {
         for (i, label) in labels.iter().enumerate() {
             let (rect, response) = ui.allocate_exact_size(vec2(t.control_height * 1.3, t.control_height * 1.3), Sense::click());
             let on = *view == i;
-            let bg = if on { t.accent_soft } else if response.hovered() { t.hover } else { Color32::TRANSPARENT };
-            ui.painter().rect(rect, t.control_radius, bg, Stroke::new(if on { 1.5 } else { 1.0 }, if on { t.accent } else { t.control_border }), egui::StrokeKind::Inside);
+            let bg = if on {
+                t.accent_soft
+            } else if response.hovered() {
+                t.hover
+            } else {
+                Color32::TRANSPARENT
+            };
+            ui.painter().rect(
+                rect,
+                t.control_radius,
+                bg,
+                Stroke::new(if on { 1.5 } else { 1.0 }, if on { t.accent } else { t.control_border }),
+                egui::StrokeKind::Inside,
+            );
             let ink = if on { t.form_ink } else { t.form_dim };
             let b = rect.shrink(rect.width() * 0.2);
             let k = b.width() * 0.62;
@@ -3513,11 +3683,12 @@ fn dimension_window(app: &mut SolveApp, ctx: &egui::Context) {
     let mut sel_dec = sel.and_then(|i| app.drawing.dims.get(i)).map(|d| d.decimals);
     let sel_dec_before = sel_dec;
     // A diameter or radius: the angle of its leader (degrees, anticlockwise from the right) and how far it runs.
-    let mut lead: Option<(f32, f32)> = sel.and_then(|i| app.drawing.dims.get(i)).filter(|d| matches!(DIM_KINDS[d.kind.min(6)].0, "diameter" | "radius")).map(|d| {
-        let v = d.b - d.a;
-        let deg = v.y.atan2(v.x).to_degrees();
-        ((if deg < 0.0 { deg + 360.0 } else { deg }).clamp(0.0, 360.0), d.at.clamp(0.0, 300.0))
-    });
+    let mut lead: Option<(f32, f32)> =
+        sel.and_then(|i| app.drawing.dims.get(i)).filter(|d| matches!(DIM_KINDS[d.kind.min(6)].0, "diameter" | "radius")).map(|d| {
+            let v = d.b - d.a;
+            let deg = v.y.atan2(v.x).to_degrees();
+            ((if deg < 0.0 { deg + 360.0 } else { deg }).clamp(0.0, 360.0), d.at.clamp(0.0, 300.0))
+        });
     let lead_before = lead;
     let mut sel_style = sel.and_then(|i| app.drawing.dims.get(i)).filter(|_| lead.is_some()).map(|d| d.style);
     let sel_style_before = sel_style;
@@ -3661,7 +3832,15 @@ fn orient_window(app: &mut SolveApp, ctx: &egui::Context) {
     let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_orient"), "orient", "Orient View").show_body(ctx, |ui| {
         ui.label("View direction (the side you look at the part from)");
         ui.horizontal_wrapped(|ui| {
-            for (label, d) in [("+X right", ["1", "0", "0"]), ("-X left", ["-1", "0", "0"]), ("-Y front", ["0", "-1", "0"]), ("+Y back", ["0", "1", "0"]), ("+Z top", ["0", "0", "1"]), ("-Z bottom", ["0", "0", "-1"]), ("Iso", ["1", "-1", "1"])] {
+            for (label, d) in [
+                ("+X right", ["1", "0", "0"]),
+                ("-X left", ["-1", "0", "0"]),
+                ("-Y front", ["0", "-1", "0"]),
+                ("+Y back", ["0", "1", "0"]),
+                ("+Z top", ["0", "0", "1"]),
+                ("-Z bottom", ["0", "0", "-1"]),
+                ("Iso", ["1", "-1", "1"]),
+            ] {
                 if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small).clicked() {
                     v = d.map(String::from);
                 }
@@ -4432,14 +4611,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let dims = &app.drawing.dims;
         // A dimension is easy to catch: a generous reach around its lines.
         let dtol = 18.0 / m.px_per_mm();
-        let dim_hit = |s: Pos2| dims.iter().enumerate().rev().find(|(_, d)| dim_parts(d).into_iter().any(|seg| dist_to_segment(s, seg) <= dtol)).map(|(i, _)| i);
+        let dim_hit = |s: Pos2| {
+            dims.iter().enumerate().rev().find(|(_, d)| dim_parts(d).into_iter().any(|seg| dist_to_segment(s, seg) <= dtol)).map(|(i, _)| i)
+        };
         // The caption under a view: the strip below its frame.
         let caps = &app.drawing.placed;
         let cap_hit = |s: Pos2| {
-            sheet.boxes.iter().rev().find(|b| {
-                let (cx, cy) = caps.get(b.0).map_or((0.0, 0.0), |v| v.cap);
-                (s.x - b.1 - cx).abs() <= 30.0 && s.y <= b.2 - b.4 / 2.0 - 1.0 + cy && s.y >= b.2 - b.4 / 2.0 - 24.0 + cy
-            }).map(|b| b.0)
+            sheet
+                .boxes
+                .iter()
+                .rev()
+                .find(|b| {
+                    let (cx, cy) = caps.get(b.0).map_or((0.0, 0.0), |v| v.cap);
+                    (s.x - b.1 - cx).abs() <= 30.0 && s.y <= b.2 - b.4 / 2.0 - 1.0 + cy && s.y >= b.2 - b.4 / 2.0 - 24.0 + cy
+                })
+                .map(|b| b.0)
         };
         let centre_hit = |s: Pos2| {
             sheet.items.iter().find_map(|(l, sh)| match (l, sh) {
@@ -4460,7 +4646,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         };
         let pointer = response.interact_pointer_pos().and_then(|q| m.to_sheet(q));
         // A view's caption: click selects it, double-click edits it, Delete hides it.
-        if app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.base.is_none() && app.drawing.text_edit.is_none() && app.drawing.cell_edit.is_none() {
+        if app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.base.is_none()
+            && app.drawing.text_edit.is_none()
+            && app.drawing.cell_edit.is_none()
+        {
             if let Some(s) = pointer
                 && (response.clicked() || response.double_clicked())
             {
@@ -4474,7 +4666,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let text = b
                             .and_then(|b| {
                                 sheet.items.iter().find_map(|(l, sh)| match (l, sh) {
-                                    (Layer::Text, Shape::Text(p, _, t, _, _)) if (p.x - b.1).abs() < 2.0 && p.y <= b.2 - b.4 / 2.0 - 1.0 && p.y >= b.2 - b.4 / 2.0 - 24.0 => Some(t.clone()),
+                                    (Layer::Text, Shape::Text(p, _, t, _, _))
+                                        if (p.x - b.1).abs() < 2.0 && p.y <= b.2 - b.4 / 2.0 - 1.0 && p.y >= b.2 - b.4 / 2.0 - 24.0 =>
+                                    {
+                                        Some(t.clone())
+                                    }
                                     _ => None,
                                 })
                             })
@@ -4537,7 +4733,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // An end of the selected centre line: drag it to make the line longer or shorter.
             let second = (s - b).length() < (s - a).length();
             app.drawing.cl_drag = Some((a, b, a, b, second));
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool)
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && (centre_hit(s).is_some() || ui.input(|i| i.modifiers.ctrl))
@@ -4546,7 +4746,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.erase = Some((s, s));
             app.drawing.selected = None;
             app.drawing.sel_dim = None;
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && let Some((v, k)) = letter_hit(sheet, &app.drawing.placed, s)
@@ -4555,7 +4760,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let orig = app.drawing.placed.get(v).map_or([0.0; 4], |p| p.letter_off);
             app.drawing.letter_drag = Some((v, k, s, orig));
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.sym.armed.is_none())
+        } else if (app.drawing.dim_tool.is_none()
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool
+            && app.drawing.sym.armed.is_none())
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && app.drawing.ord.start_drag(s, 6.0 / map.as_ref().map_or(1.0, |m| m.px_per_mm()).max(1e-3))
@@ -4563,7 +4773,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // The end of an ordinate leader: drag it anywhere, and the leader leans toward it.
             app.drawing.selected = None;
             app.drawing.ft_sel = None;
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.sym.armed.is_none())
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool
+            && app.drawing.sym.armed.is_none())
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && let Some(d) = app.drawing.sym.start_drag(s)
@@ -4572,7 +4788,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.sym.drag = Some(d);
             app.drawing.selected = None;
             app.drawing.ft_sel = None;
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && let Some(i) = free_text_hit(&app.drawing.texts, ui_text_height(&app.drawing), s)
@@ -4582,7 +4803,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.ft_drag = Some((i, s, x0, y0));
             app.drawing.ft_sel = Some(i);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on)
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool
+            && app.drawing.block_on)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && let Some(index) = moved_cell_hit(&block_geo(&app.drawing, sheet.width), &app.drawing.cells, ui_text_height(&app.drawing), s)
@@ -4591,7 +4818,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
             app.drawing.cell_drag = Some((index, s, dx, dy));
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && let Some(v) = cap_hit(s).filter(|v| app.drawing.placed.get(*v).is_some_and(|p| p.label.as_deref() != Some("")))
@@ -4601,18 +4833,33 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.cap_drag = Some((v, s, cx, cy));
             app.drawing.caption_sel = Some(v);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool
+            && app.drawing.block_on
+            && !ui.input(|i| i.modifiers.shift))
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = pointer
             && hit(s).is_none()
-            && let Some((i, part)) = fline_hit(&block_geo(&app.drawing, sheet.width), &app.drawing.flines, app.drawing.fl_sel, s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
+            && let Some((i, part)) =
+                fline_hit(&block_geo(&app.drawing, sheet.width), &app.drawing.flines, app.drawing.fl_sel, s, 12.0 / m.px_per_mm().max(1e-3) * 0.5)
         {
             // A free line of the title block: drag it (or, picked, one of its ends).
             let orig = app.drawing.flines.get(i).copied().unwrap_or([0.0; 4]);
             app.drawing.fl_drag = Some((i, part, s, orig));
             app.drawing.fl_sel = Some(i);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool
+            && app.drawing.block_on
+            && !ui.input(|i| i.modifiers.shift))
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
@@ -4623,7 +4870,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.grid_drag = Some(which);
             app.drawing.sel_grid = Some(which);
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool && app.drawing.block_on && !ui.input(|i| i.modifiers.shift))
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool
+            && app.drawing.block_on
+            && !ui.input(|i| i.modifiers.shift))
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
@@ -4634,7 +4888,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (dx, dy, _, _, _) = split_cell(app.drawing.cells.get(index).map_or("", String::as_str));
             app.drawing.cell_drag = Some((index, s, dx, dy));
             app.drawing.selected = None;
-        } else if (app.drawing.dim_tool.is_none() && !app.drawing.ord.tool && app.drawing.proj_tool.is_none() && app.drawing.cline_tool.is_none() && !app.drawing.mark_tool && !app.drawing.erase_tool)
+        } else if (app.drawing.dim_tool.is_none()
+            && !app.drawing.ord.tool
+            && app.drawing.proj_tool.is_none()
+            && app.drawing.cline_tool.is_none()
+            && !app.drawing.mark_tool
+            && !app.drawing.erase_tool)
             && response.drag_started_by(egui::PointerButton::Primary)
             && let Some(s) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
             && hit(s).is_none()
@@ -5008,16 +5267,42 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let mut remove = false;
             let closed = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_dim_text"), "dimension", "Dimension text").show_body(ui.ctx(), |ui| {
                 ui.label("Text shown on the dimension (blank = measured value)");
-                changed = crate::ui_kit::bounded_cell_editor(ui, ui.id().with(("drawing_dim_pop", i)), &mut app.drawing.dims[i].text, "measured value", false, 40).changed();
+                changed = crate::ui_kit::bounded_cell_editor(
+                    ui,
+                    ui.id().with(("drawing_dim_pop", i)),
+                    &mut app.drawing.dims[i].text,
+                    "measured value",
+                    false,
+                    40,
+                )
+                .changed();
                 // Mechanical symbols: each is put before the measured value (`<>` stands for it).
                 ui.label("Symbols (<> = measured value)");
                 ui.horizontal_wrapped(|ui| {
-                    for (sym, tip) in [("Ø", "Diameter"), ("R", "Radius"), ("SQ", "Square"), ("°", "Degree"), ("±", "Plus-minus"), ("CB", "Counterbore"), ("DP", "Depth"), ("M", "Thread"), ("SR", "Spherical radius"), ("SØ", "Spherical diameter"), ("(<>)", "Reference")] {
+                    for (sym, tip) in [
+                        ("Ø", "Diameter"),
+                        ("R", "Radius"),
+                        ("SQ", "Square"),
+                        ("°", "Degree"),
+                        ("±", "Plus-minus"),
+                        ("CB", "Counterbore"),
+                        ("DP", "Depth"),
+                        ("M", "Thread"),
+                        ("SR", "Spherical radius"),
+                        ("SØ", "Spherical diameter"),
+                        ("(<>)", "Reference"),
+                    ] {
                         if ui.small_button(sym).on_hover_text(tip).clicked() {
                             let t = &mut app.drawing.dims[i].text;
                             if t.chars().count() < 36 {
                                 if t.is_empty() {
-                                    *t = if sym == "°" || sym == "±" { format!("<>{sym}") } else if sym == "(<>)" { sym.to_string() } else { format!("{sym}<>") };
+                                    *t = if sym == "°" || sym == "±" {
+                                        format!("<>{sym}")
+                                    } else if sym == "(<>)" {
+                                        sym.to_string()
+                                    } else {
+                                        format!("{sym}<>")
+                                    };
                                 } else if sym == "°" || sym == "±" {
                                     t.push_str(sym);
                                 } else {
@@ -5337,8 +5622,30 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !ui.ctx().egui_wants_keyboard_input() && app.drawing.ft_edit.is_none() {
         let (copy_key, paste_key, dup_key) = ui.input(|i| {
             (
-                i.events.iter().any(|e| matches!(e, egui::Event::Copy | egui::Event::Key { key: egui::Key::C, pressed: true, modifiers: egui::Modifiers { command: true, shift: false, alt: false, .. }, .. })),
-                i.events.iter().any(|e| matches!(e, egui::Event::Paste(_) | egui::Event::Key { key: egui::Key::V, pressed: true, modifiers: egui::Modifiers { command: true, shift: false, alt: false, .. }, .. })),
+                i.events.iter().any(|e| {
+                    matches!(
+                        e,
+                        egui::Event::Copy
+                            | egui::Event::Key {
+                                key: egui::Key::C,
+                                pressed: true,
+                                modifiers: egui::Modifiers { command: true, shift: false, alt: false, .. },
+                                ..
+                            }
+                    )
+                }),
+                i.events.iter().any(|e| {
+                    matches!(
+                        e,
+                        egui::Event::Paste(_)
+                            | egui::Event::Key {
+                                key: egui::Key::V,
+                                pressed: true,
+                                modifiers: egui::Modifiers { command: true, shift: false, alt: false, .. },
+                                ..
+                            }
+                    )
+                }),
                 i.modifiers.command && i.key_pressed(egui::Key::D),
             )
         });
@@ -5452,8 +5759,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             app.drawing.fl_sel = None;
         } else if response.clicked() || ui.input(|inp| inp.key_pressed(egui::Key::Escape)) {
-            let over = match (response.interact_pointer_pos().and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q))), app.drawing.sheet.as_ref().map(|x| x.width), map.as_ref()) {
-                (Some(sp), Some(w), Some(m)) => fline_hit(&block_geo(&app.drawing, w), &app.drawing.flines, None, sp, 12.0 / m.px_per_mm().max(1e-3) * 0.5).map(|h| h.0),
+            let over = match (
+                response.interact_pointer_pos().and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q))),
+                app.drawing.sheet.as_ref().map(|x| x.width),
+                map.as_ref(),
+            ) {
+                (Some(sp), Some(w), Some(m)) => {
+                    fline_hit(&block_geo(&app.drawing, w), &app.drawing.flines, None, sp, 12.0 / m.px_per_mm().max(1e-3) * 0.5).map(|h| h.0)
+                }
                 _ => None,
             };
             app.drawing.fl_sel = over;
@@ -5496,7 +5809,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     // A picked text placed on the sheet: Delete takes it away; a click elsewhere lets it go.
     if let Some(i) = app.drawing.ft_sel {
-        if !ui.ctx().egui_wants_keyboard_input() && app.drawing.ft_edit.is_none() && ui.input(|inp| inp.key_pressed(egui::Key::Delete) || inp.key_pressed(egui::Key::Backspace)) {
+        if !ui.ctx().egui_wants_keyboard_input()
+            && app.drawing.ft_edit.is_none()
+            && ui.input(|inp| inp.key_pressed(egui::Key::Delete) || inp.key_pressed(egui::Key::Backspace))
+        {
             if i < app.drawing.texts.len() {
                 app.drawing.texts.remove(i);
                 refresh(app);
@@ -5504,7 +5820,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.drawing.ft_sel = None;
         } else if response.clicked() || ui.input(|inp| inp.key_pressed(egui::Key::Escape)) {
             let th = ui_text_height(&app.drawing);
-            let over = response.interact_pointer_pos().and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q))).and_then(|s| free_text_hit(&app.drawing.texts, th, s));
+            let over = response
+                .interact_pointer_pos()
+                .and_then(|q| map.as_ref().and_then(|m| m.to_sheet(q)))
+                .and_then(|s| free_text_hit(&app.drawing.texts, th, s));
             app.drawing.ft_sel = over;
         }
     }
@@ -5701,7 +6020,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if app.drawing.drag.is_none() && app.drawing.drag_dim.is_none() && app.drawing.drag_end.is_none() && app.drawing.erase.is_none() && app.drawing.cl_drag.is_none() && app.drawing.box_sel.is_none() && app.drawing.cell_drag.is_none() && app.drawing.grid_drag.is_none() && app.drawing.cap_drag.is_none() && app.drawing.letter_drag.is_none() && app.drawing.ft_drag.is_none() && app.drawing.fl_drag.is_none() && app.drawing.sym.drag.is_none() && !app.drawing.ord.dragging() {
+    if app.drawing.drag.is_none()
+        && app.drawing.drag_dim.is_none()
+        && app.drawing.drag_end.is_none()
+        && app.drawing.erase.is_none()
+        && app.drawing.cl_drag.is_none()
+        && app.drawing.box_sel.is_none()
+        && app.drawing.cell_drag.is_none()
+        && app.drawing.grid_drag.is_none()
+        && app.drawing.cap_drag.is_none()
+        && app.drawing.letter_drag.is_none()
+        && app.drawing.ft_drag.is_none()
+        && app.drawing.fl_drag.is_none()
+        && app.drawing.sym.drag.is_none()
+        && !app.drawing.ord.dragging()
+    {
         crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
     }
 
@@ -5729,7 +6062,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             (None, true) => "Add a view in the panel on the right".to_string(),
             (None, false) => "Computing…".to_string(),
         };
-        painter.text(rect.center(), egui::Align2::CENTER_CENTER, msg, egui::FontId::proportional(Tokens::get().font_heading), Color32::from_gray(210));
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            msg,
+            egui::FontId::proportional(Tokens::get().font_heading),
+            Color32::from_gray(210),
+        );
         return;
     };
     let Some(m) = sheet_map(app, rect, extent) else { return };
@@ -5854,7 +6193,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else if let (Some(from), Some(b), Some(h)) = (from, pb, ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q))) {
             let (dx, dy) = (h.x - b.1, h.y - b.2);
             let horizontal = dx.abs() >= dy.abs();
-            let target = if horizontal { (from.0 + if dx >= 0.0 { 1 } else { -1 }, from.1) } else { (from.0, from.1 + if dy >= 0.0 { 1 } else { -1 }) };
+            let target =
+                if horizontal { (from.0 + if dx >= 0.0 { 1 } else { -1 }, from.1) } else { (from.0, from.1 + if dy >= 0.0 { 1 } else { -1 }) };
             let mut found = (0..6).find(|v| grid_cell(*v, first) == Some(target));
             // The standard layout has no neighbour there: a side view beside the top or bottom view
             // (and the top or bottom one above or below a side view) is placed free, unaligned.
@@ -5875,10 +6215,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // The ghost of that view, at the parent's scale, follows along the line.
             let rot = match (free, found, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
                 (true, Some(2 | 3), 1 | 5) => {
-                    if dx >= 0.0 { 1 } else { 3 }
+                    if dx >= 0.0 {
+                        1
+                    } else {
+                        3
+                    }
                 }
                 (true, Some(1 | 5), 2 | 3) => {
-                    if dy >= 0.0 { 1 } else { 3 }
+                    if dy >= 0.0 {
+                        1
+                    } else {
+                        3
+                    }
                 }
                 _ => 0,
             };
@@ -5892,14 +6240,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 paint_preview(&painter, &m, pv, at);
             }
             painter.line_segment([map(pos2(b.1, b.2)), map(at)], Stroke::new(1.0, Tokens::get().accent));
-            painter.text(map(at) + vec2(14.0, -14.0), egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(Tokens::get().font_body), Tokens::get().accent);
+            painter.text(
+                map(at) + vec2(14.0, -14.0),
+                egui::Align2::LEFT_BOTTOM,
+                label,
+                egui::FontId::proportional(Tokens::get().font_body),
+                Tokens::get().accent,
+            );
             if let Some(view) = found
                 && response.clicked_by(egui::PointerButton::Primary)
             {
                 let dashed = app.drawing.placed.get(parent).is_some_and(|v| v.dashed);
                 let n = app.drawing.placed.len();
                 app.drawing.placed.push(PlacedView {
-            spin: 0.0,
+                    spin: 0.0,
                     view,
                     x: f64::from(at.x),
                     y: f64::from(at.y),
@@ -5908,7 +6262,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     dims: false,
                     section: None,
                     section_line: None,
-        section_path: None,
+                    section_path: None,
                     detail: None,
                     align: if free { None } else { Some((parent, horizontal)) },
                     axis: None,
@@ -5920,8 +6274,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     flip: false,
                     colour: app.drawing.placed.get(parent).is_some_and(|v| v.colour),
                     rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
-                        (true, 2 | 3, 1 | 5) => if dx >= 0.0 { 1 } else { 3 },
-                        (true, 1 | 5, 2 | 3) => if dy >= 0.0 { 1 } else { 3 },
+                        (true, 2 | 3, 1 | 5) => {
+                            if dx >= 0.0 {
+                                1
+                            } else {
+                                3
+                            }
+                        }
+                        (true, 1 | 5, 2 | 3) => {
+                            if dy >= 0.0 {
+                                1
+                            } else {
+                                3
+                            }
+                        }
                         _ => 0,
                     },
                 });
@@ -5990,7 +6356,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let q = snap_point(sheet, s, tol).unwrap_or(s);
                 match from {
                     Some(f) if shift && kind == 0 => {
-                        if (q.x - f.x).abs() >= (q.y - f.y).abs() { pos2(q.x, f.y) } else { pos2(f.x, q.y) }
+                        if (q.x - f.x).abs() >= (q.y - f.y).abs() {
+                            pos2(q.x, f.y)
+                        } else {
+                            pos2(f.x, q.y)
+                        }
                     }
                     _ => q,
                 }
@@ -6091,7 +6461,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .flat_map(|(l, sh)| -> Vec<(Pos2, Pos2)> {
                         match (l, sh) {
                             (Layer::Visible | Layer::Hidden, Shape::Line(a, b)) => vec![(*a, *b)],
-                            (Layer::Visible | Layer::Hidden, Shape::Poly(pts)) => pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).collect(),
+                            (Layer::Visible | Layer::Hidden, Shape::Poly(pts)) => {
+                                pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).collect()
+                            }
                             _ => Vec::new(),
                         }
                     })
@@ -6148,7 +6520,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 3 => "Circular centre line: click the centre, then a point on the circle (Esc ends)",
                 _ => "Centre mark: click a circle or point (Esc ends)",
             };
-            painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
+            painter.text(
+                response.rect.left_top() + vec2(8.0, 8.0),
+                egui::Align2::LEFT_TOP,
+                hint,
+                egui::FontId::proportional(Tokens::get().font_body),
+                accent,
+            );
             if let Some(t) = hover.and_then(target) {
                 painter.circle_stroke(map(pos2(t[0], t[1])), 7.0, Stroke::new(2.0, accent));
             }
@@ -6227,8 +6605,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else {
             let accent = Tokens::get().accent;
             let hover = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
-            let hint = if picked.is_empty() { "Detail View: click the centre of the detail on a view (Esc ends)" } else { "Detail View: click a point on the circle" };
-            painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
+            let hint = if picked.is_empty() {
+                "Detail View: click the centre of the detail on a view (Esc ends)"
+            } else {
+                "Detail View: click a point on the circle"
+            };
+            painter.text(
+                response.rect.left_top() + vec2(8.0, 8.0),
+                egui::Align2::LEFT_TOP,
+                hint,
+                egui::FontId::proportional(Tokens::get().font_body),
+                accent,
+            );
             if let (Some(h), Some(first)) = (hover, picked.first().copied()) {
                 painter.circle_stroke(map(first), (h - first).length() * px_per_mm, Stroke::new(2.0, accent));
             }
@@ -6240,7 +6628,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let views: Vec<&(usize, f32, f32, f32, f32)> = sheet
                         .boxes
                         .iter()
-                        .filter(|bx| app.drawing.placed.get(bx.0).is_some_and(|v| v.view < 6 && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none()))
+                        .filter(|bx| {
+                            app.drawing
+                                .placed
+                                .get(bx.0)
+                                .is_some_and(|v| v.view < 6 && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none())
+                        })
                         .collect();
                     let src = views.iter().find(|bx| (a.x - bx.1).abs() <= bx.3 / 2.0 && (a.y - bx.2).abs() <= bx.4 / 2.0).copied().copied();
                     let k = src.and_then(|bx| sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1));
@@ -6274,8 +6667,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let hover = ui.input(|i| i.pointer.hover_pos()).and_then(|q| m.to_sheet(q));
             let first_pt = picked.first().copied();
             let pick = |c: Pos2| -> Pos2 { section_snap(sheet, c, first_pt, tol).0 };
-            let hint = if picked.is_empty() { "Section View: click the first point of the cutting line on any view (hole centres snap, Esc ends)" } else { "Section View: click the second point" };
-            painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
+            let hint = if picked.is_empty() {
+                "Section View: click the first point of the cutting line on any view (hole centres snap, Esc ends)"
+            } else {
+                "Section View: click the second point"
+            };
+            painter.text(
+                response.rect.left_top() + vec2(8.0, 8.0),
+                egui::Align2::LEFT_TOP,
+                hint,
+                egui::FontId::proportional(Tokens::get().font_body),
+                accent,
+            );
             // Every hole centre is a dot to aim at, so the cutting line is easy to put through them.
             for (q, _) in sheet.rounds().circles.iter().take(400) {
                 painter.circle_filled(map(*q), 2.5, accent.gamma_multiply(0.7));
@@ -6299,9 +6702,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let tops: Vec<&(usize, f32, f32, f32, f32)> = sheet
                         .boxes
                         .iter()
-                        .filter(|bx| app.drawing.placed.get(bx.0).is_some_and(|v| v.view < 6 && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none()))
+                        .filter(|bx| {
+                            app.drawing
+                                .placed
+                                .get(bx.0)
+                                .is_some_and(|v| v.view < 6 && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none())
+                        })
                         .collect();
-                    let top = tops.iter().find(|bx| (a.x - bx.1).abs() <= bx.3 / 2.0 && (a.y - bx.2).abs() <= bx.4 / 2.0).or(tops.first()).copied().copied();
+                    let top = tops
+                        .iter()
+                        .find(|bx| (a.x - bx.1).abs() <= bx.3 / 2.0 && (a.y - bx.2).abs() <= bx.4 / 2.0)
+                        .or(tops.first())
+                        .copied()
+                        .copied();
                     let k = top.and_then(|bx| sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1));
                     let ctr = top.and_then(|bx| sheet.centres.iter().find(|s| s.0 == bx.0).map(|s| (s.1, s.2)));
                     match (top, k, ctr) {
@@ -6316,16 +6729,29 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             // A straight left-right or up-down cut puts its view on the line through the parent's
                             // centre (below it, or beside it), and the view keeps to that line from then on.
                             let (nx, ny) = section_side((d.x / d.length().max(1e-6), d.y / d.length().max(1e-6)));
-                            let along = if nx.abs() <= 0.1 { Some(false) } else if ny.abs() <= 0.1 { Some(true) } else { None };
+                            let along = if nx.abs() <= 0.1 {
+                                Some(false)
+                            } else if ny.abs() <= 0.1 {
+                                Some(true)
+                            } else {
+                                None
+                            };
                             let axis = along.map(|horizontal| (horizontal, if horizontal { bx.2 } else { bx.1 }));
                             // An angled cut: its view lies on the line through the parent's centre across the cut, and slides on it.
-                            let ray = if along.is_none() { free_spot_ray(sheet, pos2(bx.1, bx.2), vec2(nx, ny), (want - pos2(bx.1, bx.2)).length(), (bx.3, bx.4)) } else { None };
+                            let ray = if along.is_none() {
+                                free_spot_ray(sheet, pos2(bx.1, bx.2), vec2(nx, ny), (want - pos2(bx.1, bx.2)).length(), (bx.3, bx.4))
+                            } else {
+                                None
+                            };
                             let at = ray.unwrap_or_else(|| free_spot_on(sheet, want, (bx.3, bx.4), axis));
                             let link = along.map(|horizontal| (bx.0, horizontal));
                             let axis_link = ray.map(|_| (bx.0, nx, ny));
-                            sec_new = Some(([p1.0, p1.1, p2.0, p2.1], k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view), link, axis_link));
+                            sec_new =
+                                Some(([p1.0, p1.1, p2.0, p2.1], k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view), link, axis_link));
                         }
-                        (None, _, _) | (_, None, _) | (_, _, None) => sec_msg = Some("Section View needs a view on the sheet to cut: add one first".to_string()),
+                        (None, _, _) | (_, None, _) | (_, _, None) => {
+                            sec_msg = Some("Section View needs a view on the sheet to cut: add one first".to_string())
+                        }
                         _ => {}
                     }
                     app.drawing.sec_tool = None;
@@ -6350,7 +6776,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else {
                 "Stepped Section: click each bend; double-click or Enter at the last point"
             };
-            painter.text(response.rect.left_top() + vec2(8.0, 8.0), egui::Align2::LEFT_TOP, hint, egui::FontId::proportional(Tokens::get().font_body), accent);
+            painter.text(
+                response.rect.left_top() + vec2(8.0, 8.0),
+                egui::Align2::LEFT_TOP,
+                hint,
+                egui::FontId::proportional(Tokens::get().font_body),
+                accent,
+            );
             for (q, _) in sheet.rounds().circles.iter().take(400) {
                 painter.circle_filled(map(*q), 2.5, accent.gamma_multiply(0.7));
             }
@@ -6379,7 +6811,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.line_segment([map(l), map(at)], Stroke::new(2.0, accent.gamma_multiply(0.7)));
                 }
             }
-            let mut finish = ui.input(|i| i.key_pressed(egui::Key::Enter) || i.pointer.button_clicked(egui::PointerButton::Middle)) || response.double_clicked();
+            let mut finish =
+                ui.input(|i| i.key_pressed(egui::Key::Enter) || i.pointer.button_clicked(egui::PointerButton::Middle)) || response.double_clicked();
             if !finish
                 && response.clicked_by(egui::PointerButton::Primary)
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
@@ -6396,10 +6829,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let tops: Vec<&(usize, f32, f32, f32, f32)> = sheet
                         .boxes
                         .iter()
-                        .filter(|bx| app.drawing.placed.get(bx.0).is_some_and(|v| v.view < 6 && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none()))
+                        .filter(|bx| {
+                            app.drawing
+                                .placed
+                                .get(bx.0)
+                                .is_some_and(|v| v.view < 6 && v.rot == 0 && v.section.is_none() && v.custom.is_none() && v.detail.is_none())
+                        })
                         .collect();
                     let a = pts.first().copied().unwrap_or_default();
-                    let top = tops.iter().find(|bx| (a.x - bx.1).abs() <= bx.3 / 2.0 && (a.y - bx.2).abs() <= bx.4 / 2.0).or(tops.first()).copied().copied();
+                    let top = tops
+                        .iter()
+                        .find(|bx| (a.x - bx.1).abs() <= bx.3 / 2.0 && (a.y - bx.2).abs() <= bx.4 / 2.0)
+                        .or(tops.first())
+                        .copied()
+                        .copied();
                     let k = top.and_then(|bx| sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1));
                     let ctr = top.and_then(|bx| sheet.centres.iter().find(|s| s.0 == bx.0).map(|s| (s.1, s.2)));
                     match (top, k, ctr) {
@@ -6407,7 +6850,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let model = |q: Pos2| [cx + (q.x - bx.1) / k, cy + (q.y - bx.2) / k];
                             let path: Vec<f32> = pts.iter().flat_map(|q| model(*q)).collect();
                             // The longest piece sets the direction of the cut: the view lies across it.
-                            let long = pts.windows(2).filter_map(|w| if let [p, q] = w { Some(*q - *p) } else { None }).max_by(|u, v| u.length().total_cmp(&v.length())).unwrap_or_default();
+                            let long = pts
+                                .windows(2)
+                                .filter_map(|w| if let [p, q] = w { Some(*q - *p) } else { None })
+                                .max_by(|u, v| u.length().total_cmp(&v.length()))
+                                .unwrap_or_default();
                             let want = section_spot(long, (bx.1, bx.2, bx.3, bx.4));
                             let at = free_spot(sheet, want, (bx.3, bx.4));
                             sec_path_new = Some((path, k, at.x, at.y, app.drawing.placed.get(bx.0).map_or(1, |v| v.view)));
@@ -6428,7 +6875,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let idle = app.drawing.dim_tool.is_none()
             && app.drawing.proj_tool.is_none()
             && app.drawing.cline_tool.is_none()
-            && app.drawing.sec_tool.is_none() && app.drawing.sec_poly.is_none() && app.drawing.det_tool.is_none()
+            && app.drawing.sec_tool.is_none()
+            && app.drawing.sec_poly.is_none()
+            && app.drawing.det_tool.is_none()
             && !app.drawing.mark_tool
             && !app.drawing.erase_tool
             && app.drawing.base.is_none()
@@ -6456,10 +6905,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 painter.add(egui::Shape::line(pts.iter().map(|p| map(*p)).collect(), Stroke::new(7.0, accent.gamma_multiply(0.35))));
                             }
                             Shape::Circle(c, r) => {
-                                painter.add(egui::Shape::line(arc_points(*c, *r, 0.0, 360.0).into_iter().map(map).collect(), Stroke::new(7.0, accent.gamma_multiply(0.35))));
+                                painter.add(egui::Shape::line(
+                                    arc_points(*c, *r, 0.0, 360.0).into_iter().map(map).collect(),
+                                    Stroke::new(7.0, accent.gamma_multiply(0.35)),
+                                ));
                             }
                             Shape::Arc(c, r, a0, a1) => {
-                                painter.add(egui::Shape::line(arc_points(*c, *r, *a0, *a1).into_iter().map(map).collect(), Stroke::new(7.0, accent.gamma_multiply(0.35))));
+                                painter.add(egui::Shape::line(
+                                    arc_points(*c, *r, *a0, *a1).into_iter().map(map).collect(),
+                                    Stroke::new(7.0, accent.gamma_multiply(0.35)),
+                                ));
                             }
                             Shape::Text(..) => {}
                         }
@@ -6516,7 +6971,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let idle = app.drawing.dim_tool.is_none()
             && app.drawing.proj_tool.is_none()
             && app.drawing.cline_tool.is_none()
-            && app.drawing.sec_tool.is_none() && app.drawing.sec_poly.is_none() && app.drawing.det_tool.is_none()
+            && app.drawing.sec_tool.is_none()
+            && app.drawing.sec_poly.is_none()
+            && app.drawing.det_tool.is_none()
             && !app.drawing.mark_tool
             && !app.drawing.erase_tool
             && app.drawing.base.is_none()
@@ -6654,7 +7111,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.line_segment([map(u), map(v)], Stroke::new(1.5, accent));
                 }
                 let (l0, l1) = dim_segment(&tmp);
-                painter.text(map(pos2((l0.x + l1.x) / 2.0, (l0.y + l1.y) / 2.0)) + vec2(0.0, -4.0), egui::Align2::CENTER_BOTTOM, if (0..=4).contains(&app.drawing.dim_decimals) { format!("{measured:.*}", app.drawing.dim_decimals as usize) } else { format!("{measured:.1}") }, egui::FontId::proportional(Tokens::get().font_body + 2.0), accent);
+                painter.text(
+                    map(pos2((l0.x + l1.x) / 2.0, (l0.y + l1.y) / 2.0)) + vec2(0.0, -4.0),
+                    egui::Align2::CENTER_BOTTOM,
+                    if (0..=4).contains(&app.drawing.dim_decimals) {
+                        format!("{measured:.*}", app.drawing.dim_decimals as usize)
+                    } else {
+                        format!("{measured:.1}")
+                    },
+                    egui::FontId::proportional(Tokens::get().font_body + 2.0),
+                    accent,
+                );
             }
             if response.clicked_by(egui::PointerButton::Primary)
                 && let Some(c) = response.interact_pointer_pos().and_then(|q| m.to_sheet(q))
@@ -6677,7 +7144,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let again = if app.drawing.dim_back || kind == 8 { 7 } else { kind };
                 // A click on a line (away from its ends and corners) takes both its ends, for Smart, Horizontal, Vertical and Aligned.
                 let tool_kind = app.drawing.dim_tool.as_ref().filter(|(k, p)| matches!(*k, 0 | 1 | 2 | 7) && p.is_empty()).map(|(k, _)| *k);
-                let seg_pick = if tool_kind.is_some() && hit_pt.is_none() && snap_circle(sheet, c, tol * 2.5).is_none() { nearest_segment(sheet, c, tol) } else { None };
+                let seg_pick = if tool_kind.is_some() && hit_pt.is_none() && snap_circle(sheet, c, tol * 2.5).is_none() {
+                    nearest_segment(sheet, c, tol)
+                } else {
+                    None
+                };
                 if let Some((centre, r)) = first_circle {
                     app.drawing.dim_tool = Some((8, vec![centre, pos2(r, 0.0)]));
                 } else if kind == 8 {
@@ -6691,7 +7162,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     } else {
                         let v = c - centre;
                         let len = v.length().max(1e-6);
-                        new_dim = Some(DimItem { kind: 3, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0, decimals: -1, style: 0 });
+                        new_dim = Some(DimItem {
+                            kind: 3,
+                            a: centre,
+                            b: centre + v / len * r,
+                            at: len,
+                            text: String::new(),
+                            slide: 0.0,
+                            decimals: -1,
+                            style: 0,
+                        });
                         app.drawing.dim_tool = Some((7, Vec::new()));
                     }
                 } else if let (Some((a, b)), Some(k)) = (seg_pick, tool_kind) {
@@ -6700,7 +7180,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     // Balloon or note: the point on the part, then where it goes; balloons are numbered in turn.
                     if let Some(target) = picks.first().copied() {
                         let number = app.drawing.dims.iter().filter(|d| d.kind == 5).count() + 1;
-                        let text = if kind == 5 { number.to_string() } else if app.drawing.note_text.trim().is_empty() { "NOTE".to_string() } else { app.drawing.note_text.trim().to_string() };
+                        let text = if kind == 5 {
+                            number.to_string()
+                        } else if app.drawing.note_text.trim().is_empty() {
+                            "NOTE".to_string()
+                        } else {
+                            app.drawing.note_text.trim().to_string()
+                        };
                         new_dim = Some(DimItem { kind, a: target, b: snap_leader(target, c), at: 0.0, text, slide: 0.0, decimals: -1, style: 0 });
                         app.drawing.dim_tool = Some((again, Vec::new()));
                     } else {
@@ -6711,7 +7197,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if let (Some(centre), Some(r)) = (picks.first().copied(), picks.get(1).map(|p| p.x)) {
                         let v = c - centre;
                         let len = v.length().max(1e-6);
-                        new_dim = Some(DimItem { kind, a: centre, b: centre + v / len * r, at: len, text: String::new(), slide: 0.0, decimals: -1, style: 0 });
+                        new_dim = Some(DimItem {
+                            kind,
+                            a: centre,
+                            b: centre + v / len * r,
+                            at: len,
+                            text: String::new(),
+                            slide: 0.0,
+                            decimals: -1,
+                            style: 0,
+                        });
                         app.drawing.dim_tool = Some((again, Vec::new()));
                     } else if let Some((centre, r)) = snap_circle(sheet, c, tol * 2.5) {
                         app.drawing.dim_tool = Some((kind, vec![centre, pos2(r, 0.0)]));
@@ -6771,7 +7266,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if app.drawing.centre_box.is_some() {
                 let n = centre_in_box(app, r);
-                painter.text(screen.left_top() + vec2(4.0, -4.0), egui::Align2::LEFT_BOTTOM, format!("{n} lines/marks/texts selected: press Delete to remove (Shift+drag frames the title block)"), egui::FontId::proportional(Tokens::get().font_body), accent);
+                painter.text(
+                    screen.left_top() + vec2(4.0, -4.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{n} lines/marks/texts selected: press Delete to remove (Shift+drag frames the title block)"),
+                    egui::FontId::proportional(Tokens::get().font_body),
+                    accent,
+                );
             }
         }
     }
@@ -6825,10 +7326,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let n = 72;
             let a1 = if c[4] < c[3] { c[4] + 360.0 } else { c[4] };
             let (a0, a1) = (c[3].to_radians(), a1.to_radians());
-            let pts: Vec<Pos2> = (0..=n).map(|k| {
-                let t = a0 + (a1 - a0) * k as f32 / n as f32;
-                map(pos2(c[0] + c[2] * t.cos(), c[1] + c[2] * t.sin()))
-            }).collect();
+            let pts: Vec<Pos2> = (0..=n)
+                .map(|k| {
+                    let t = a0 + (a1 - a0) * k as f32 / n as f32;
+                    map(pos2(c[0] + c[2] * t.cos(), c[1] + c[2] * t.sin()))
+                })
+                .collect();
             painter.add(egui::Shape::line(pts, Stroke::new(3.0, accent)));
         }
     }
@@ -6839,7 +7342,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             painter.circle(map(q), 4.0, Color32::WHITE, Stroke::new(2.0, accent));
         }
         let mid = pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
-        painter.text(map(mid) + vec2(6.0, -6.0), egui::Align2::LEFT_BOTTOM, format!("centre line {:.1} mm on sheet", (b - a).length()), egui::FontId::proportional(Tokens::get().font_body), accent);
+        painter.text(
+            map(mid) + vec2(6.0, -6.0),
+            egui::Align2::LEFT_BOTTOM,
+            format!("centre line {:.1} mm on sheet", (b - a).length()),
+            egui::FontId::proportional(Tokens::get().font_body),
+            accent,
+        );
     }
     // Frames of the placed views: the selected one stands out; a dragged one follows the pointer.
     let accent = Tokens::get().accent;
@@ -6882,7 +7391,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let (sx, sy, gx, gy) = snap_axes(sheet, b.0, x, y, 14.0);
                         (x, y) = (sx, sy);
                         let guide = Stroke::new(1.0, Color32::from_rgb(235, 120, 40));
-                        for line in gx.map(|gx| (pos2(gx, -1000.0), pos2(gx, 2000.0))).into_iter().chain(gy.map(|gy| (pos2(-1000.0, gy), pos2(2000.0, gy)))) {
+                        for line in
+                            gx.map(|gx| (pos2(gx, -1000.0), pos2(gx, 2000.0))).into_iter().chain(gy.map(|gy| (pos2(-1000.0, gy), pos2(2000.0, gy))))
+                        {
                             painter.extend(egui::Shape::dashed_line(&[map(line.0), map(line.1)], guide, 6.0, 4.0));
                         }
                     }
@@ -6934,7 +7445,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             dims: false,
             section: None,
             section_line: None,
-        section_path: None,
+            section_path: None,
             detail: Some(d),
             align: None,
             axis: None,
@@ -7061,7 +7572,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let mut moved = vec![index];
             for _ in 0..4 {
                 for k in 0..app.drawing.placed.len() {
-                    let follows = app.drawing.placed[k].align.is_some_and(|(p, _)| moved.contains(&p)) || app.drawing.placed[k].axis.is_some_and(|(p, _, _)| moved.contains(&p));
+                    let follows = app.drawing.placed[k].align.is_some_and(|(p, _)| moved.contains(&p))
+                        || app.drawing.placed[k].axis.is_some_and(|(p, _, _)| moved.contains(&p));
                     if follows && !moved.contains(&k) {
                         app.drawing.placed[k].x += ddx;
                         app.drawing.placed[k].y += ddy;
@@ -7183,7 +7695,14 @@ fn section_snap(sheet: &Sheet, c: Pos2, first: Option<Pos2>, tol: f32) -> (Pos2,
     // through the holes it lines up with.
     let reach = tol * 0.35;
     let nearest = |v: f32, pick: &dyn Fn(&Pos2) -> f32| {
-        sheet.rounds().circles.iter().take(400).map(|(q, _)| pick(q)).filter(|t| (t - v).abs() <= reach).min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()))
+        sheet
+            .rounds()
+            .circles
+            .iter()
+            .take(400)
+            .map(|(q, _)| pick(q))
+            .filter(|t| (t - v).abs() <= reach)
+            .min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()))
     };
     if let Some(x) = nearest(p.x, &|q| q.x) {
         p.x = x;
@@ -7326,7 +7845,8 @@ fn free_spot_ray(sheet: &Sheet, origin: Pos2, dir: egui::Vec2, start: f32, size:
     let area = |cx: f32, cy: f32| (cx - w / 2.0 - 6.0, cx + w / 2.0 + 6.0, cy - h / 2.0 - 22.0, cy + h / 2.0 + 6.0);
     let hit = |a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)| a.0 < b.1 && b.0 < a.1 && a.2 < b.3 && b.2 < a.3;
     let block = (sheet.width * 0.52, sheet.width, 0.0, 95.0);
-    let taken: Vec<(f32, f32, f32, f32)> = sheet.boxes.iter().map(|b| (b.1 - b.3 / 2.0 - 6.0, b.1 + b.3 / 2.0 + 6.0, b.2 - b.4 / 2.0 - 22.0, b.2 + b.4 / 2.0 + 6.0)).collect();
+    let taken: Vec<(f32, f32, f32, f32)> =
+        sheet.boxes.iter().map(|b| (b.1 - b.3 / 2.0 - 6.0, b.1 + b.3 / 2.0 + 6.0, b.2 - b.4 / 2.0 - 22.0, b.2 + b.4 / 2.0 + 6.0)).collect();
     let (start, len) = (if start.is_finite() { start.max(0.0) } else { 0.0 }, dir.length());
     if len < 1e-6 || !len.is_finite() {
         return None;
@@ -7334,7 +7854,12 @@ fn free_spot_ray(sheet: &Sheet, origin: Pos2, dir: egui::Vec2, start: f32, size:
     let u = dir / len;
     (0..200).map(|i| origin + u * (start + 5.0 * i as f32)).find(|q| {
         let me = area(q.x, q.y);
-        q.x - w / 2.0 >= 15.0 && q.x + w / 2.0 <= sheet.width - 15.0 && q.y - h / 2.0 - 22.0 >= 15.0 && q.y + h / 2.0 + 6.0 <= sheet.height - 15.0 && !hit(me, block) && !taken.iter().any(|t| hit(me, *t))
+        q.x - w / 2.0 >= 15.0
+            && q.x + w / 2.0 <= sheet.width - 15.0
+            && q.y - h / 2.0 - 22.0 >= 15.0
+            && q.y + h / 2.0 + 6.0 <= sheet.height - 15.0
+            && !hit(me, block)
+            && !taken.iter().any(|t| hit(me, *t))
     })
 }
 
@@ -7599,11 +8124,7 @@ fn snap_leader(from: Pos2, to: Pos2) -> Pos2 {
     let step = 15f32.to_radians();
     let ang = v.y.atan2(v.x);
     let snapped = (ang / step).round() * step;
-    if (snapped - ang).abs() <= 4f32.to_radians() {
-        from + vec2(snapped.cos(), snapped.sin()) * len
-    } else {
-        to
-    }
+    if (snapped - ang).abs() <= 4f32.to_radians() { from + vec2(snapped.cos(), snapped.sin()) * len } else { to }
 }
 
 fn snap_axes(sheet: &Sheet, index: usize, x: f32, y: f32, tol: f32) -> (f32, f32, Option<f32>, Option<f32>) {
@@ -7775,7 +8296,11 @@ fn pdf_document(pages: &[PdfPage]) -> Vec<u8> {
             body.extend(&rgb);
             body.extend(b"\nendstream");
             object(&mut out, &body);
-            let mut mask = format!("<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>\nstream\n", alpha.len()).into_bytes();
+            let mut mask = format!(
+                "<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>\nstream\n",
+                alpha.len()
+            )
+            .into_bytes();
             mask.extend(&alpha);
             mask.extend(b"\nendstream");
             object(&mut out, &mask);
@@ -7839,7 +8364,10 @@ fn pdf_thai_objects(out: &mut Vec<u8>, offsets: &mut Vec<usize>, first: usize) {
         out.extend(body);
         out.extend(b"\nendobj\n");
     };
-    object(out, format!("<< /Type /Font /Subtype /Type0 /BaseFont /NotoSansThai /Encoding /Identity-H /DescendantFonts [{} 0 R] >>", first + 1).as_bytes());
+    object(
+        out,
+        format!("<< /Type /Font /Subtype /Type0 /BaseFont /NotoSansThai /Encoding /Identity-H /DescendantFonts [{} 0 R] >>", first + 1).as_bytes(),
+    );
     object(
         out,
         format!(
@@ -8009,7 +8537,8 @@ fn shape_key(sheet: &Sheet, shape: &Shape) -> Option<LineKey> {
         Shape::Text(..) => return None,
     };
     let mid = pos2((p.x + q.x) / 2.0, (p.y + q.y) / 2.0);
-    let inside = |b: &&(usize, f32, f32, f32, f32), margin: f32| (mid.x - b.1).abs() <= b.3 / 2.0 + margin && (mid.y - b.2).abs() <= b.4 / 2.0 + margin;
+    let inside =
+        |b: &&(usize, f32, f32, f32, f32), margin: f32| (mid.x - b.1).abs() <= b.3 / 2.0 + margin && (mid.y - b.2).abs() <= b.4 / 2.0 + margin;
     let found = sheet.boxes.iter().rev().find(|b| inside(b, 0.0)).or_else(|| sheet.boxes.iter().rev().find(|b| inside(b, 8.0)));
     let q100 = |v: f32| (v * 100.0).round().clamp(-1.0e8, 1.0e8) as i32;
     match found {
@@ -8132,7 +8661,16 @@ mod hand_drawn_tests {
     /// even when another view is in the way; where that line is full it goes to the nearest free place.
     #[test]
     fn a_section_view_is_placed_on_the_axis_of_its_parent() {
-        let sheet = |boxes: Vec<(usize, f32, f32, f32, f32)>| Sheet { width: 420.0, height: 297.0, note: String::new(), items: Vec::new(), boxes, scales: Vec::new(), centres: Vec::new(), rounds: std::sync::OnceLock::new() };
+        let sheet = |boxes: Vec<(usize, f32, f32, f32, f32)>| Sheet {
+            width: 420.0,
+            height: 297.0,
+            note: String::new(),
+            items: Vec::new(),
+            boxes,
+            scales: Vec::new(),
+            centres: Vec::new(),
+            rounds: std::sync::OnceLock::new(),
+        };
         let parent = (0, 120.0, 200.0, 80.0, 80.0);
         let size = (60.0, 30.0);
         let below = free_spot_on(&sheet(vec![parent]), pos2(133.0, 110.0), size, Some((false, 120.0)));
@@ -8152,8 +8690,21 @@ mod hand_drawn_tests {
     /// and shows that guide from a wider angle.
     #[test]
     fn an_angled_cut_finds_the_middle_of_the_part() {
-        let items = vec![(Layer::Visible, Shape::Circle(pos2(100.0, 100.0), 50.0)), (Layer::Visible, Shape::Circle(pos2(100.0, 100.0), 10.0)), (Layer::Visible, Shape::Circle(pos2(140.0, 60.0), 4.0))];
-        let sheet = Sheet { width: 420.0, height: 297.0, note: String::new(), items, boxes: Vec::new(), scales: Vec::new(), centres: Vec::new(), rounds: std::sync::OnceLock::new() };
+        let items = vec![
+            (Layer::Visible, Shape::Circle(pos2(100.0, 100.0), 50.0)),
+            (Layer::Visible, Shape::Circle(pos2(100.0, 100.0), 10.0)),
+            (Layer::Visible, Shape::Circle(pos2(140.0, 60.0), 4.0)),
+        ];
+        let sheet = Sheet {
+            width: 420.0,
+            height: 297.0,
+            note: String::new(),
+            items,
+            boxes: Vec::new(),
+            scales: Vec::new(),
+            centres: Vec::new(),
+            rounds: std::sync::OnceLock::new(),
+        };
         let first = pos2(40.0, 40.0);
         // The middle lies 45 degrees from the first point; the pointer is a hair off that line, far beyond the middle.
         let (p, guides) = section_snap(&sheet, pos2(171.0, 170.0), Some(first), 3.0);
@@ -8168,8 +8719,39 @@ mod hand_drawn_tests {
     /// Stretching a section's chain line moves the cutting line itself (so its arrows follow), at the right place and order.
     #[test]
     fn stretching_the_cutting_line_moves_the_section_line() {
-        let sheet = Sheet { width: 420.0, height: 297.0, note: String::new(), items: Vec::new(), boxes: vec![(0, 100.0, 150.0, 80.0, 80.0)], scales: vec![(0, 2.0)], centres: vec![(0, 10.0, 20.0)], rounds: std::sync::OnceLock::new() };
-        let view = |section_line: Option<[f32; 4]>| PlacedView { view: 0, x: 100.0, y: 150.0, scale: String::new(), dashed: false, dims: false, section: section_line.map(|_| (0, String::new())), section_line, section_path: None, detail: None, align: None, axis: None, custom: None, rot: 0, spin: 0.0, label: None, letter: String::new(), cap: (0.0, 0.0), letter_off: [0.0; 4], flip: false, colour: false };
+        let sheet = Sheet {
+            width: 420.0,
+            height: 297.0,
+            note: String::new(),
+            items: Vec::new(),
+            boxes: vec![(0, 100.0, 150.0, 80.0, 80.0)],
+            scales: vec![(0, 2.0)],
+            centres: vec![(0, 10.0, 20.0)],
+            rounds: std::sync::OnceLock::new(),
+        };
+        let view = |section_line: Option<[f32; 4]>| PlacedView {
+            view: 0,
+            x: 100.0,
+            y: 150.0,
+            scale: String::new(),
+            dashed: false,
+            dims: false,
+            section: section_line.map(|_| (0, String::new())),
+            section_line,
+            section_path: None,
+            detail: None,
+            align: None,
+            axis: None,
+            custom: None,
+            rot: 0,
+            spin: 0.0,
+            label: None,
+            letter: String::new(),
+            cap: (0.0, 0.0),
+            letter_off: [0.0; 4],
+            flip: false,
+            colour: false,
+        };
         let placed = vec![view(None), view(Some([10.0, 0.0, 10.0, 40.0]))];
         // Model (10,0)-(10,40) at scale 2 about the centre (10,20): sheet (100,110)-(100,190); the drawn chain line is 2.5 mm longer.
         let old = (pos2(100.0, 107.5), pos2(100.0, 192.5));
@@ -8179,13 +8761,25 @@ mod hand_drawn_tests {
         // Dragged from the other end: the first end of the line moves, the order stays.
         let (_, back) = stretch_cutting_line(&placed, &sheet, (old.1, old.0), (pos2(100.0, 212.5), pos2(100.0, 107.5))).expect("found");
         assert!((back[3] - 50.0).abs() < 1e-3 && back[1].abs() < 1e-3, "{back:?}");
-        assert!(stretch_cutting_line(&placed, &sheet, (pos2(0.0, 0.0), pos2(5.0, 5.0)), old).is_none(), "an ordinary centre line is not a cutting line");
+        assert!(
+            stretch_cutting_line(&placed, &sheet, (pos2(0.0, 0.0), pos2(5.0, 5.0)), old).is_none(),
+            "an ordinary centre line is not a cutting line"
+        );
     }
 
     /// An angled section view is put on the line through its parent's centre across the cut, and slides on it.
     #[test]
     fn an_angled_section_view_keeps_to_its_axis() {
-        let sheet = Sheet { width: 420.0, height: 297.0, note: String::new(), items: Vec::new(), boxes: vec![(0, 120.0, 200.0, 80.0, 80.0)], scales: Vec::new(), centres: Vec::new(), rounds: std::sync::OnceLock::new() };
+        let sheet = Sheet {
+            width: 420.0,
+            height: 297.0,
+            note: String::new(),
+            items: Vec::new(),
+            boxes: vec![(0, 120.0, 200.0, 80.0, 80.0)],
+            scales: Vec::new(),
+            centres: Vec::new(),
+            rounds: std::sync::OnceLock::new(),
+        };
         let u = vec2(0.6, -0.8);
         let at = free_spot_ray(&sheet, pos2(120.0, 200.0), u, 100.0, (60.0, 30.0)).expect("room along the axis");
         let (x, y) = on_axis(120.0, 200.0, u.x, u.y, at.x + 7.0, at.y + 3.0);

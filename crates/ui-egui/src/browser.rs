@@ -241,7 +241,9 @@ pub fn selection_group(app: &SolveApp, target: &Target) -> Option<Value> {
             let b = st.body(name)?;
             (b.component, "bodies")
         }
-        Target::Sketch { id } => (app.session.doc.feature(*id)?.component, if solidcraft_engine::view::sketch_is_curve(&app.session, *id) { "curves" } else { "sketches" }),
+        Target::Sketch { id } => {
+            (app.session.doc.feature(*id)?.component, if solidcraft_engine::view::sketch_is_curve(&app.session, *id) { "curves" } else { "sketches" })
+        }
         Target::Plane { id } => (app.session.doc.feature(*id)?.component, "construction"),
         _ => return None,
     };
@@ -1393,7 +1395,11 @@ fn layer_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
             }
         }
     }
-    let r = draw_row(ui, ui.id().with("layer_new"), &Row { depth: depth + 1, icon: "folder", label: "New Layer (from selection)", name: true, ..Default::default() });
+    let r = draw_row(
+        ui,
+        ui.id().with("layer_new"),
+        &Row { depth: depth + 1, icon: "folder", label: "New Layer (from selection)", name: true, ..Default::default() },
+    );
     if r.clicked {
         let items = crate::context_menu::selected_names(app);
         let mut k = layers.len() + 1;
@@ -1974,8 +1980,10 @@ fn entry_row(
     acts: &mut Actions,
 ) {
     app.tree.order.push(e.row_key.clone());
-    let pattern_sketch =
-        matches!(folder, "sketches" | "curves").then(|| e.key.parse::<u64>().ok()).flatten().filter(|id| crate::sketch_pattern_tree::has_patterns(app, *id));
+    let pattern_sketch = matches!(folder, "sketches" | "curves")
+        .then(|| e.key.parse::<u64>().ok())
+        .flatten()
+        .filter(|id| crate::sketch_pattern_tree::has_patterns(app, *id));
     let pattern_key = format!("{}/patterns", e.row_key);
     let patterns_open = is_open(app, &pattern_key, true);
     let badges: &[&str] = if e.locked { &["lock"] } else { &[] };

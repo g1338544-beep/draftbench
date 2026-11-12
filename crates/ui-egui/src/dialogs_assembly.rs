@@ -202,13 +202,15 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let s = &app.session;
     let (asm, inputs) = match id {
         "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
-        "joint.create" => (
-            Asm::Joint(Box::new(JointForm::new(false))),
-            vec![SelInput::new("Fixed part", SNAPS, false), SelInput::new("Moving part", SNAPS, false)],
-        ),
-        "joint.as_built" => {
-            (Asm::Joint(Box::new(JointForm::new(true))), vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)])
+        "joint.create" => {
+            (Asm::Joint(Box::new(JointForm::new(false))), vec![SelInput::new("Fixed part", SNAPS, false), SelInput::new("Moving part", SNAPS, false)])
         }
+        // Named as the Joint dialog names them (owner's request): the part that stays, the part
+        // that moves, then where the joint is.
+        "joint.as_built" => (
+            Asm::Joint(Box::new(JointForm::new(true))),
+            vec![SelInput::new("Fixed part", BODIES, false), SelInput::new("Moving part", BODIES, false), SelInput::new("Position", SNAPS, false)],
+        ),
         "joint.origin" => (Asm::JointOrigin { name: String::new(), hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
         "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
@@ -526,13 +528,18 @@ fn shifted(s: &SnapPt, x: f64, y: f64) -> Value {
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [SelInput], active: &mut usize) -> bool {
     // A short how-to on the dialogs people find hard to start (Joint, Cam, Drive Joints).
     let guide = match k {
+        Asm::Joint(f) if f.as_built => Some(
+            "1. Fixed part: click the part that stays put. 2. Moving part: click the part that moves. 3. Position: click the pin, hole or face the joint is at. 4. Type, Range, Play, OK.",
+        ),
         Asm::Joint(_) => Some(
             "1. Fixed part: click where the part that stays put joins. 2. Moving part: click the matching place on the part that moves. 3. Type, Range, Play, OK.",
         ),
         Asm::Cam(_) => Some(
             "How to: first make a Revolute joint for the cam and a Slider (or Revolute) joint for the follower. 1. Profile = click the cam's outline edges. 2. Pick the cam joint and the follower joint below. 3. Optional: a round Roller on the follower, or its Tip. 4. Animate to check, then OK.",
         ),
-        Asm::Drive { .. } => Some("How to: pick the joint, then drag the slider or type a value to move it. OK keeps the position; Cancel puts it back."),
+        Asm::Drive { .. } => {
+            Some("How to: pick the joint, then drag the slider or type a value to move it. OK keeps the position; Cancel puts it back.")
+        }
         _ => None,
     };
     if let Some(text) = guide {
@@ -550,9 +557,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             crate::ui_kit::options(ui, "component_options", &mut [("Activate", activate)]);
         }
         Asm::Joint(f) => {
-            // As-built: two components picked, the position comes next.
-            if f.as_built && *active == 0 && inputs.first().is_some_and(|i| i.items.len() >= 2) {
-                *active = 1;
+            // As-built: both parts picked (pre-selected), the position comes next.
+            if f.as_built && *active == 0 && (0..2).all(|i| !sel_items(inputs, i).is_empty()) {
+                *active = 2;
             }
             // Picks that make no joint say why, under them, and offer the way out (#1239).
             if let Some((why, bodies)) = problem {
@@ -602,7 +609,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 form_row(ui, "Animate", |ui| {
                     ui.horizontal(|ui| {
                         let label = if f.animate { "■ Stop" } else { "▶ Play" };
-                        if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).on_hover_text("Play the joint's motion in the view").clicked()
+                        if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
+                            .on_hover_text("Play the joint's motion in the view")
+                            .clicked()
                         {
                             f.animate = !f.animate;
                         }
@@ -919,8 +928,7 @@ pub(crate) fn body_of(sel: &Sel) -> Option<&str> {
 /// component: a STEP file with several parts often brings them as bodies of one component.
 fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String, Vec<String>)> {
     let Asm::Joint(f) = k else { return None };
-    let picks: Vec<&Sel> =
-        if f.as_built { sel_items(inputs, 0).iter().collect() } else { (0..2).filter_map(|i| sel_items(inputs, i).first()).collect() };
+    let picks: Vec<&Sel> = (0..2).filter_map(|i| sel_items(inputs, i).first()).collect();
     if f.editing.is_some() || picks.len() < 2 {
         return None;
     }
@@ -994,12 +1002,15 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Ok(out);
             }
             if f.as_built {
-                let occs = occurrences(s, sel_items(inputs, 0));
-                if occs.len() != 2 {
+                let (fixed, moving) = (occurrences(s, sel_items(inputs, 0)), occurrences(s, sel_items(inputs, 1)));
+                let (Some(a), Some(b)) = (fixed.first(), moving.first()) else {
+                    return Err("select the fixed part and the moving part".into());
+                };
+                if a == b {
                     return Err("select two components".into());
                 }
-                let mut p = json!({"type": kind, "a": occs.first(), "b": occs.get(1), "limits": limits});
-                if let Some(x) = sel_items(inputs, 1).first().and_then(|x| snap_of(s, x)) {
+                let mut p = json!({"type": kind, "a": a, "b": b, "limits": limits});
+                if let Some(x) = sel_items(inputs, 2).first().and_then(|x| snap_of(s, x)) {
                     p["at"] = x.param;
                 }
                 return Ok(cmd("joint.as_built", p));

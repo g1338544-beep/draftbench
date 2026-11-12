@@ -131,15 +131,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let left = r.pending.iter().filter(|p| !r.ticked.contains(p)).count();
     let all_ticked = left == 0;
     let mut action = 0;
-    let (closed, _) = ui_kit::Window::new(egui::Id::new("sc_reveal"), "settings", crate::i18n::tr_label("Show/Hide")).actions("", "Close", None).show(ctx, true, |ui| {
-        ui_kit::text(ui, "Click a faded body, or drag a box over several, to show them.", ui_kit::Text::Note("reveal_hint"));
-        if ui_kit::button(ui, "Select All", ui_kit::Button::Enabled(!all_ticked)).clicked() {
-            action = 1;
-        }
-        if ui_kit::button(ui, "Done", ui_kit::Button::Normal).clicked() {
-            action = 2;
-        }
-    });
+    let (closed, _) = ui_kit::Window::new(egui::Id::new("sc_reveal"), "settings", crate::i18n::tr_label("Show/Hide"))
+        .actions("", "Close", None)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, "Click a faded body, or drag a box over several, to show them.", ui_kit::Text::Note("reveal_hint"));
+            if ui_kit::button(ui, "Select All", ui_kit::Button::Enabled(!all_ticked)).clicked() {
+                action = 1;
+            }
+            if ui_kit::button(ui, "Done", ui_kit::Button::Normal).clicked() {
+                action = 2;
+            }
+        });
     if action == 1 {
         if let Some(r) = app.reveal.as_mut() {
             r.ticked = r.pending.clone();

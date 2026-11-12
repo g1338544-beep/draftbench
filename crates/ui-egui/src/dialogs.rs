@@ -667,9 +667,14 @@ impl Dialog {
                 d.extra.insert("tangent_chain".into(), json!(true));
                 d
             }
-            "solid.mirror" => {
-                Dialog::new(Kind::Mirror, vec![SelInput::new("Objects", BODIES, true), SelInput::new("Mirror Plane", PLANES | PLANAR_FACES, false), SelInput::new("Second Plane (middle)", PLANES | PLANAR_FACES, false)])
-            }
+            "solid.mirror" => Dialog::new(
+                Kind::Mirror,
+                vec![
+                    SelInput::new("Objects", BODIES, true),
+                    SelInput::new("Mirror Plane", PLANES | PLANAR_FACES, false),
+                    SelInput::new("Second Plane (middle)", PLANES | PLANAR_FACES, false),
+                ],
+            ),
             "solid.rib" | "solid.web" => Dialog::new(
                 Kind::Rib { web: id == "solid.web", thickness: "2 mm".into(), depth: String::new(), flip: false, normal: false },
                 vec![SelInput::new("Curves", CURVES, true)],
@@ -678,9 +683,7 @@ impl Dialog {
                 Kind::ReplaceFace,
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
             ),
-            "face.delete" | "solid.remove_feature" => {
-                Dialog::new(Kind::DeleteFaces, vec![SelInput::new("Faces", FACES, true)])
-            }
+            "face.delete" | "solid.remove_feature" => Dialog::new(Kind::DeleteFaces, vec![SelInput::new("Faces", FACES, true)]),
             "face.resize" => Dialog::new(Kind::ResizeFace { diameter: String::new() }, vec![SelInput::new("Round faces", FACES, true)]),
             "solid.boundary_fill" => {
                 Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", BODIES, true)])
@@ -718,15 +721,13 @@ impl Dialog {
                 let t = (command == "construct.point.along_path").then(|| "0.5".to_string());
                 Dialog::new(Kind::Construct { command, title, keys, t }, inputs)
             }
-            "construct.plane.along_path" => {
-                Dialog::new(
-                    Kind::PathPlane { t: "0.5".into(), sketch: None },
-                    vec![
-                        SelInput::new("Path", CURVES | EDGES, false),
-                        SelInput::new("Point on the path (optional)", selection::VERTICES | selection::POINTS | selection::SKETCH_POINTS, false),
-                    ],
-                )
-            }
+            "construct.plane.along_path" => Dialog::new(
+                Kind::PathPlane { t: "0.5".into(), sketch: None },
+                vec![
+                    SelInput::new("Path", CURVES | EDGES, false),
+                    SelInput::new("Point on the path (optional)", selection::VERTICES | selection::POINTS | selection::SKETCH_POINTS, false),
+                ],
+            ),
             "solid.split_body" => Dialog::new(
                 Kind::Split,
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES | BODIES, false)],
@@ -879,6 +880,13 @@ impl Dialog {
         // The values the last OK of this command left (owner's request: every command keeps its
         // last settings); picks are not kept.
         if let Some(k) = remembered_values(&d.kind) {
+            // A Move remembered in another type picks what that type picks (Point to Point's
+            // From and To, not Free's Pivot): its rows and inputs must agree.
+            if let (Kind::Move { mode: was, .. }, Kind::Move { mode, .. }) = (&d.kind, &k)
+                && was != mode
+            {
+                d.inputs = crate::dialogs_move::inputs(*mode);
+            }
             d.kind = k;
         }
         if id == "solid.trim_body" {
@@ -3653,7 +3661,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             } else {
                 let one = plane_value(s, sels(d, 1).first()).ok_or("the mirror plane must be a plane or a planar face")?;
                 let text = d.extra.get("distance").and_then(Value::as_str).unwrap_or("0");
-                let dist: f64 = if text.trim().is_empty() { 0.0 } else { text.trim().trim_end_matches("mm").trim().parse().map_err(|_| "Distance must be a number in mm".to_string())? };
+                let dist: f64 = if text.trim().is_empty() {
+                    0.0
+                } else {
+                    text.trim().trim_end_matches("mm").trim().parse().map_err(|_| "Distance must be a number in mm".to_string())?
+                };
                 if !dist.is_finite() || dist.abs() > 1.0e6 {
                     return Err("Distance must be a finite number in mm".into());
                 }
@@ -3954,7 +3966,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let surface_tool: Option<String> = match sels(d, 1).first() {
                 Some(Sel::Body { name }) => Some(name.to_string()),
                 Some(Sel::Face { body: b, .. })
-                    if d.extra.get("surface_part").and_then(Value::as_str) != Some("face") && s.world_state().body(b).is_some_and(|x| x.body.is_surface()) =>
+                    if d.extra.get("surface_part").and_then(Value::as_str) != Some("face")
+                        && s.world_state().body(b).is_some_and(|x| x.body.is_surface()) =>
                 {
                     Some(b.to_string())
                 }
@@ -3990,48 +4003,57 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 json!({"body": body, "plane": {"origin": pt(w.origin + n * dist), "normal": pt(n)}})
             } else {
-            match sels(d, 1).first() {
-                Some(Sel::Plane { name }) => json!({"body": body, "plane": name}),
-                Some(Sel::Face { body: b, index, point }) => match planar_face(s, b, *index) {
-                    Some((_, n)) => {
-                        // Distance moves the cutting plane along the face normal.
-                        let text = d.extra.get("distance").and_then(Value::as_str).unwrap_or("0");
-                        let dist: f64 = text.trim().trim_end_matches("mm").trim().parse().map_err(|_| "Distance must be a number in mm".to_string())?;
-                        if !dist.is_finite() || dist.abs() > 1.0e6 {
-                            return Err("Distance must be a finite number in mm".into());
+                match sels(d, 1).first() {
+                    Some(Sel::Plane { name }) => json!({"body": body, "plane": name}),
+                    Some(Sel::Face { body: b, index, point }) => match planar_face(s, b, *index) {
+                        Some((_, n)) => {
+                            // Distance moves the cutting plane along the face normal.
+                            let text = d.extra.get("distance").and_then(Value::as_str).unwrap_or("0");
+                            let dist: f64 =
+                                text.trim().trim_end_matches("mm").trim().parse().map_err(|_| "Distance must be a number in mm".to_string())?;
+                            if !dist.is_finite() || dist.abs() > 1.0e6 {
+                                return Err("Distance must be a finite number in mm".into());
+                            }
+                            json!({"body": body, "plane": {"origin": pt(*point + n * dist), "normal": pt(n)}})
                         }
-                        json!({"body": body, "plane": {"origin": pt(*point + n * dist), "normal": pt(n)}})
+                        None => json!({"body": body, "tool": {"body": b, "point": pt(*point)}}),
+                    },
+                    // A straight sketch line, in the sketch it was picked in (#1552).
+                    Some(Sel::SketchCurve { id }) => {
+                        let picked = d.extra.get("tool_sketch").and_then(Value::as_u64);
+                        let st = s.world_state();
+                        let holding: Vec<u64> = st.sketches.iter().filter(|ss| ss.sketch.curve_index(id).is_some()).map(|ss| ss.feature).collect();
+                        let sketch = match picked {
+                            Some(k) if holding.contains(&k) => k,
+                            None if holding.len() == 1 => holding.first().copied().ok_or("pick a sketch line")?,
+                            _ => return Err("pick the sketch line in the viewport".into()),
+                        };
+                        json!({"body": body, "sketch": sketch, "line": id})
                     }
-                    None => json!({"body": body, "tool": {"body": b, "point": pt(*point)}}),
-                },
-                // A straight sketch line, in the sketch it was picked in (#1552).
-                Some(Sel::SketchCurve { id }) => {
-                    let picked = d.extra.get("tool_sketch").and_then(Value::as_u64);
-                    let st = s.world_state();
-                    let holding: Vec<u64> = st.sketches.iter().filter(|ss| ss.sketch.curve_index(id).is_some()).map(|ss| ss.feature).collect();
-                    let sketch = match picked {
-                        Some(k) if holding.contains(&k) => k,
-                        None if holding.len() == 1 => holding.first().copied().ok_or("pick a sketch line")?,
-                        _ => return Err("pick the sketch line in the viewport".into()),
-                    };
-                    json!({"body": body, "sketch": sketch, "line": id})
+                    // A whole surface body as the tool: its (single) face's surface, extended.
+                    Some(Sel::Body { name }) => {
+                        let st = s.world_state();
+                        let tb = st.body(name).ok_or("pick a surface body, a plane, a face or a sketch line")?;
+                        if !tb.body.is_surface() {
+                            return Err("pick a surface body, a plane, a face or a sketch line".into());
+                        }
+                        if tb.body.face_count() != 1 {
+                            return Err(
+                                "not supported yet: Split Body with a surface of several faces; use Trim Body, or pick one face of the surface"
+                                    .into(),
+                            );
+                        }
+                        let m = tb.mesh();
+                        let at = m
+                            .triangles
+                            .first()
+                            .and_then(|t| m.tri(t))
+                            .map(|[a, b, c]| (a + b + c) / 3.0)
+                            .ok_or("the surface has no faces to cut with")?;
+                        json!({"body": body, "tool": {"body": name, "point": pt(at)}})
+                    }
+                    _ => return Err("pick a plane, a face, a surface body or a sketch line".into()),
                 }
-                // A whole surface body as the tool: its (single) face's surface, extended.
-                Some(Sel::Body { name }) => {
-                    let st = s.world_state();
-                    let tb = st.body(name).ok_or("pick a surface body, a plane, a face or a sketch line")?;
-                    if !tb.body.is_surface() {
-                        return Err("pick a surface body, a plane, a face or a sketch line".into());
-                    }
-                    if tb.body.face_count() != 1 {
-                        return Err("not supported yet: Split Body with a surface of several faces; use Trim Body, or pick one face of the surface".into());
-                    }
-                    let m = tb.mesh();
-                    let at = m.triangles.first().and_then(|t| m.tri(t)).map(|[a, b, c]| (a + b + c) / 3.0).ok_or("the surface has no faces to cut with")?;
-                    json!({"body": body, "tool": {"body": name, "point": pt(at)}})
-                }
-                _ => return Err("pick a plane, a face, a surface body or a sketch line".into()),
-            }
             };
             if d.extra.get("trim").and_then(Value::as_bool).unwrap_or(false) {
                 let mut p = p;
