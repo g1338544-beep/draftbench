@@ -584,3 +584,32 @@ fn a_face_place_snaps_to_the_points_of_shown_geometry_only() {
         assert_eq!(taken, if hide { 1 } else { 1 + 4 + 1 }, "the origin, and unless hidden the face's corners and the lost point");
     }
 }
+
+/// Owner: a click on an edge distance line puts the keyboard in that distance's box, ready to
+/// type; it went back to the diameter by the hole.
+#[test]
+fn a_click_on_the_edge_distance_line_types_into_its_box() {
+    let mut h = Harness::new();
+    h.app.ui.show_origin = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let face = screen(&mut h, Vec3::new(20.0, 15.0, 20.0));
+    h.step(&json!({"click": face})).unwrap();
+    let edge = screen(&mut h, Vec3::new(20.0, 0.0, 20.0));
+    if h.app.dialog.as_ref().unwrap().inputs.iter().position(|i| i.label == "Edge 1").is_some_and(|i| h.app.dialog.as_ref().unwrap().active != i) {
+        let i = h.app.dialog.as_ref().unwrap().inputs.iter().position(|i| i.label == "Edge 1").unwrap();
+        h.app.dialog.as_mut().unwrap().active = i;
+    }
+    h.step(&json!({"click": [edge[0], edge[1] - 1.0]})).unwrap();
+    h.frames(3);
+    let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "Edge 1").map(|i| i.items.len());
+    assert_eq!(picked, Some(1), "the edge is picked");
+    let before = format!("{:?}", h.app.dialog.as_ref().unwrap().inputs);
+    let mid = screen(&mut h, Vec3::new(20.0, 7.5, 20.0));
+    h.step(&json!({"click": mid})).unwrap();
+    h.frames(3);
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new(("sc_hole_edge_value", 0usize))), "the Edge 1 box has the keyboard");
+    assert_eq!(format!("{:?}", h.app.dialog.as_ref().unwrap().inputs), before, "the click picked nothing");
+}
