@@ -1772,3 +1772,29 @@ fn the_toggle_clamp_moves_as_a_four_bar() {
         assert!(place(&s, "Handle") != before, "{v}: {r}");
     }
 }
+
+#[test]
+fn zz_timing_clamp_drive() {
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/motion/toggle-clamp-parts.json")).unwrap();
+    let mut s = Session::default();
+    for c in script["commands"].as_array().unwrap() {
+        run(&mut s, c["command"].as_str().unwrap(), c["params"].clone());
+    }
+    let pins = [("Base", "Arm", [0.0, 0.0, 14.0]), ("Arm", "Handle", [0.0, 40.0, 20.0]), ("Handle", "Link", [30.0, 40.0, 20.0]), ("Base", "Link", [40.0, 0.0, 14.0])];
+    for (i, (a, b, at)) in pins.iter().enumerate() {
+        let t = std::time::Instant::now();
+        run(&mut s, "joint.as_built", json!({"type": "revolute", "a": a, "b": b, "at": {"occurrence": 0, "point": at, "z": [0, 0, 1]}, "name": format!("J{}", i + 1)}));
+        eprintln!("as_built {i}: {:?}", t.elapsed());
+    }
+    let t = std::time::Instant::now();
+    let st = s.model.state();
+    let sol = solidcraft_doc::joints::solve(&s.doc, &st);
+    eprintln!("solve: {:?} conflicts {:?}", t.elapsed(), sol.conflicts.len());
+    let t = std::time::Instant::now();
+    let held: solidcraft_doc::joints::Held = [((1u64, 0usize), 0.0)].into_iter().collect();
+    let _ = solidcraft_doc::joints::solve_holding(&s.doc, &st, &held);
+    eprintln!("solve_holding: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    run(&mut s, "joint.drive", json!({"joint": "J1", "value": "15 deg"}));
+    eprintln!("drive: {:?}", t.elapsed());
+}
