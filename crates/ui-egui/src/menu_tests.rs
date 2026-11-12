@@ -188,6 +188,10 @@ fn mass_properties_waits_for_a_picked_body() {
     app.session.selection = vec![solidcraft_engine::Sel::Body { name: b }];
     app.start("inspect.mass_properties");
     assert!(app.menu.props.is_some(), "a selected body is measured at once");
+    // Owner: the bodies weighed show as selected, so it can be seen which were clicked.
+    crate::sketch_tools::mass_reset();
+    crate::sketch_tools::mass_properties(&mut app, vec![body(&app)]);
+    assert_eq!(app.session.selection, vec![solidcraft_engine::Sel::Body { name: body(&app) }]);
 }
 
 #[test]

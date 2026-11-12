@@ -202,6 +202,8 @@ pub fn mass_properties(app: &mut SolveApp, bodies: Vec<String>) {
         }
         p.clone()
     });
+    // The bodies weighed are shown selected (owner: which ones were clicked could not be told).
+    app.session.selection = all.iter().map(|name| solidcraft_engine::Sel::Body { name: name.clone() }).collect();
     match app.session.execute("inspect.mass_properties", &json!({"bodies": all})) {
         Ok(v) => app.menu.props = Some(("Mass properties".into(), v)),
         Err(e) => app.set_status(e.to_string(), true),
