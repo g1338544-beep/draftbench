@@ -1063,6 +1063,8 @@ impl Dialog {
                 | Kind::PatternCirc { .. }
                 | Kind::Loft { .. }
                 | Kind::PathPlane { .. }
+                | Kind::OffsetPlane { .. }
+                | Kind::AnglePlane { .. }
                 | Kind::Midplane
                 | Kind::PlaneAuto { .. }
                 | Kind::Construct { .. }

@@ -870,6 +870,23 @@ mod tests {
         assert_eq!(plane_preview_half(&Aabb3::EMPTY), 10.0, "no model: 10 mm");
     }
 
+    /// Owner: Offset Plane along a WCS axis showed nothing before OK. It previews now, and the
+    /// preview has the plane.
+    #[test]
+    fn offset_and_angle_planes_preview() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        for id in ["construct.plane.offset", "construct.plane.at_angle"] {
+            app.start(id);
+            assert!(app.dialog.as_ref().is_some_and(|d| d.previews()), "{id} previews");
+        }
+        app.start("construct.plane.offset");
+        let d = app.dialog.as_mut().unwrap();
+        d.extra.insert("wcs_axis".into(), json!("x"));
+        let cmds = crate::dialogs::preview_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
+        let p = app.session.preview(&cmds).unwrap();
+        assert!(p.after.construct.len() > p.before.construct.len(), "the new plane is in the preview");
+    }
+
     #[test]
     fn tool_preview_follows_tab_without_recolouring_removal_or_idle_previews() {
         for dark in [false, true] {
