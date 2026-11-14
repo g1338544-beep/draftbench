@@ -173,3 +173,33 @@ fn apply_keeps_the_move_type_and_its_points() {
     let labels: Vec<_> = d.inputs.iter().map(|i| i.label).collect();
     assert!(matches!(d.kind, Kind::Move { mode: POINT_TO_POINT, .. }) && labels == ["Bodies", "From", "To"], "{labels:?}");
 }
+
+/// Owner: once the WCS origin is moved, the typed X, Y, Z count from it (along its axes);
+/// after Reset (the world's WCS) from the model's origin again.
+#[test]
+fn typed_points_count_from_the_moved_wcs_origin() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    app.start("solid.move");
+    let mut d = app.dialog.clone().unwrap();
+    d.kind = kind(POINT_TO_POSITION);
+    d.inputs = inputs(POINT_TO_POSITION);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![Sel::Vertex { body: "Body1".into(), point: Vec3::ZERO }];
+    if let Kind::Move { x, y, z, .. } = &mut d.kind {
+        (*x, *y, *z) = ("0 mm".into(), "0 mm".into(), "5 mm".into());
+    }
+    // The WCS at (100, 50, 0), turned 90 degrees about Z: its XC is the world's Y.
+    app.session.wcs = Some(solidcraft_engine::cmd::wcs::Wcs { origin: Vec3::new(100.0, 50.0, 0.0), x: Vec3::Y, y: -Vec3::X });
+    let p = params(&app, &d).unwrap();
+    assert_eq!(p["translate"], json!(["100 mm", "50 mm", "5 mm"]), "to the WCS origin, 5 up its ZC");
+    assert_eq!(world_to_wcs(&app, Vec3::new(100.0, 60.0, 0.0)), Vec3::new(10.0, 0.0, 0.0), "10 along XC");
+    d.kind = kind(TRANSLATE);
+    if let Kind::Move { x, .. } = &mut d.kind {
+        *x = "10 mm".into();
+    }
+    assert_eq!(params(&app, &d).unwrap()["translate"], json!(["0 mm", "10 mm", "0 mm"]), "10 along XC is along the world's Y");
+    app.session.wcs = None;
+    assert_eq!(params(&app, &d).unwrap()["translate"], json!(["10 mm", "0 mm", "0 mm"]), "after Reset: the world's X again");
+}

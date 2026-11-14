@@ -177,6 +177,7 @@
   "Wall Thickness": "ความหนาผนัง",
   "What happened?": "เกิดอะไรขึ้น?",
   "Width": "ความกว้าง",
+  "X, Y, Z count from the WCS origin (XC, YC, ZC)": "ค่า X, Y, Z นับจากจุดกำเนิด WCS (XC, YC, ZC)",
   "Zebra": "ลายม้าลาย",
   "cmd.appearance_assign": "สีและวัสดุ",
   "cmd.appearance_library": "คลังลักษณะพื้นผิว",

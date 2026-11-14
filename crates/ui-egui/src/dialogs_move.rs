@@ -96,6 +96,13 @@ fn bodies_empty(d: &Dialog) -> bool {
     d.inputs.first().is_none_or(|i| i.items.is_empty())
 }
 
+/// A line saying the numbers count from the moved WCS (nothing while it is the world's).
+pub(crate) fn wcs_note(app: &SolveApp, ui: &mut egui::Ui) {
+    if wcs(app).is_some() {
+        ui.label(egui::RichText::new(crate::i18n::tr_label("X, Y, Z count from the WCS origin (XC, YC, ZC)")).small().weak());
+    }
+}
+
 /// The value rows after the inputs; true when Enter was pressed in one.
 pub fn rows(ui: &mut egui::Ui, k: &mut Kind) -> bool {
     let Kind::Move { mode, x, y, z, rx, ry, rz, angle } = k else { return false };
@@ -214,6 +221,8 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     let num = |t: Vec3| json!([mm(t.x), mm(t.y), mm(t.z)]);
     let mut p = json!({ "bodies": bodies });
     match *mode {
+        // Along the WCS axes once it is moved (the typed expressions as they are while it is the world).
+        TRANSLATE if wcs(app).is_some() => p["translate"] = num(wcs_dir_to_world(app, Vec3::new(len(app, x)?, len(app, y)?, len(app, z)?))),
         TRANSLATE => p["translate"] = json!([x, y, z]),
         FREE => {
             let a = [ang(app, rx)?, ang(app, ry)?, ang(app, rz)?];
@@ -284,7 +293,7 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
         }
         _ => {
             let from = need_point(1, "the point to move")?;
-            let at = Vec3::new(len(app, x)?, len(app, y)?, len(app, z)?);
+            let at = wcs_to_world(app, Vec3::new(len(app, x)?, len(app, y)?, len(app, z)?));
             p["translate"] = num(at - from);
         }
     }
@@ -332,12 +341,47 @@ pub fn align_rows(d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     changed
 }
 
-/// A From / To point typed in the rows (X, Y, Z from the origin), when there is one.
+/// A From / To point typed in the rows (X, Y, Z from the WCS origin, along its axes), when
+/// there is one; in world coordinates.
 fn typed_point(app: &SolveApp, d: &Dialog, key: &str) -> Option<Vec3> {
     let a = d.extra.get(key)?.as_array()?;
     let v: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
     let [x, y, z] = v[..] else { return None };
-    Some(Vec3::new(len(app, x).ok()?, len(app, y).ok()?, len(app, z).ok()?))
+    Some(wcs_to_world(app, Vec3::new(len(app, x).ok()?, len(app, y).ok()?, len(app, z).ok()?)))
+}
+
+/// The work coordinate system the typed coordinates are in (owner: "once the origin is moved,
+/// the numbers count from the new origin; after Reset from the old one"): the world's while none
+/// is set.
+fn wcs(app: &SolveApp) -> Option<solidcraft_engine::cmd::wcs::Wcs> {
+    app.session.wcs.filter(|w| *w != solidcraft_engine::cmd::wcs::Wcs::WORLD)
+}
+
+/// WCS coordinates (from its origin, along XC, YC, ZC) → world.
+pub(crate) fn wcs_to_world(app: &SolveApp, l: Vec3) -> Vec3 {
+    match wcs(app) {
+        Some(w) => w.origin + w.x * l.x + w.y * l.y + w.z() * l.z,
+        None => l,
+    }
+}
+
+/// A WCS direction (along XC, YC, ZC) → world.
+fn wcs_dir_to_world(app: &SolveApp, l: Vec3) -> Vec3 {
+    match wcs(app) {
+        Some(w) => w.x * l.x + w.y * l.y + w.z() * l.z,
+        None => l,
+    }
+}
+
+/// World → WCS coordinates.
+pub(crate) fn world_to_wcs(app: &SolveApp, p: Vec3) -> Vec3 {
+    match wcs(app) {
+        Some(w) => {
+            let r = p - w.origin;
+            Vec3::new(r.dot(w.x), r.dot(w.y), r.dot(w.z()))
+        }
+        None => p,
+    }
 }
 
 /// The From (1) or To (2) point of a Point to Point move: the numbers typed, else the pick.
@@ -349,6 +393,14 @@ fn point_of(app: &SolveApp, d: &Dialog, i: usize) -> Option<Vec3> {
 /// changed; the move then goes to the numbers typed. A new pick replaces the numbers.
 pub fn point_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
+    wcs_note(app, ui);
+    // The rows are in the WCS: when it changes, the numbers follow it.
+    let frame = format!("{:?}", wcs(app));
+    if d.extra.get("xyz_frame").and_then(Value::as_str) != Some(frame.as_str()) {
+        d.extra.insert("xyz_frame".into(), json!(frame));
+        d.extra.remove("from_xyz");
+        d.extra.remove("to_xyz");
+    }
     for (i, name, key) in [(1usize, "From", "from_xyz"), (2, "To", "to_xyz")] {
         let pick = sel_point(app, items(d, i).first());
         let sig_key = format!("{key}_pick");
@@ -362,7 +414,7 @@ pub fn point_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
                 let t = |k: usize| a.get(k).and_then(Value::as_str).unwrap_or("0 mm").to_string();
                 [t(0), t(1), t(2)]
             }
-            _ => match pick {
+            _ => match pick.map(|p| world_to_wcs(app, p)) {
                 Some(p) => [mm(p.x), mm(p.y), mm(p.z)],
                 None => [mm(0.0), mm(0.0), mm(0.0)],
             },

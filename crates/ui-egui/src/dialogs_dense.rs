@@ -1057,6 +1057,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             extra_options(ui, "sweep_options", &mut d.extra, &[("Tangent Chain", "tangent_chain")]);
         }
         k @ Kind::Move { .. } => {
+            if matches!(k, Kind::Move { mode, .. } if matches!(*mode, crate::dialogs_move::TRANSLATE | crate::dialogs_move::POINT_TO_POSITION)) {
+                crate::dialogs_move::wcs_note(app, ui);
+            }
             enter |= crate::dialogs_move::rows(ui, k);
             extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
         }

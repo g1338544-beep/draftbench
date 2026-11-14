@@ -454,6 +454,7 @@
   "Will fail": "失敗します",
   "X angle": "X角度",
   "X distance": "X距離",
+  "X, Y, Z count from the WCS origin (XC, YC, ZC)": "X, Y, Z は WCS 原点から（XC, YC, ZC）",
   "Y angle": "Y角度",
   "Y distance": "Y距離",
   "Z angle": "Z角度",
