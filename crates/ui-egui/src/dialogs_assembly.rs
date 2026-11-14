@@ -1183,19 +1183,27 @@ pub(crate) fn slot_centre_line(m: &solidcraft_engine::geom::Mesh, face: usize) -
     // Resampled evenly, closed.
     let ring = resample_closed(&outline, 400)?;
     let n = ring.len();
-    // The two farthest points: the slot's ends.
-    let (mut ia, mut ib, mut far) = (0, 0, -1.0);
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = ring[i].dist(ring[j]);
-            if d > far {
-                (ia, ib, far) = (i, j, d);
+    // The slot's ends: where the outline turns most over a short run (its round or square
+    // caps), two of them apart along the outline. (Farthest points would be wrong for a curved
+    // slot, whose outer arc's ends lie farther apart than its own ends.)
+    let turn: Vec<f64> = (0..n)
+        .map(|i| {
+            let (a, b, c) = (ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]);
+            match ((b - a).normalized(), (c - b).normalized()) {
+                (Some(u), Some(v)) => u.dot(v).clamp(-1.0, 1.0).acos(),
+                _ => 0.0,
             }
-        }
-    }
-    if far <= 1e-9 {
-        return None;
-    }
+        })
+        .collect();
+    let w = (n / 20).max(2);
+    let windowed: Vec<f64> = (0..n).map(|i| (0..w).map(|k| turn[(i + n + k - w / 2) % n]).sum()).collect();
+    let ia = (0..n).max_by(|a, b| windowed[*a].total_cmp(&windowed[*b]))?;
+    let apart = |j: usize| {
+        let d = (j + n - ia) % n;
+        d.min(n - d)
+    };
+    let ib = (0..n).filter(|j| apart(*j) >= n / 4).max_by(|a, b| windowed[*a].total_cmp(&windowed[*b]))?;
+    let (ia, ib) = (ia.min(ib), ia.max(ib));
     let side1: Vec<Vec3> = (ia..=ib).map(|i| ring[i % n]).collect();
     let side2: Vec<Vec3> = (ib..=ia + n).map(|i| ring[i % n]).rev().collect();
     let k = 64;
