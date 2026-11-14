@@ -1177,8 +1177,11 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
                 lines.push(format!("{}  {}", tr("Area"), crate::prefs::show_mm(app, it["area_mm2"].as_f64().unwrap_or(0.0), 2)))
             }
             Some("vertex" | "sketch_point") => {
+                // From a moved WCS's origin, along its axes.
                 let p = &it["position"];
-                lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
+                let at = crate::dialogs_move::world_to_wcs(app, solidcraft_engine::geom::Vec3::new(p[0].as_f64().unwrap_or(0.0), p[1].as_f64().unwrap_or(0.0), p[2].as_f64().unwrap_or(0.0)));
+                let (x, y, z) = (json!(at.x), json!(at.y), json!(at.z));
+                lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&x), mm(&y), mm(&z)));
             }
             _ => {}
         }
@@ -1201,7 +1204,8 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
         } else {
             value(ui, crate::i18n::tr_label("Distance"), &crate::prefs::show_mm(app, d, 1));
         }
-        let delta = b - a;
+        // Along a moved WCS's axes.
+        let delta = crate::dialogs_move::world_to_wcs(app, b) - crate::dialogs_move::world_to_wcs(app, a);
         for (l, v) in [("ΔX", delta.x), ("ΔY", delta.y), ("ΔZ", delta.z)] {
             value(ui, l, &crate::prefs::show_mm(app, v.abs(), 1));
         }

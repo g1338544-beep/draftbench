@@ -511,7 +511,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
                 painter.text(
                     s + vec2(9.0, -9.0),
                     egui::Align2::LEFT_BOTTOM,
-                    format!("{name}  {}", coords_text(*p)),
+                    format!("{name}  {}", coords_text(app, *p)),
                     egui::FontId::proportional(Tokens::get().font_body),
                     accent,
                 );
@@ -522,7 +522,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         {
             painter.circle_stroke(s, 6.0, egui::Stroke::new(2.0, accent));
             painter.circle_filled(s, 2.0, accent);
-            painter.text(s + vec2(9.0, 16.0), egui::Align2::LEFT_TOP, coords_text(h), egui::FontId::proportional(Tokens::get().font_body), accent);
+            painter.text(s + vec2(9.0, 16.0), egui::Align2::LEFT_TOP, coords_text(app, h), egui::FontId::proportional(Tokens::get().font_body), accent);
         }
         if let [(a, _), (b, _)] = markers.as_slice()
             && let (Some(sa), Some(sb)) = (proj.to_screen(*a), proj.to_screen(*b))
@@ -1698,7 +1698,9 @@ fn mm_text(v: f64) -> String {
     if t.is_empty() || t == "-0" { "0".to_string() } else { t.to_string() }
 }
 
-/// A point's X, Y, Z: its distance from the origin along each axis.
-fn coords_text(p: Vec3) -> String {
+/// A point's X, Y, Z: its distance from the origin along each axis (from a moved WCS's origin,
+/// along XC, YC, ZC).
+fn coords_text(app: &SolveApp, p: Vec3) -> String {
+    let p = crate::dialogs_move::world_to_wcs(app, p);
     format!("X {}  Y {}  Z {}", mm_text(p.x), mm_text(p.y), mm_text(p.z))
 }
