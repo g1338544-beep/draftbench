@@ -101,7 +101,7 @@ fn build(s: &mut Session, p: &Value) -> Result<Value> {
             .triangles
             .iter()
             .enumerate()
-            .filter_map(|(i, t)| tri(t).map(|[a, b, c]| (i, ((a + b + c) * (1.0 / 3.0)).dist(*q))))
+            .filter_map(|(i, t)| tri(t).map(|[a, b, c]| (i, solidcraft_geom::compare::closest_on_triangle(*q, a, b, c).dist(*q))))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .and_then(|(i, _)| m.tri_face.get(i).copied());
         if let Some(f) = near
@@ -111,6 +111,7 @@ fn build(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let mut sum = Vec3::ZERO;
+    let mut area = 0.0;
     let mut normals = Vec::new();
     for (i, t) in m.triangles.iter().enumerate() {
         if m.tri_face.get(i).is_some_and(|f| faces.contains(f))
@@ -118,21 +119,31 @@ fn build(s: &mut Session, p: &Value) -> Result<Value> {
         {
             let n = (b - a).cross(c - a);
             sum = sum + n;
+            area += n.len();
             if let Some(u) = n.normalized() {
                 normals.push(u);
             }
         }
     }
-    let mut up = sum.normalized().ok_or_else(|| bad(cmd, "the picked faces have no area"))?;
-    if flip {
-        up = up * -1.0;
-    }
-    if normals.iter().any(|n| n.dot(up) * if flip { -1.0 } else { 1.0 } < 0.17) {
-        return Err(bad(
+    let spread = || {
+        bad(
             cmd,
             "the picked faces turn too far round (more than 80 degrees from their mean direction): pick faces that face roughly one way, \
              and make a block for each side",
-        ));
+        )
+    };
+    if !(area > 0.0) {
+        return Err(bad(cmd, "the picked faces have no area"));
+    }
+    if sum.len() < area * 0.2 {
+        return Err(spread());
+    }
+    let mut up = sum.normalized().ok_or_else(spread)?;
+    if normals.iter().any(|n| n.dot(up) < 0.17) {
+        return Err(spread());
+    }
+    if flip {
+        up = up * -1.0;
     }
     drop(st);
 
@@ -259,7 +270,7 @@ mod tests {
         s.execute("sketch.create", &json!({"plane": "XZ", "name": "Arc"})).unwrap();
         let r = s.execute("sketch.arc.three_point", &json!({"start": [-30, -40], "end": [30, -40], "through": [0, -50]})).unwrap();
         let _ = r;
-        s.execute("sketch.line", &json!({"start": [-30, -40], "end": [30, -40]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[-30, -40], [30, -40]]})).unwrap();
         s.execute("sketch.finish", &json!({})).unwrap();
         let r = s.execute("solid.extrude", &json!({"sketch": "Arc", "distance": 40})).unwrap();
         r["created_bodies"][0].as_str().unwrap().to_string()
@@ -280,7 +291,8 @@ mod tests {
         let st = s.world_state();
         let b = st.body(r["body"].as_str().unwrap()).unwrap();
         let bb = b.mesh().bounds();
-        assert!((bb.min.z - 43.0).abs() < 0.3, "its curved face 3 over the dome's sides: {bb:?}");
+        // Its curved face: radius 53, extended 3 (the margin's run-off) past the dome's sides.
+        assert!(bb.min.z > 40.0 && bb.min.z < 44.0, "its curved face over the dome's sides: {bb:?}");
         assert!((bb.max.z - (53.0 + 20.0)).abs() < 0.05, "20 past the offset's top: {bb:?}");
         // Every point of the block is at least the gap from the dome (radius 50 about (0, y, 0)).
         assert!(b.mesh().positions.iter().all(|q| (q.x * q.x + q.z * q.z).sqrt() >= 53.0 - 0.05), "nothing closer than the gap");

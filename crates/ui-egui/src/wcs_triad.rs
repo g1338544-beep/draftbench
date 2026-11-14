@@ -618,10 +618,15 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
     }
     if PICK_ORIGIN.with(Cell::get) {
         let hit = TARGET.with(Cell::get);
+        // Only the snap points near the pointer (owner: every point of the model at once is too
+        // many); fading out toward the edge of the neighbourhood.
+        let pointer = painter.ctx().pointer_hover_pos();
         GUIDES.with(|g| {
             for (p, _) in g.borrow().iter() {
-                if let Some(q) = proj.to_screen(*p) {
-                    painter.circle_filled(q, 3.0, orange);
+                if let (Some(q), Some(at)) = (proj.to_screen(*p), pointer)
+                    && let Some(fade) = guide_fade(q.distance(at))
+                {
+                    painter.circle_filled(q, 3.0, orange.gamma_multiply(fade));
                 }
             }
         });
@@ -650,9 +655,26 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
     }
 }
 
+/// How far from the pointer (screen points) a snap point is drawn while picking the origin.
+const GUIDE_REACH: f32 = 90.0;
+
+/// A snap point's opacity at `d` points from the pointer: full near it, none past the reach.
+fn guide_fade(d: f32) -> Option<f32> {
+    (d <= GUIDE_REACH).then(|| (1.0 - (d / GUIDE_REACH).powi(2)).clamp(0.25, 1.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Owner: picking the WCS origin showed every point of the model; only those near the
+    /// pointer are drawn now.
+    #[test]
+    fn only_snap_points_near_the_pointer_are_drawn() {
+        assert_eq!(guide_fade(0.0), Some(1.0));
+        assert!(guide_fade(60.0).is_some_and(|f| f < 1.0 && f >= 0.25));
+        assert_eq!(guide_fade(GUIDE_REACH + 1.0), None, "far points are not drawn");
+    }
 
     /// Only a straight edge gives an axis a direction; a bent or round one does not.
     #[test]
