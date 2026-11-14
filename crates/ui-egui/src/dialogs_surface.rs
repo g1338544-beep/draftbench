@@ -114,6 +114,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             SplitFace,
             /// CF Block: the block on the picked faces' outer side, `gap` off them, `depth` past
             /// that, square to their mean normal.
+            /// Close Holes: a surface's holes up to `up_to` across closed.
+            CloseHoles {
+                up_to: String,
+            },
             CfBlock {
                 gap: String,
                 margin: String,
@@ -141,6 +145,7 @@ impl Surf {
             Surf::Untrim { .. } => "UNTRIM",
             Surf::SplitFace => "SPLIT FACE",
             Surf::CfBlock { .. } => "CF BLOCK",
+            Surf::CloseHoles { .. } => "CLOSE HOLES",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
         }
     }
@@ -216,6 +221,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         ],
         Surf::Untrim { .. } => vec![SelInput::new("Face", FACES, false), SelInput::new("Holes (edges on them)", EDGES, true)],
         Surf::CfBlock { .. } => vec![SelInput::new("Part faces the block supports", FACES, true)],
+        Surf::CloseHoles { .. } => vec![SelInput::new("Surface", BODIES | FACES, false)],
         Surf::SplitFace => vec![
             SelInput::new("1. Faces to divide (click the faces)", FACES, true),
             SelInput::new(
@@ -244,6 +250,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, remove: false, mutual: false },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
         "solid.split_face" | "solid.split_line" => Surf::SplitFace,
+        "cf.close_holes" => Surf::CloseHoles { up_to: "30 mm".into() },
         "cf.block" => Surf::CfBlock { gap: "3 mm".into(), margin: "5 mm".into(), depth: "20 mm".into(), flip: false },
         _ => Surf::simple_start(id)?.0,
     };
@@ -306,6 +313,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             form_row(ui, "Direction", |ui| {
                 ui_kit::segmented(ui, direction, &EXTRUDE_SIDES.map(|(label, _)| label), Default::default());
             });
+        }
+        Surf::CloseHoles { up_to } => {
+            enter |= expr_row(ui, "Close holes up to (across)", up_to);
         }
         Surf::CfBlock { gap, margin, depth, flip } => {
             enter |= expr_row(ui, "Gap (block to part)", gap);
@@ -910,6 +920,17 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                 p["in_place"] = json!(true);
             }
             ("surface.untrim", p)
+        }
+        Surf::CloseHoles { up_to } => {
+            need(0, "the surface")?;
+            let body = items(inputs, 0)
+                .iter()
+                .find_map(|x| match x {
+                    Sel::Body { name } | Sel::Face { body: name, .. } => Some(name.clone()),
+                    _ => None,
+                })
+                .ok_or("pick the surface")?;
+            ("cf.close_holes", json!({"body": body, "up_to": up_to}))
         }
         Surf::CfBlock { gap, margin, depth, flip } => {
             need(0, "the part's faces")?;

@@ -259,7 +259,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "CF",
         panel: "PREPARE",
         promoted: 3,
-        ids: &["surface.extend", "surface.untrim", "surface.patch", "surface.offset", "surface.stitch", "surface.trim", "construct.plane.offset"],
+        ids: &["surface.extend", "cf.close_holes", "surface.untrim", "surface.patch", "surface.offset", "surface.stitch", "surface.trim", "construct.plane.offset"],
     },
     // The block shaped by hand: cut by the surface, split, made solid from a sheet.
     Section {

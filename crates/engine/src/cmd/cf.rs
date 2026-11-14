@@ -23,6 +23,10 @@ pub static COMMANDS: &[CommandSpec] = &[
          built-in estimate). → material, density (g/cm³), price_per_kg, items: [{name, size, mass_kg, price}], mass_kg, price (THB), \
          prices_date. Prices are rough estimates for Thailand; use the supplier's quote.",
     ),
+    CommandSpec::new("cf.close_holes", "Close Holes", close_holes).at("SOLID", "CF").icon("surface_patch").params(
+        "body: surface; up_to?: length (default 30: holes this size or smaller across are closed, larger ones stay). Every face of \\
+         the surface loses its small holes in place (Untrim), so an imported part's surface is ready to offset. → closed: count",
+    ),
     CommandSpec::new("cf.block", "CF Block", block).at("SOLID", "CF").icon("box").params(
     "faces: [[x,y,z]] (points on the part's faces the block supports; they should face roughly one way); body?; gap?: length (default 3: \
      how far the block stays off the faces, out along their mean normal, outside the part); depth?: length (default 20: how far the block reaches \
@@ -325,6 +329,113 @@ impl Rot {
     }
 }
 
+/// Close a surface's small holes (owner: "close the small gaps, holes and notches automatically
+/// for CF work"): each face's closed inner loops no larger than `up_to` across, untrimmed in
+/// place. One undo step.
+fn close_holes(s: &mut Session, p: &Value) -> Result<Value> {
+    let depth = s.undo.len();
+    let r = close_holes_steps(s, p);
+    s.undo.truncate(depth);
+    r
+}
+
+fn close_holes_steps(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "cf.close_holes";
+    let body = p.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`body` must name a surface"))?.to_string();
+    let up_to = num(s, p, "up_to", 30.0, cmd)?;
+    if up_to <= 0.0 {
+        return Err(bad(cmd, "`up_to` must be more than 0"));
+    }
+    // Per face: a point inside it, and its small closed loops of open edges (one point on each).
+    let jobs: Vec<(Vec3, Vec<Vec3>)> = {
+        let st = s.world_state();
+        let b = st.body(&body).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+        if !b.body.is_surface() {
+            return Err(bad(cmd, "pick a surface (a solid's holes are its own faces: use Delete Face)"));
+        }
+        let m = b.mesh();
+        let faces = m.tri_face.iter().copied().max().map_or(0, |f| f as usize + 1);
+        let mut jobs = Vec::new();
+        for f in 0..faces.min(10_000) {
+            let open: Vec<Vec<Vec3>> = (0..m.edges.len())
+                .filter(|&e| m.edge_faces.get(e).is_some_and(|x| x.len() == 1 && x.first() == Some(&(f as u32))))
+                .filter_map(|e| m.edges.get(e).cloned())
+                .collect();
+            let tris: Vec<[Vec3; 3]> = m
+                .triangles
+                .iter()
+                .zip(&m.tri_face)
+                .filter(|(_, tf)| **tf as usize == f)
+                .filter_map(|(t, _)| Some([*m.positions.get(t[0] as usize)?, *m.positions.get(t[1] as usize)?, *m.positions.get(t[2] as usize)?]))
+                .collect();
+            let Some(inside) = tris.iter().max_by(|a, b| tri_area(a).total_cmp(&tri_area(b))).map(|[a, b, c]| (*a + *b + *c) * (1.0 / 3.0)) else {
+                continue;
+            };
+            let mut span = solidcraft_geom::Aabb3::EMPTY;
+            tris.iter().flatten().for_each(|q| span.add(*q));
+            let face_size = span.size().len();
+            let holes: Vec<Vec3> = closed_loops(open)
+                .into_iter()
+                .filter(|l| {
+                    let mut bb = solidcraft_geom::Aabb3::EMPTY;
+                    l.iter().for_each(|q| bb.add(*q));
+                    let d = bb.size().len();
+                    d <= up_to && d < face_size * 0.5
+                })
+                .filter_map(|l| l.first().copied())
+                .collect();
+            if !holes.is_empty() {
+                jobs.push((inside, holes));
+            }
+        }
+        jobs
+    };
+    let mut closed = 0;
+    for (inside, holes) in jobs {
+        let n = holes.len();
+        s.execute(
+            "surface.untrim",
+            &json!({"face": {"body": body, "point": [inside.x, inside.y, inside.z]}, "holes": holes.iter().map(|q| [q.x, q.y, q.z]).collect::<Vec<_>>(), "in_place": true}),
+        )
+        .map_err(|e| bad(cmd, format!("a face's holes could not be closed: {e}")))?;
+        closed += n;
+    }
+    if closed == 0 {
+        return Err(bad(cmd, format!("no holes up to {up_to} mm across on `{body}`")));
+    }
+    Ok(json!({"body": body, "closed": closed}))
+}
+
+fn tri_area(t: &[Vec3; 3]) -> f64 {
+    (t[1] - t[0]).cross(t[2] - t[0]).len() * 0.5
+}
+
+/// Polylines joined end to end, the closed loops among them.
+fn closed_loops(mut parts: Vec<Vec<Vec3>>) -> Vec<Vec<Vec3>> {
+    parts.retain(|p| p.len() >= 2);
+    let tol = 1e-4;
+    let mut out = Vec::new();
+    while !parts.is_empty() {
+        let mut line = parts.remove(0);
+        loop {
+            let (Some(head), Some(tail)) = (line.first().copied(), line.last().copied()) else { break };
+            if head.dist(tail) < tol && line.len() > 2 {
+                out.push(line);
+                break;
+            }
+            let Some(i) = parts.iter().position(|p| p.first().is_some_and(|q| q.dist(tail) < tol) || p.last().is_some_and(|q| q.dist(tail) < tol)) else {
+                break;
+            };
+            let mut next = parts.remove(i);
+            if next.first().is_some_and(|q| q.dist(tail) >= tol) {
+                next.reverse();
+            }
+            line.extend(next.into_iter().skip(1));
+        }
+    }
+    out
+}
+
 /// The point halfway along a polyline.
 fn polyline_mid(pts: &[Vec3]) -> Vec3 {
     let total: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
@@ -342,6 +453,27 @@ fn polyline_mid(pts: &[Vec3]) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Owner: close an imported surface's small holes for CF work. The plate's top copied as a
+    /// surface (three holes of radius 2): holes up to 5 mm across close, leaving the 40 × 20
+    /// rectangle; up to 3 mm, none (refused, nothing changed); one undo step.
+    #[test]
+    fn small_holes_of_a_surface_close() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 2, "body_name": "Plate"})).unwrap();
+        for x in [10, 20, 30] {
+            s.execute("solid.cylinder", &json!({"radius": 2, "height": 4, "base": [x, 10, -1], "operation": "cut", "targets": ["Plate"]})).unwrap();
+        }
+        let r = s.execute("surface.offset", &json!({"faces": [[5, 5, 2]], "body": "Plate", "distance": 0})).unwrap();
+        let top = r["created_bodies"][0].as_str().unwrap().to_string();
+        assert!(s.execute("cf.close_holes", &json!({"body": top, "up_to": 3})).is_err(), "4 mm holes are larger");
+        let undo = s.undo.len();
+        let r = s.execute("cf.close_holes", &json!({"body": top, "up_to": 5})).unwrap();
+        assert_eq!(r["closed"], 3);
+        assert_eq!(s.undo.len(), undo + 1, "one undo step");
+        let area = solidcraft_kernel::measure(&s.world_state().body(&top).unwrap().body).unwrap().area;
+        assert!((area - 800.0).abs() < 1e-6, "{area}");
+    }
 
     /// Owner: a material price estimate. A 100 × 200 × 20 SS400 plate: 0.4 L at 7.85 kg/L is
     /// 3.14 kg, at 35 THB/kg 109.9 THB; two of them twice that; a typed price wins; a body's stock
