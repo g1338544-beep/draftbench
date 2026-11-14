@@ -95,7 +95,7 @@ pub fn sync_inputs(d: &mut crate::dialogs::Dialog) {
     let want = f.joint_kind() == JointKind::PinPath;
     let has = d.inputs.iter().position(|i| i.label == SLOT_PATH);
     match (want, has) {
-        (true, None) => d.inputs.push(SelInput::new(SLOT_PATH, crate::selection::CURVES | EDGES, true)),
+        (true, None) => d.inputs.push(SelInput::new(SLOT_PATH, crate::selection::CURVES | EDGES | FACES, true)),
         (false, Some(i)) => {
             d.inputs.remove(i);
             d.active = d.active.min(d.inputs.len().saturating_sub(1));
@@ -640,9 +640,22 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             form_row(ui, "Motion", |ui| {
                 ui.label("");
             });
-            // Pin in Path is made as built (its slot is where it is drawn).
-            let types: &[&str] = if f.as_built { &TYPE_LABELS } else { &TYPE_LABELS[..TYPE_LABELS.len() - 1] };
-            choice_row(ui, "Type", "jt_type", &mut f.kind, types);
+            // Pin in Path is Pin-slot with a slot along a path (owner: one type, not two): the Type
+            // list shows Pin-slot for both, and its Slot row picks straight or along a path.
+            let path_kind = TYPES.iter().position(|t| *t == "pin_path").unwrap_or(13);
+            let slot_kind = TYPES.iter().position(|t| *t == "pin_slot").unwrap_or(4);
+            let mut shown = if f.kind == path_kind { slot_kind } else { f.kind };
+            let before = shown;
+            choice_row(ui, "Type", "jt_type", &mut shown, &TYPE_LABELS[..TYPE_LABELS.len() - 1]);
+            if shown != before {
+                f.kind = shown;
+            }
+            // A slot along a path is made as built (the slot is where it is drawn).
+            if f.as_built && f.editing.is_none() && (f.kind == slot_kind || f.kind == path_kind) {
+                let mut along = usize::from(f.kind == path_kind);
+                choice_row(ui, "Slot", "jt_slot_kind", &mut along, &["Straight", "Along a path (curved)"]);
+                f.kind = if along == 1 { path_kind } else { slot_kind };
+            }
             // Each type shows only the options it uses (owner).
             let jk = f.joint_kind();
             if f.as_built && f.editing.is_none() {
@@ -654,7 +667,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     crate::ui_kit::caption(
                         ui,
                         "Slot on",
-                        crate::i18n::tr_label("Slot path: click the slot's centre line (sketch lines or arcs, or model edges), in order."),
+                        crate::i18n::tr_label(
+                            "Slot path: click a face of the slot (its floor or a side wall): the pin runs along its middle. Or click a centre line drawn in a sketch, or model edges.",
+                        ),
                     );
                 }
                 if sel_items(inputs, 1).len() > 1 && matches!(jk, JointKind::Slider | JointKind::Revolute) {
@@ -1081,10 +1096,131 @@ fn slot_path(s: &Session, items: &[Sel]) -> Option<Vec<Vec3>> {
                 let b = st.body(body)?;
                 parts.push(b.mesh().edges.get(*index)?.clone());
             }
+            // A face of the slot: the middle of its outline (owner: "click the slot, the pin runs
+            // down its middle").
+            Sel::Face { body, index, .. } => {
+                let b = st.body(body)?;
+                return slot_centre_line(&b.mesh(), *index);
+            }
             _ => {}
         }
     }
     chain(parts)
+}
+
+/// The centre line of a slot from one of its faces (its floor, or a side wall): the face's
+/// longest boundary loop (the slot's outline) split at its two farthest points (the slot's ends),
+/// the two sides walked together and averaged, then cut back by half the slot's width at each
+/// end, so the pin stops where it touches an end. Straight, curved and S-shaped slots alike.
+pub(crate) fn slot_centre_line(m: &solidcraft_engine::geom::Mesh, face: usize) -> Option<Vec<Vec3>> {
+    let parts: Vec<Vec<Vec3>> = (0..m.edges.len())
+        .filter(|&e| m.edge_faces.get(e).is_some_and(|f| f.contains(&(face as u32))))
+        .filter_map(|e| m.edges.get(e).cloned())
+        .collect();
+    let loops = loops_of(parts);
+    let len = |l: &[Vec3]| l.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>();
+    let outline = loops.into_iter().max_by(|a, b| len(a).total_cmp(&len(b)))?;
+    // Resampled evenly, closed.
+    let ring = resample_closed(&outline, 400)?;
+    let n = ring.len();
+    // The two farthest points: the slot's ends.
+    let (mut ia, mut ib, mut far) = (0, 0, -1.0);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = ring[i].dist(ring[j]);
+            if d > far {
+                (ia, ib, far) = (i, j, d);
+            }
+        }
+    }
+    if far <= 1e-9 {
+        return None;
+    }
+    let side1: Vec<Vec3> = (ia..=ib).map(|i| ring[i % n]).collect();
+    let side2: Vec<Vec3> = (ib..=ia + n).map(|i| ring[i % n]).rev().collect();
+    let k = 64;
+    let (s1, s2) = (resample_open(&side1, k)?, resample_open(&side2, k)?);
+    let mid: Vec<Vec3> = s1.iter().zip(&s2).map(|(a, b)| (*a + *b) * 0.5).collect();
+    // Half the width, at the middle; the line cut back by it at each end.
+    let half = s1.get(k / 2).zip(s2.get(k / 2)).map(|(a, b)| a.dist(*b) * 0.5)?;
+    let total = len(&mid);
+    if !(total > 2.0 * half + 1e-6) {
+        return None;
+    }
+    trim_line(&mid, half, total - half)
+}
+
+/// Polylines joined end to end into closed loops (each as a point list, first point not repeated).
+fn loops_of(mut parts: Vec<Vec<Vec3>>) -> Vec<Vec<Vec3>> {
+    parts.retain(|p| p.len() >= 2);
+    let tol = 1e-4;
+    let mut out = Vec::new();
+    while let Some(mut line) = (!parts.is_empty()).then(|| parts.remove(0)) {
+        loop {
+            let (Some(head), Some(tail)) = (line.first().copied(), line.last().copied()) else { break };
+            if head.dist(tail) < tol && line.len() > 2 {
+                break;
+            }
+            let Some(i) = parts.iter().position(|p| p.first().is_some_and(|q| q.dist(tail) < tol) || p.last().is_some_and(|q| q.dist(tail) < tol)) else {
+                break;
+            };
+            let mut next = parts.remove(i);
+            if next.first().is_some_and(|q| q.dist(tail) >= tol) {
+                next.reverse();
+            }
+            line.extend(next.into_iter().skip(1));
+        }
+        if line.first().zip(line.last()).is_some_and(|(a, b)| a.dist(*b) < tol) {
+            line.pop();
+        }
+        out.push(line);
+    }
+    out
+}
+
+/// `count` points evenly along a closed loop.
+fn resample_closed(pts: &[Vec3], count: usize) -> Option<Vec<Vec3>> {
+    let mut closed = pts.to_vec();
+    closed.push(*pts.first()?);
+    let mut out = resample_open(&closed, count + 1)?;
+    out.pop();
+    Some(out)
+}
+
+/// `count` points evenly along a polyline, its ends included.
+fn resample_open(pts: &[Vec3], count: usize) -> Option<Vec<Vec3>> {
+    let total: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
+    if !(total > 0.0) || count < 2 {
+        return None;
+    }
+    (0..count).map(|i| point_at(pts, total * i as f64 / (count - 1) as f64)).collect()
+}
+
+/// The point `at` along a polyline.
+fn point_at(pts: &[Vec3], at: f64) -> Option<Vec3> {
+    let mut left = at;
+    for w in pts.windows(2) {
+        let l = w[0].dist(w[1]);
+        if left <= l && l > 0.0 {
+            return Some(w[0] + (w[1] - w[0]) * (left / l));
+        }
+        left -= l;
+    }
+    pts.last().copied()
+}
+
+/// The part of a polyline between two lengths along it.
+fn trim_line(pts: &[Vec3], from: f64, to: f64) -> Option<Vec<Vec3>> {
+    let mut out = vec![point_at(pts, from)?];
+    let mut run = 0.0;
+    for w in pts.windows(2) {
+        run += w[0].dist(w[1]);
+        if run > from && run < to {
+            out.push(w[1]);
+        }
+    }
+    out.push(point_at(pts, to)?);
+    Some(out)
 }
 
 /// A Pin in Path joint's travel from the pin to each end of the slot (the `path` and `at` of its

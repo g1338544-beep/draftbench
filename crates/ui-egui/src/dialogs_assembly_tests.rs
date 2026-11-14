@@ -970,3 +970,50 @@ fn as_built_pin_in_path_runs_along_the_picked_slot() {
     let [bx, by] = x(&app);
     assert!((bx + 10.0).abs() < 1e-6 && (by + 10.0).abs() < 1e-6, "round the bend: {bx} {by}");
 }
+
+/// Owner: "click the slot, the pin runs down its middle". A slot's outline (40 long between its
+/// end centres, 10 wide, round ends) as one face's boundary: its centre line runs from one end
+/// centre to the other; and a curved slot (a quarter ring, radius 50, 10 wide) gives its arc.
+#[test]
+fn a_slots_face_gives_its_centre_line() {
+    let stadium = |len: f64, r: f64| {
+        let mut pts = Vec::new();
+        for i in 0..=32 {
+            let a = -std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * i as f64 / 32.0;
+            pts.push(Vec3::new(len + r * a.cos(), r * a.sin(), 0.0));
+        }
+        for i in 0..=32 {
+            let a = std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * i as f64 / 32.0;
+            pts.push(Vec3::new(r * a.cos(), r * a.sin(), 0.0));
+        }
+        pts.push(pts[0]);
+        pts
+    };
+    let mesh = |outline: Vec<Vec3>| solidcraft_engine::geom::Mesh { edges: vec![outline], edge_faces: vec![vec![0]], ..Default::default() };
+    let line = crate::dialogs_assembly::slot_centre_line(&mesh(stadium(40.0, 5.0)), 0).unwrap();
+    let (a, b) = (line[0], *line.last().unwrap());
+    let ends = if a.x < b.x { (a, b) } else { (b, a) };
+    assert!(ends.0.dist(Vec3::ZERO) < 0.3 && ends.1.dist(Vec3::new(40.0, 0.0, 0.0)) < 0.3, "{ends:?}");
+    assert!(line.iter().all(|q| q.y.abs() < 0.3), "along the middle");
+    // A curved slot: arcs of radius 45 and 55 about the origin, joined by round ends.
+    let mut ring = Vec::new();
+    for i in 0..=40 {
+        let t = std::f64::consts::FRAC_PI_2 * i as f64 / 40.0;
+        ring.push(Vec3::new(55.0 * t.cos(), 55.0 * t.sin(), 0.0));
+    }
+    for i in 1..16 {
+        let a = std::f64::consts::PI * i as f64 / 16.0;
+        ring.push(Vec3::new(-5.0 * a.cos(), 50.0 + 5.0 * a.sin(), 0.0) + Vec3::new(0.0, 0.0, 0.0) * 0.0);
+    }
+    for i in (0..=40).rev() {
+        let t = std::f64::consts::FRAC_PI_2 * i as f64 / 40.0;
+        ring.push(Vec3::new(45.0 * t.cos(), 45.0 * t.sin(), 0.0));
+    }
+    for i in 1..16 {
+        let a = std::f64::consts::PI * i as f64 / 16.0;
+        ring.push(Vec3::new(50.0 + 5.0 * a.cos(), -5.0 * a.sin(), 0.0));
+    }
+    ring.push(ring[0]);
+    let arc = crate::dialogs_assembly::slot_centre_line(&mesh(ring), 0).unwrap();
+    assert!(arc.iter().all(|q| ((q.x * q.x + q.y * q.y).sqrt() - 50.0).abs() < 1.0), "on the radius-50 arc: {arc:?}");
+}
