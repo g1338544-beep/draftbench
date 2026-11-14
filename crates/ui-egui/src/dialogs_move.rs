@@ -396,10 +396,16 @@ pub fn point_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     wcs_note(app, ui);
     // The rows are in the WCS: when it changes, the numbers follow it.
     let frame = format!("{:?}", wcs(app));
-    if d.extra.get("xyz_frame").and_then(Value::as_str) != Some(frame.as_str()) {
-        d.extra.insert("xyz_frame".into(), json!(frame));
-        d.extra.remove("from_xyz");
-        d.extra.remove("to_xyz");
+    match d.extra.get("xyz_frame").and_then(Value::as_str) {
+        Some(was) if was == frame => {}
+        was => {
+            // Numbers typed in another WCS: shown again from the picks in this one.
+            if was.is_some() {
+                d.extra.remove("from_xyz");
+                d.extra.remove("to_xyz");
+            }
+            d.extra.insert("xyz_frame".into(), json!(frame));
+        }
     }
     for (i, name, key) in [(1usize, "From", "from_xyz"), (2, "To", "to_xyz")] {
         let pick = sel_point(app, items(d, i).first());
