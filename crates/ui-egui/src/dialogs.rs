@@ -2217,6 +2217,10 @@ fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, range: std::
         let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
         form_row(ui, label, |ui| {
             ui.horizontal(|ui| {
+                // The colour this input's picks light up in, so they can be told apart.
+                if let Some(c) = crate::viewport::pick_colour(i).filter(|_| !inp.items.is_empty()) {
+                    ui.label(RichText::new("●").color(c));
+                }
                 let active = i == d.active;
                 // A chip: "↖ Select" (outlined) while empty, "N selected" (filled) once picked.
                 let custom_axis = i == 1 && inp.items.is_empty() && stored_revolve_axis(&d.kind).is_some();

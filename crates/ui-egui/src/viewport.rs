@@ -2311,12 +2311,31 @@ fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through:
     }
 }
 
+/// The bright colour of a dialog input's picks: none for the first (it keeps the selection
+/// colour), then orange, magenta, green, cyan, yellow.
+pub(crate) fn pick_colour(input: usize) -> Option<Color32> {
+    const COLOURS: [Color32; 5] = [
+        Color32::from_rgb(255, 140, 0),
+        Color32::from_rgb(230, 50, 200),
+        Color32::from_rgb(30, 200, 90),
+        Color32::from_rgb(0, 200, 230),
+        Color32::from_rgb(240, 210, 0),
+    ];
+    input.checked_sub(1).and_then(|i| COLOURS.get(i % COLOURS.len()).copied())
+}
+
 fn highlight_geometry_key(app: &SolveApp) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let selected = app.highlighted();
     app.session.revision.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     serde_json::to_string(&selected).unwrap_or_default().hash(&mut h);
+    // Which input each pick is in sets its colour.
+    if let Some(d) = &app.dialog {
+        for inp in &d.inputs {
+            inp.items.len().hash(&mut h);
+        }
+    }
     format!("{:?}", app.viewport.hover).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
@@ -2458,14 +2477,22 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         return sc;
     }
     let mut feedback = GpuScene::default();
+    // Owner: with a dialog picking several things (a joint's two parts, a fixed and a moving
+    // part), each input's picks have a bright colour of their own; the first input keeps the
+    // selection colour.
+    let input_colour = |x: &Sel| -> Option<Color32> {
+        let d = app.dialog.as_ref()?;
+        let i = d.inputs.iter().position(|inp| inp.items.iter().any(|y| crate::selection::same_item(x, y)))?;
+        pick_colour(i)
+    };
     // Selected things.
     for x in &sel {
         match x {
             Sel::Face { body, index, .. } => {
                 // A live preview stands in for the body: its old faces would fight with it.
                 if let Some(b) = st.body(body).filter(|_| app.session.body_visible(body) && !app.preview.effective_replaced().contains(body)) {
-                    face_tris(&mut feedback, &shown(b), *index, c4(t.sel_face), false);
-                    hidden_face_outline(&mut feedback, &drawn_mesh(app, b), *index, t.sel_edge);
+                    face_tris(&mut feedback, &shown(b), *index, c4(input_colour(x).unwrap_or(t.sel_face)), false);
+                    hidden_face_outline(&mut feedback, &drawn_mesh(app, b), *index, input_colour(x).unwrap_or(t.sel_edge));
                 }
             }
             Sel::Body { name } => {
@@ -2474,7 +2501,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 {
                     let m = shown(b);
                     let count = b.body.face_count();
-                    mesh_tris(&mut feedback, &m, c4(t.body_selected), true, |f| (f as usize) < count);
+                    mesh_tris(&mut feedback, &m, c4(input_colour(x).unwrap_or(t.body_selected)), true, |f| (f as usize) < count);
                 }
             }
             Sel::Edge { body, index, point } => {
@@ -2482,7 +2509,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     && app.session.body_visible(body)
                     && let Some(e) = edge_of(&drawn_mesh(app, b), *index, *point)
                 {
-                    edge_lines(&mut feedback, e, t.sel_edge, t.sel_edge_rim, 3.0);
+                    edge_lines(&mut feedback, e, input_colour(x).unwrap_or(t.sel_edge), t.sel_edge_rim, 3.0);
                 }
             }
             Sel::Profile { sketch, index } => profile_fill(&mut feedback, app, *sketch, *index, t.sel_profile, t.sel_profile_edge),

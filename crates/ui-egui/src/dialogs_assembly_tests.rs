@@ -1039,3 +1039,16 @@ fn joint_placement_and_motion_link_type_switch_dialogs() {
     h.frames(2);
     assert!(h.app.dialog.as_ref().is_some_and(|d| crate::dialogs::command_of(d) == Some("joint.gear")), "the gear link");
 }
+
+/// Owner: picks in different inputs (a joint's fixed and moving parts) light up in different
+/// bright colours; the first input keeps the selection colour.
+#[test]
+fn each_inputs_picks_have_their_own_colour() {
+    let c: Vec<_> = (0..7).map(crate::viewport::pick_colour).collect();
+    assert!(c[0].is_none(), "the first input: the selection colour");
+    let bright: Vec<_> = c[1..6].iter().map(|x| x.unwrap()).collect();
+    for (i, a) in bright.iter().enumerate() {
+        assert!(bright.iter().skip(i + 1).all(|b| a != b), "all different");
+        assert!(a.r().max(a.g()).max(a.b()) >= 200, "bright");
+    }
+}
