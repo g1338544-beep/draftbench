@@ -43,7 +43,117 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_copy3d")
         .enabled(in_sketch)
         .params("wires: [drawn 3D curve or point ids]; by: [dx,dy,dz] the shift of each copy, or from + to: [x,y,z] world points (the copy lands where `to` is); count?: copies, each shifted once more (default 1, at most 100). The copies are new, free 3D curves (needs 3D Sketch on)"),
+    CommandSpec::new("sketch.relation3d", "3D Relation", relation3d).icon("constraint").enabled(in_sketch).params(concat!(
+        "type: along (wire, axis: x|y|z) | parallel | perpendicular | equal | tangent (a, b: two drawn 3D curves; tangent: where they meet) | ",
+        "length (wire, value: mm, a size) | distance (a, b: [curve, point index], value: mm) | fix (at: [curve, point index], point?: [x,y,z] world, default where it is) | ",
+        "on_face (at: [curve, point index], origin: [x,y,z], normal: [x,y,z] world: the face's plane) | normal (wire, normal: [x,y,z] world). ",
+        "The drawn points move as little as they can until it holds; refused when it conflicts (→ index: the relation's place in the list)"
+    )),
+    CommandSpec::new("sketch.relation3d_value", "Change 3D Size", relation3d_value)
+        .icon("dimension")
+        .enabled(in_sketch)
+        .params("index: a length or distance relation's place, value: mm; the curves follow"),
+    CommandSpec::new("sketch.relation3d_delete", "Delete 3D Relations", relation3d_delete)
+        .icon("delete")
+        .enabled(in_sketch)
+        .params("indices: [places in the relation list] (sketch.relation3d gave them)"),
 ];
+
+/// A drawn point: [curve id, point index].
+fn drawn_point(cmd: &str, v: Option<&Value>, name: &str) -> Result<solidcraft_sketch::DrawnPoint> {
+    let a = v.and_then(Value::as_array).filter(|a| a.len() == 2).ok_or_else(|| bad(cmd, format!("`{name}` must be [curve id, point index]")))?;
+    let id = a.first().and_then(Value::as_str).ok_or_else(|| bad(cmd, format!("`{name}`: the curve id comes first")))?;
+    let i = a
+        .get(1)
+        .and_then(Value::as_u64)
+        .and_then(|i| usize::try_from(i).ok())
+        .filter(|i| *i < solidcraft_sketch::MAX_FIT_POINTS)
+        .ok_or_else(|| bad(cmd, format!("`{name}`: the point index is a whole number below 500")))?;
+    Ok((id.to_string(), i))
+}
+
+fn relation3d(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_sketch::Relation3d as R;
+    let cmd = "sketch.relation3d";
+    let text = |name: &str| p.get(name).and_then(Value::as_str).map(str::to_string).ok_or_else(|| bad(cmd, format!("`{name}` must be a drawn 3D curve id")));
+    let num = |name: &str| p.get(name).and_then(Value::as_f64).ok_or_else(|| bad(cmd, format!("`{name}` must be a number (mm)")));
+    let v3 = |name: &str| p.get(name).and_then(vec3).ok_or_else(|| bad(cmd, format!("`{name}` must be [x,y,z]")));
+    let inverse = inverse_owner_frame(s, p, cmd)?;
+    let kind = p.get("type").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase().replace([' ', '-'], "_");
+    let (index, info) = edit(s, p, cmd, false, |sk, _| {
+        needs_3d(sk, cmd)?;
+        // World points and directions into the curves' own space.
+        let space_of = |sk: &solidcraft_sketch::Sketch, id: &str| sk.wire_index(id).and_then(|w| sk.wires.get(w)).map(|w| w.space);
+        let pt = |sk: &solidcraft_sketch::Sketch, id: &str, q: Vec3| if space_of(sk, id) == Some(WireSpace::Component) { solidcraft_doc::apply_point(&inverse, q) } else { q };
+        let dir = |sk: &solidcraft_sketch::Sketch, id: &str, q: Vec3| if space_of(sk, id) == Some(WireSpace::Component) { solidcraft_doc::apply_vector(&inverse, q) } else { q };
+        let arr = |q: Vec3| [q.x, q.y, q.z];
+        let r = match kind.as_str() {
+            "along" => {
+                let axis = match p.get("axis").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase().as_str() {
+                    "x" => 0,
+                    "y" => 1,
+                    "z" => 2,
+                    _ => return Err(bad(cmd, "`axis` must be x, y or z")),
+                };
+                R::Along { wire: text("wire")?, axis }
+            }
+            "parallel" => R::Parallel { a: text("a")?, b: text("b")? },
+            "perpendicular" => R::Perpendicular { a: text("a")?, b: text("b")? },
+            "equal" => R::Equal { a: text("a")?, b: text("b")? },
+            "tangent" => R::Tangent { a: text("a")?, b: text("b")? },
+            "length" => R::Length { wire: text("wire")?, value: num("value")? },
+            "distance" => R::Distance { a: drawn_point(cmd, p.get("a"), "a")?, b: drawn_point(cmd, p.get("b"), "b")?, value: num("value")? },
+            "fix" => {
+                let at = drawn_point(cmd, p.get("at"), "at")?;
+                let point = match p.get("point") {
+                    Some(_) => arr(pt(sk, &at.0, v3("point")?)),
+                    None => {
+                        let q = sk.wire_index(&at.0).and_then(|w| sk.wires.get(w)).and_then(|w| w.fit.get(at.1)).copied();
+                        arr(q.ok_or_else(|| bad(cmd, format!("`{}` has no drawn point {}", at.0, at.1)))?)
+                    }
+                };
+                R::Fix { at, point }
+            }
+            "on_face" | "on_plane" => {
+                let at = drawn_point(cmd, p.get("at"), "at")?;
+                R::OnPlane { origin: arr(pt(sk, &at.0, v3("origin")?)), normal: arr(dir(sk, &at.0, v3("normal")?)), at }
+            }
+            "normal" => {
+                let wire = text("wire")?;
+                R::Normal { normal: arr(dir(sk, &wire, v3("normal")?)), wire }
+            }
+            other => return Err(bad(cmd, format!("unknown 3D relation `{other}`"))),
+        };
+        sk.add_relation3d(r)?;
+        Ok(sk.relations3d.len() - 1)
+    })?;
+    Ok(json!({"index": index, "sketch": info}))
+}
+
+fn relation3d_value(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.relation3d_value";
+    let index = p.get("index").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok()).ok_or_else(|| bad(cmd, "`index` must be a relation's place"))?;
+    let value = p.get("value").and_then(Value::as_f64).ok_or_else(|| bad(cmd, "`value` must be a length (mm)"))?;
+    let ((), info) = edit(s, p, cmd, false, |sk, _| {
+        sk.set_relation3d_value(index, value)?;
+        Ok(())
+    })?;
+    Ok(json!({"sketch": info}))
+}
+
+fn relation3d_delete(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.relation3d_delete";
+    let indices: Vec<usize> =
+        p.get("indices").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).filter_map(|i| usize::try_from(i).ok()).collect()).unwrap_or_default();
+    if indices.is_empty() {
+        return Err(bad(cmd, "`indices` must list relation places"));
+    }
+    let (left, info) = edit(s, p, cmd, false, |sk, _| {
+        sk.remove_relations3d(&indices);
+        Ok(sk.relations3d.len())
+    })?;
+    Ok(json!({"relations": left, "sketch": info}))
+}
 
 fn points(cmd: &str, p: &Value, min: usize) -> Result<Vec<Vec3>> {
     let a = p.get("points").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`points` must list [x,y,z] points"))?;

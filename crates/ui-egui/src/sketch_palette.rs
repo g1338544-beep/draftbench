@@ -357,6 +357,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut construction = false;
     let mut look = false;
     let mut finish = false;
+    let mut discard = false;
     let mut tie = false;
     let mut start = None;
     let feature = active_feature(app);
@@ -478,19 +479,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 crate::scenario::publish_rect("sketch_palette:finish", button.rect);
                 crate::scenario::publish_handle("sketch_palette:finish", button.rect.center());
                 finish = button.clicked();
-                let (at, slice) = crate::ui_kit::button_pair(
+                // Cancel Sketch (owner): leave without keeping what this edit changed. Slice
+                // stays a toggle under More.
+                let (at, cancel) = crate::ui_kit::button_pair(
                     ui,
                     "sketch_palette",
-                    [false, opts.slice],
+                    [false, false],
                     [
                         crate::ui_kit::PairButton { key: "look_at", label: "ui.look_at", icon: Some("lookat") },
-                        crate::ui_kit::PairButton { key: "slice", label: "Slice", icon: None },
+                        crate::ui_kit::PairButton { key: "cancel", label: "Cancel Sketch", icon: None },
                     ],
                 );
                 look = at;
-                if slice {
-                    set = Some(("slice".into(), !opts.slice));
-                }
+                discard = cancel;
             }
         });
     });
@@ -526,6 +527,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if finish {
         app.finish_sketch();
+    } else if discard {
+        app.cancel_sketch();
     }
 }
 
@@ -545,8 +548,8 @@ mod tests {
             Tokens::get().sketch_palette_width
         );
         let look = crate::scenario::rect_of("sketch_palette:look_at").unwrap();
-        let slice = crate::scenario::rect_of("sketch_palette:slice").unwrap();
-        assert_eq!(look.size(), slice.size());
+        let cancel = crate::scenario::rect_of("sketch_palette:cancel").unwrap();
+        assert_eq!(look.size(), cancel.size());
         assert_eq!(look.height(), Tokens::get().form_button_height);
         assert_eq!(crate::scenario::rect_of("sketch_palette:meter").unwrap().height(), Tokens::get().space_6);
         assert!(crate::scenario::handle_at("sketch_palette:toggle:grid").is_none());
@@ -614,6 +617,38 @@ mod tests {
         assert!(crate::scenario::handle_at("button:sketch.finish").is_some(), "and so does the ribbon's Finish");
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         assert!(h.app.session.active_sketch.is_none());
+    }
+
+    /// Owner: a Cancel Sketch button. A new sketch cancelled goes; an edit of an existing one
+    /// cancelled keeps the sketch as it was before the edit (not before earlier edits).
+    #[test]
+    fn cancel_sketch_leaves_without_keeping_the_edit() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let features = h.app.session.doc.features.len();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+        h.settle();
+        let at = crate::scenario::handle_at("sketch_palette:cancel").expect("Cancel Sketch beside Look At");
+        h.call("ui.click", json!({"x":at.x,"y":at.y}));
+        assert!(h.app.session.active_sketch.is_none());
+        assert_eq!(h.app.session.doc.features.len(), features, "the new sketch went");
+        // An existing sketch: one line kept from its first edit, a second line cancelled.
+        let id = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.settle();
+        h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+        h.app.finish_sketch();
+        h.settle();
+        h.app.edit_sketch(id);
+        h.settle();
+        h.app.run("sketch.line", json!({"points":[[0,5],[10,5]]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,9],[10,9]]})).unwrap();
+        h.settle();
+        h.app.cancel_sketch();
+        assert!(h.app.session.active_sketch.is_none());
+        let sk = h.app.session.doc.sketch(id).expect("the sketch stays");
+        assert_eq!(sk.curves.len(), 1, "only the line of the earlier edit");
     }
 
     #[test]
@@ -827,7 +862,11 @@ mod tests {
         let slice_on = |h: &mut crate::scenario::Harness| h.app.session.world_state().sketch(active).unwrap().sketch.view.slice;
         assert!(!slice_on(&mut h));
         // Clicking the row's label (not just the checkbox) toggles the option, same as before
-        // the checkbox and the label became separate widgets in their own column.
+        // the checkbox and the label became separate widgets in their own column. Slice is under
+        // More (the footer's place went to Cancel Sketch).
+        let more = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
+        h.call("ui.click", json!({"x":more.x,"y":more.y}));
+        h.settle();
         let [x, y] = h.widget("Slice").unwrap();
         h.call("ui.click", json!({"x": x, "y": y}));
         h.settle();

@@ -223,3 +223,37 @@ fn three_d_sketch_command_draws_a_visible_line_between_model_corners() {
     let drawn = sk.wires.first().map(|w| w.pts.clone()).unwrap_or_default();
     assert!(drawn.len() >= 2 && drawn.iter().any(|p| (p.z - hi.z).abs() < 1e-3), "the line lies on the top face: {drawn:?}");
 }
+
+/// Owner: a 3D sketch takes relations and sizes, easy to use. Picking a drawn 3D line offers
+/// Along X/Y/Z, Length and Fix at the pick; two lines offer Parallel, Perpendicular, Equal and
+/// Tangent. Length opens its size box; the value typed sets it and the line follows.
+#[test]
+fn picked_3d_lines_offer_their_relations_and_a_size_box() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create3d", json!({})).unwrap();
+    h.app.tool = None;
+    let made = h.app.run("sketch.line3d", json!({"points": [[0, 0, 0], [1, 2, 30], [12, 2, 31]]})).unwrap();
+    let a = made["curves"][0].as_str().unwrap().to_string();
+    let b = made["curves"][1].as_str().unwrap().to_string();
+    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a.clone() }];
+    let labels = |h: &crate::scenario::Harness| crate::relation_bar::items(&h.app).iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+    assert_eq!(labels(&h), ["Along X", "Along Y", "Along Z", "Length", "Fix"]);
+    let along_z = crate::relation_bar::items(&h.app).into_iter().find(|i| i.label == "Along Z").unwrap();
+    crate::relation_bar::run_wire_item(&mut h.app, &along_z).unwrap();
+    let length = crate::relation_bar::items(&h.app).into_iter().find(|i| i.label == "Length").unwrap();
+    crate::relation_bar::run_wire_item(&mut h.app, &length).unwrap();
+    assert!(crate::relation_bar::size_pending().is_some(), "Length opens its size box");
+    let index = crate::relation_bar::size_pending().unwrap();
+    h.app.run("sketch.relation3d_value", json!({"index": index, "value": 40})).unwrap();
+    let st = h.app.session.world_state();
+    let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    let w = &ss.sketch.wires[ss.sketch.wire_index(&a).unwrap()];
+    let (p, q) = (w.fit[0], *w.fit.last().unwrap());
+    assert!((q - p).len() > 39.999 && (q - p).cross(Vec3::Z).len() < 1e-5, "{p:?} {q:?}");
+    drop(st);
+    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a.clone() }, solidcraft_engine::Sel::SketchCurve { id: b }];
+    assert_eq!(labels(&h), ["Parallel", "Perpendicular", "Equal", "Tangent"]);
+    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a }];
+    assert!(labels(&h).contains(&"Remove relations".to_string()), "a curve with relations can lose them");
+}

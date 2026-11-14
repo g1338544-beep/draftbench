@@ -398,6 +398,8 @@ pub struct SolveApp {
     pub now: f64,
     /// The view before the current sketch started (Finish Sketch returns to it).
     pub pre_sketch_cam: Option<Camera>,
+    /// The open sketch and the undo depth when it opened: Cancel Sketch undoes back to it.
+    pub sketch_undo_floor: Option<(u64, usize)>,
     /// The history marker before Edit Sketch rolled the timeline to the sketch; Finish Sketch
     /// restores it.
     pub pre_sketch_marker: Option<Option<usize>>,
@@ -571,6 +573,7 @@ impl SolveApp {
             cam_anim: None,
             now: 0.0,
             pre_sketch_cam: None,
+            sketch_undo_floor: None,
             pre_sketch_marker: None,
             services,
             file_picker: None,
@@ -1334,6 +1337,53 @@ impl SolveApp {
         }
     }
 
+    /// Cancel Sketch (owner): leave the open sketch without what this edit changed. Each change
+    /// made in it is undone (the undo steps taken while it was open); a sketch made in this edit
+    /// goes too. The marker and view return as Finish Sketch puts them back.
+    /// Remember where the undo history stood when the open sketch opened (Cancel Sketch goes
+    /// back to there, never into an earlier edit of the same sketch).
+    pub(crate) fn track_sketch_floor(&mut self) {
+        match self.session.active_sketch {
+            Some(id) if self.sketch_undo_floor.is_none_or(|(f, _)| f != id) => self.sketch_undo_floor = Some((id, self.session.undo.len())),
+            None => self.sketch_undo_floor = None,
+            _ => {}
+        }
+    }
+
+    pub fn cancel_sketch(&mut self) {
+        let Some(id) = self.session.active_sketch else { return };
+        self.track_sketch_floor();
+        let floor = self.sketch_undo_floor.map_or(0, |(_, d)| d);
+        sketch_text_move::cancel_drag(self);
+        if self.dialog.is_some() {
+            dialogs::cancel(self);
+        }
+        dim_view::cancel();
+        self.tool = None;
+        let mut guard = 0;
+        while self.session.undo.len() > floor && self.session.undo.last().is_some_and(|top| top.active_sketch == Some(id)) && guard < 10_000 {
+            guard += 1;
+            if self.run("edit.undo", json!({})).is_err() {
+                break;
+            }
+        }
+        // Made in this edit: the step before it has no such sketch.
+        if self.session.doc.feature(id).is_some() && self.session.undo.last().is_some_and(|top| top.doc.feature(id).is_none()) {
+            let _ = self.run("edit.undo", json!({}));
+        }
+        if self.session.active_sketch.is_some() {
+            self.finish_sketch();
+        } else {
+            if let Some(marker) = self.pre_sketch_marker.take() {
+                self.restore_marker(marker);
+            }
+            if let Some(c) = self.pre_sketch_cam.take() {
+                self.animate_to(c);
+            }
+        }
+        self.set_status(crate::i18n::tr_label("Sketch cancelled: its changes were not kept").to_string(), false);
+    }
+
     fn restore_marker(&mut self, marker: Option<usize>) {
         // Rolling forward past the features after the sketch recomputes them (an edited sketch
         // under a text cut): off the window thread when it takes a while.
@@ -1797,6 +1847,7 @@ impl SolveApp {
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         expression_complete::begin_frame(ui.ctx());
+        self.track_sketch_floor();
         let t0 = now_ms();
         // The first frames draw with the bundled faces while the system's CJK, Hangul and Thai
         // faces are read on a thread; the fonts are installed again once they are there.

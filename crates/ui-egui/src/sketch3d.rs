@@ -549,6 +549,38 @@ pub fn drag_end() {
     SNAP3.with(|s| *s.borrow_mut() = None);
 }
 
+/// The 3D relations and sizes, as small tags on their curves (a size reads its value), so what
+/// holds the sketch is plain to see.
+fn relation_tags(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    use solidcraft_engine::sketch::Relation3d as R;
+    let st = app.session.world_state();
+    let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
+    let sk = &ss.sketch;
+    let mid = |id: &str| -> Option<Vec3> {
+        let w = sk.wire_index(id).and_then(|i| sk.wires.get(i))?;
+        Some((*w.pts.first()? + *w.pts.last()?) * 0.5)
+    };
+    let tk = Tokens::get();
+    // Tags on one curve stack up, one under the other.
+    let mut stacked: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+    for r in sk.relations3d.iter().take(400) {
+        let text = match r {
+            R::Length { value, .. } => crate::prefs::show_mm(app, *value, 1),
+            R::Distance { value, .. } => format!("↔ {}", crate::prefs::show_mm(app, *value, 1)),
+            other => crate::i18n::tr_label(other.label()).to_string(),
+        };
+        for w in r.wires().into_iter().take(2) {
+            let Some(at) = mid(w).and_then(|m| proj.to_screen(m)) else { continue };
+            let dy = stacked.entry(w.to_string()).or_insert(0.0);
+            let galley = painter.layout_no_wrap(text.clone(), egui::FontId::proportional(tk.font_micro), tk.text);
+            let r = Rect::from_min_size(at + vec2(8.0, 6.0 + *dy), galley.size() + vec2(8.0, 4.0));
+            *dy += r.height() + 2.0;
+            painter.rect_filled(r, 3.0, tk.accent_soft);
+            painter.galley(r.min + vec2(4.0, 2.0), galley, tk.text);
+        }
+    }
+}
+
 /// Draw the drawn 3D points and the triad.
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.session.active_sketch.is_none() {
@@ -565,6 +597,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if !active(app) {
         return;
     }
+    relation_tags(app, painter, proj);
     if let Some((at, label)) = SNAP3.with(|s| *s.borrow()) {
         painter.circle_stroke(at, 6.0, Stroke::new(1.5, tk.accent));
         let r = Rect::from_min_size(at + vec2(12.0, -24.0), vec2(42.0, 14.0));

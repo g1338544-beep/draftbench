@@ -18,6 +18,8 @@ const OFFSET: Vec2 = vec2(18.0, 18.0);
 thread_local! {
     /// The selection the bar was placed for and where: a new pick moves the bar to the pointer.
     static ANCHOR: std::cell::RefCell<Option<(String, Pos2)>> = const { std::cell::RefCell::new(None) };
+    /// A 3D length just added: its relation's place, the text typed, focus wanted.
+    static SIZE: std::cell::RefCell<Option<(usize, String, bool)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The relations the current sketch selection allows (empty outside a sketch, while a tool or
@@ -25,6 +27,9 @@ thread_local! {
 pub fn items(app: &SolveApp) -> Vec<Item> {
     if app.session.active_sketch.is_none() || app.tool.is_some() || app.dialog.is_some() || app.params.is_some() {
         return Vec::new();
+    }
+    if let Some(three_d) = wire_items(app) {
+        return three_d;
     }
     if let Some(mixed) = edge_items(app) {
         return mixed;
@@ -84,6 +89,152 @@ fn edge_items(app: &SolveApp) -> Option<Vec<Item>> {
     })
 }
 
+/// Drawn 3D curves picked in a 3D sketch (with a model vertex or face perhaps): the 3D
+/// relations and sizes that fit (owner: a 3D sketch takes tangent, sizes and relations to lines
+/// and to the part's faces). Their params carry `rel3d`: the `sketch.relation3d` parameters.
+fn wire_items(app: &SolveApp) -> Option<Vec<Item>> {
+    use serde_json::json;
+    use solidcraft_engine::Sel;
+    let sid = app.session.active_sketch?;
+    let st = app.session.world_state();
+    let ss = st.sketch(sid)?;
+    if !ss.sketch.view.three_d {
+        return None;
+    }
+    let drawn = |id: &str| ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i)).filter(|w| w.fit.len() >= 2 && w.link.is_none());
+    let (mut wires, mut vertex, mut face) = (Vec::new(), None, None);
+    for x in &app.session.selection {
+        match x {
+            Sel::SketchCurve { id } if drawn(id).is_some() => wires.push(id.clone()),
+            Sel::Vertex { point, .. } if vertex.is_none() => vertex = Some(*point),
+            Sel::Face { body, index, point } if face.is_none() => {
+                let normal = crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| n);
+                face = Some((*point, normal?));
+            }
+            _ => return None,
+        }
+    }
+    let rel = |label: &str, icon: &str, p: serde_json::Value| {
+        let mut item = crate::context_menu::cmd(app, "sketch.relation3d", label).with(json!({ "rel3d": p }));
+        item.icon = icon.to_string();
+        item
+    };
+    // The drawn point of a curve nearest a place (in the world).
+    let nearest = |id: &str, at: solidcraft_engine::geom::Vec3| -> Option<usize> {
+        let w = drawn(id)?;
+        let n = w.fit.len();
+        Some(if w.fit.first()?.dist(at) <= w.fit.last()?.dist(at) { 0 } else { n - 1 })
+    };
+    Some(match (wires.as_slice(), vertex, face) {
+        ([a], None, None) => {
+            let length = drawn(a).map(|w| w.fit.windows(2).map(|q| q[0].dist(q[1])).sum::<f64>()).unwrap_or(0.0);
+            let mut v = vec![
+                rel("Along X", "", json!({"type": "along", "wire": a, "axis": "x"})),
+                rel("Along Y", "", json!({"type": "along", "wire": a, "axis": "y"})),
+                rel("Along Z", "", json!({"type": "along", "wire": a, "axis": "z"})),
+                rel("Length", "dimension", json!({"type": "length", "wire": a, "value": (length * 1000.0).round() / 1000.0})),
+                rel("Fix", "", json!({"type": "fix", "at": [a, 0]})),
+            ];
+            if ss.sketch.relations3d.iter().any(|r| r.wires().contains(&a.as_str())) {
+                let mut clear = crate::context_menu::cmd(app, "sketch.relation3d_delete", "Remove relations").with(json!({ "rel3d_clear": a }));
+                clear.icon = "delete".into();
+                v.push(clear);
+            }
+            v
+        }
+        ([a, b], None, None) => vec![
+            rel("Parallel", "", json!({"type": "parallel", "a": a, "b": b})),
+            rel("Perpendicular", "", json!({"type": "perpendicular", "a": a, "b": b})),
+            rel("Equal", "", json!({"type": "equal", "a": a, "b": b})),
+            rel("Tangent", "", json!({"type": "tangent", "a": a, "b": b})),
+        ],
+        ([a], Some(v), None) => {
+            let i = nearest(a, v)?;
+            vec![rel("Fix to vertex", "", json!({"type": "fix", "at": [a, i], "point": [v.x, v.y, v.z]}))]
+        }
+        ([a], None, Some((at, n))) => {
+            let i = nearest(a, at)?;
+            vec![
+                rel("On face", "", json!({"type": "on_face", "at": [a, i], "origin": [at.x, at.y, at.z], "normal": [n.x, n.y, n.z]})),
+                rel("Normal to face", "", json!({"type": "normal", "wire": a, "normal": [n.x, n.y, n.z]})),
+            ]
+        }
+        _ => return None,
+    })
+}
+
+/// Run a 3D relation item: add it (a length opens its size box), or take a curve's relations
+/// away.
+pub(crate) fn run_wire_item(app: &mut SolveApp, item: &Item) -> Result<(), String> {
+    let p = item.params.as_ref().ok_or("no parameters")?;
+    if let Some(wire) = p.get("rel3d_clear").and_then(serde_json::Value::as_str) {
+        let sid = app.session.active_sketch.ok_or("no sketch")?;
+        let st = app.session.world_state();
+        let indices: Vec<usize> = st
+            .sketch(sid)
+            .map(|ss| ss.sketch.relations3d.iter().enumerate().filter(|(_, r)| r.wires().contains(&wire)).map(|(i, _)| i).collect())
+            .unwrap_or_default();
+        app.run("sketch.relation3d_delete", serde_json::json!({ "indices": indices }))?;
+        return Ok(());
+    }
+    let rel = p.get("rel3d").cloned().ok_or("no relation")?;
+    let r = app.run("sketch.relation3d", rel.clone())?;
+    if rel.get("type").and_then(serde_json::Value::as_str) == Some("length")
+        && let Some(index) = r.get("index").and_then(serde_json::Value::as_u64)
+    {
+        let value = rel.get("value").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        SIZE.with(|s| *s.borrow_mut() = Some((index as usize, format!("{value}"), true)));
+    }
+    Ok(())
+}
+
+/// The 3D length waiting for its value in the size box (its relation's place).
+#[cfg(test)]
+pub(crate) fn size_pending() -> Option<usize> {
+    SIZE.with(|s| s.borrow().as_ref().map(|x| x.0))
+}
+
+/// The size box of a 3D length just added: type the length, Enter sets it.
+fn size_box(app: &mut SolveApp, ui: &egui::Ui, at: Pos2) {
+    let Some((index, mut text, mut focus)) = SIZE.with(|s| s.borrow().clone()) else { return };
+    let mut done = false;
+    let mut cancel = false;
+    Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new("sc_size3d")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+        Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(crate::i18n::tr_label("Length (mm)"));
+                let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(70.0));
+                if focus {
+                    r.request_focus();
+                    focus = false;
+                }
+                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    done = true;
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    cancel = true;
+                }
+            });
+        });
+    });
+    if done {
+        let value = app.session.doc.eval(&text, solidcraft_engine::doc::expr::Kind::Length).ok();
+        match value {
+            Some(v) => {
+                if let Err(e) = app.run("sketch.relation3d_value", serde_json::json!({"index": index, "value": v})) {
+                    app.set_status(e, true);
+                }
+            }
+            None => app.set_status(crate::i18n::tr_label("Type a length in mm").to_string(), true),
+        }
+        SIZE.with(|s| *s.borrow_mut() = None);
+    } else if cancel || app.session.active_sketch.is_none() {
+        SIZE.with(|s| *s.borrow_mut() = None);
+    } else {
+        SIZE.with(|s| *s.borrow_mut() = Some((index, text, focus)));
+    }
+}
+
 /// Project the picked model edge into the sketch, then relate the line to the projected line.
 fn relate_to_edge(app: &mut SolveApp, item: &Item) -> Result<(), String> {
     let p = item.params.as_ref().ok_or("no parameters")?;
@@ -128,6 +279,11 @@ fn anchor(key: String, pointer: Option<Pos2>, area: Rect, width: f32) -> Pos2 {
 
 /// Draw the bar over the viewport `area` and run a relation when one is clicked.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, area: Rect) {
+    if SIZE.with(|s| s.borrow().is_some()) {
+        let at = ANCHOR.with(|a| a.borrow().as_ref().map(|x| x.1)).unwrap_or(area.center());
+        size_box(app, ui, at);
+        return;
+    }
     let list = items(app);
     if list.is_empty() || ui.input(|i| i.pointer.any_down() && i.pointer.is_decidedly_dragging()) {
         if list.is_empty() {
@@ -167,7 +323,11 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, area: Rect) {
         },
     );
     if let Some(item) = clicked {
-        if item.params.as_ref().is_some_and(|p| p.get("edge").is_some()) {
+        if item.params.as_ref().is_some_and(|p| p.get("rel3d").is_some() || p.get("rel3d_clear").is_some()) {
+            if let Err(e) = run_wire_item(app, &item) {
+                app.set_status(e, true);
+            }
+        } else if item.params.as_ref().is_some_and(|p| p.get("edge").is_some()) {
             if let Err(e) = relate_to_edge(app, &item) {
                 app.set_status(e, true);
             }

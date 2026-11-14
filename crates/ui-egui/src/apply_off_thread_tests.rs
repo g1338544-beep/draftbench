@@ -174,3 +174,24 @@ fn another_command_ends_an_edit_and_puts_the_marker_back() {
     h.app.start("surface.offset");
     assert_eq!(h.app.session.doc.marker, before, "the marker is back where it was");
 }
+
+/// Owner (Offset Surface open after clicking Ruled Surface): every Surface command shared one
+/// remembered set of values, so the next one opened as the last one used. Each command keeps
+/// its own now.
+#[test]
+fn each_surface_command_remembers_its_own_values() {
+    let mut h = square_on_a_block();
+    crate::dialogs::cancel(&mut h.app);
+    h.app.start("surface.offset");
+    let offset = h.app.dialog.as_ref().map(|d| d.kind.clone()).unwrap();
+    crate::dialogs::remember_values(&offset);
+    for id in ["surface.ruled", "surface.extrude", "surface.trim", "surface.thicken"] {
+        h.app.start(id);
+        let k = h.app.dialog.as_ref().map(|d| format!("{:?}", d.kind)).unwrap_or_default();
+        assert!(!k.contains("Offset"), "{id} opened as Offset Surface: {k}");
+    }
+    h.app.start("surface.offset");
+    assert!(h.app.dialog.as_ref().is_some_and(|d| format!("{:?}", d.kind).contains("Offset")));
+    let key = |k: &crate::dialogs::Kind| crate::dialogs::values_key(k).unwrap_or_default();
+    assert_eq!(key(&offset), "Surface(Offset");
+}

@@ -423,19 +423,23 @@ fn sketch_point_normal(app: &SolveApp, s: &Sel) -> Option<solidcraft_engine::geo
 
 /// Which remembered values a dialog kind shares: its variant, plus the command for primitives
 /// (Box, Cylinder… share one kind). None: kinds whose state is not plain values.
-fn values_key(k: &Kind) -> Option<String> {
+pub(crate) fn values_key(k: &Kind) -> Option<String> {
     match k {
         Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. } | Kind::Assembly(_) | Kind::Text(_) | Kind::SketchModify(_) => None,
         Kind::Primitive { cmd, .. } => Some(format!("Primitive:{cmd}")),
+        // The kind's name with the names of the variants it wraps (`Surface(Offset`): one
+        // remembered set of values per command. Up to `(` only, every Surface command shared one
+        // key, and opening another brought back the last one used (owner: on the Surface tab
+        // another command opened as the one used before).
         _ => {
             let dbg = format!("{k:?}");
-            let end = dbg.find([' ', '{', '(']).unwrap_or(dbg.len());
-            Some(dbg.get(..end).unwrap_or_default().to_string())
+            let end = dbg.find([' ', '{', '"', ')', ',']).unwrap_or(dbg.len());
+            Some(dbg.get(..end).unwrap_or_default().trim_end_matches('(').to_string())
         }
     }
 }
 
-fn remember_values(k: &Kind) {
+pub(crate) fn remember_values(k: &Kind) {
     if let Some(key) = values_key(k) {
         let mut k = k.clone();
         if let Kind::Primitive { at, .. } = &mut k {

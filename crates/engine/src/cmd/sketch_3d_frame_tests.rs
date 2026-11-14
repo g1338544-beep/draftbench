@@ -313,3 +313,42 @@ fn wire_frame_three_owner_sweep_profile_move_invalidates_warm_cache() {
     assert_eq!(s.doc.to_json(), saved);
     measure(&s, 4.0);
 }
+
+/// Owner: a 3D sketch takes relations and sizes like a 2D one. A 3D line along Z with a
+/// length, then a line on from it square to it: the chain follows a size change, a relation
+/// that conflicts is refused, and deleting one frees the curves again. In a second
+/// occurrence's frame, world inputs land where they are given.
+#[test]
+fn relations_and_sizes_in_a_3d_sketch() {
+    let (mut s, _, _, _) = second_frame();
+    let made = run(&mut s, "sketch.line3d", json!({"points": [[20, 30, 40], [21, 31, 52], [30, 31, 53]]}));
+    let a = made["curves"][0].as_str().unwrap().to_string();
+    let b = made["curves"][1].as_str().unwrap().to_string();
+    run(&mut s, "sketch.relation3d", json!({"type": "fix", "at": [a, 0]}));
+    run(&mut s, "sketch.relation3d", json!({"type": "along", "wire": a, "axis": "z"}));
+    let size = run(&mut s, "sketch.relation3d", json!({"type": "length", "wire": a, "value": 15}))["index"].as_u64().unwrap();
+    run(&mut s, "sketch.relation3d", json!({"type": "perpendicular", "a": a, "b": b}));
+    let sketch = s.active_sketch.unwrap();
+    let ends = |s: &Session| {
+        let st = s.world_state();
+        let ws = &st.sketch(sketch).unwrap().sketch;
+        let w = |id: &str| ws.wires.iter().find(|w| w.id == id).map(|w| (w.pts[0], *w.pts.last().unwrap())).unwrap();
+        (w(&a), w(&b))
+    };
+    let ((p, q), (r, t)) = ends(&s);
+    near(p, Vec3::new(20.0, 30.0, 40.0));
+    near(q, Vec3::new(20.0, 30.0, 55.0));
+    near(r, q);
+    assert!((t - r).dot(q - p).abs() < 1e-5);
+    run(&mut s, "sketch.relation3d_value", json!({"index": size, "value": 20}));
+    let ((_, q), (r, _)) = ends(&s);
+    near(q, Vec3::new(20.0, 30.0, 60.0));
+    near(r, q);
+    assert!(s.execute("sketch.relation3d", &json!({"type": "parallel", "a": a, "b": b})).is_err(), "conflicts with perpendicular");
+    assert!(s.execute("sketch.relation3d", &json!({"type": "along", "wire": a, "axis": "w"})).is_err());
+    let left = run(&mut s, "sketch.relation3d_delete", json!({"indices": [size]}))["relations"].as_u64().unwrap();
+    assert_eq!(left, 3);
+    // Saved and read back with its relations.
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    assert_eq!(restored.sketch(sketch).unwrap().relations3d, s.doc.sketch(sketch).unwrap().relations3d);
+}
