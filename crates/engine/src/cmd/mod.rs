@@ -23,8 +23,6 @@ macro_rules! planned {
 mod bom;
 mod browser;
 mod cf;
-#[cfg(test)]
-mod cover_probe;
 pub mod drawing_symbols;
 mod layers;
 pub(crate) mod clearance;
