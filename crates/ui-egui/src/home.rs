@@ -693,7 +693,17 @@ fn tiles(app: &mut SolveApp, ui: &mut egui::Ui, _recent: &[String]) -> Option<Ac
     let light = mid.lerp_to_gamma(palette("active-1", "sketch"), 0.7);
     gradient_rect(&painter, r, 22.0, &[deep, dark, mid, light]);
     let white = Color32::WHITE;
-    painter.text(r.left_top() + vec2(34.0, 26.0), egui::Align2::LEFT_TOP, "DraftNew", crate::fonts::bold(t.font_display * 1.5), white);
+    let title = painter.text(r.left_top() + vec2(34.0, 26.0), egui::Align2::LEFT_TOP, "DraftNew", crate::fonts::bold(t.font_display * 1.5), white);
+    // The version in small type beside the name (owner: "DraftNew version 1.0" when it opens).
+    let version = format!("{} {}", crate::i18n::tr_label("Version"), crate::update::current_version());
+    painter.text(
+        egui::pos2(title.right() + 10.0, title.bottom() - 4.0),
+        egui::Align2::LEFT_BOTTOM,
+        &version,
+        egui::FontId::proportional(t.font_small),
+        white.gamma_multiply(0.85),
+    );
+    crate::scenario::publish_rect("home:version", egui::Rect::from_min_size(egui::pos2(title.right() + 10.0, title.top()), title.size()));
     let blurb = crate::i18n::tr_label("Parametric 3D design in your browser: sketch, extrude, assemble.");
     let g = painter.layout(blurb.to_string(), egui::FontId::proportional(t.font_intro), white.gamma_multiply(0.92), w - 68.0);
     let blurb_y = r.top() + 30.0 + t.font_display * 1.5 + 10.0;
@@ -1037,6 +1047,17 @@ mod tests {
         open_recent(&mut h.app, "/disk/other/Bracket.solidcraft");
         assert_eq!(asked.borrow().len(), 1, "a file the host doesn't remember is not asked for");
         assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| *error && text.contains("no longer there")));
+    }
+
+    /// Owner: the start page says the version in small type beside the name.
+    #[test]
+    fn the_start_page_shows_the_version() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = true;
+        h.frames(3);
+        let name = crate::scenario::rect_of("home:version").expect("the version is drawn");
+        assert!(name.width() > 0.0);
+        assert!(!crate::update::current_version().is_empty());
     }
 
     /// Rebuild the shipped pictures from the authoritative sample command scripts.

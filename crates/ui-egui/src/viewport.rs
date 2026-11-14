@@ -745,6 +745,13 @@ struct BodyDraw {
     on_gpu: bool,
 }
 
+/// Whether edge `ei` of `m` is drawn: with face edges on (`all_faces`), every edge between two
+/// different faces too (smooth joins, joins between a surface's patches); never a closed
+/// surface's own seam.
+pub(crate) fn face_edge_shown(m: &solidcraft_engine::geom::Mesh, ei: usize, all_faces: bool) -> bool {
+    m.shaded_edge_visible(ei) || (all_faces && m.edge_faces.get(ei).is_some_and(|fs| fs.len() == 2 && fs[0] != fs[1]))
+}
+
 /// Whether shaded bodies also show their tangent (smooth) edges; set from the View menu.
 static TANGENT_EDGES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -812,10 +819,15 @@ impl BodyDraw {
         // they are left out (its faces still show the thread), as smooth joins are.
         let helices: Vec<bool> = if shaded && edges { m.edges.iter().map(|e| helix_like(e)).collect() } else { Vec::new() };
         let thread_like = helices.iter().filter(|h| **h).count() >= 4;
+        // Face edges (the View setting, on by default like NX): every boundary between two
+        // faces shows, smooth joins and the joins between a surface's patches too, so a formed
+        // part's ribs and pockets read. Not on a faceted body (a modelled thread's result: a few
+        // triangles per face), where it would bury the shape in facet lines.
+        let faces = m.tri_face.iter().copied().max().map_or(0, |f| f as usize + 1);
+        let faceted = faces >= 400 && m.triangles.len() < faces * 6;
+        let all_faces = TANGENT_EDGES.load(std::sync::atomic::Ordering::Relaxed) && !faceted;
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
-            // Smooth joins (and the seams between a faceted body's facets) are left out in wireframe
-            // too: there they would draw every facet of a modelled thread's body.
-            if !m.edge_pickable(ei) || (!TANGENT_EDGES.load(std::sync::atomic::Ordering::Relaxed) && !m.shaded_edge_visible(ei)) {
+            if !face_edge_shown(m, ei, all_faces) {
                 continue;
             }
             if thread_like && helices.get(ei).copied().unwrap_or(false) {
@@ -6373,6 +6385,24 @@ mod tests {
             app.session.selection = selected;
             assert_eq!(build_highlight(&app).merged().tris.len(), expected, "whole-body feedback must neither omit nor duplicate selected faces");
         }
+    }
+
+    /// Owner (NX beside DraftNew on a formed sheet part): NX shows every boundary between
+    /// faces, so ribs and pockets read; DraftNew hid the smooth ones. Face edges are on by
+    /// default now: a fillet's tangent edges are drawn, and the View setting still hides them.
+    #[test]
+    fn face_edges_show_a_fillets_tangent_edges_by_default() {
+        assert!(crate::UiState::default().tangent_edges, "on by default, like NX");
+        // Three edges: a crease, a smooth join between two faces, a join between two patches of
+        // one surface (a seam), and a closed surface's own seam (one face on both sides).
+        let mut m = solidcraft_engine::geom::Mesh::default();
+        m.edges = vec![vec![Vec3::ZERO, Vec3::X]; 4];
+        m.edge_faces = vec![vec![0, 1], vec![1, 2], vec![2, 3], vec![3, 3]];
+        m.smooth_edges = vec![false, true, false, false];
+        m.seams = vec![false, false, true, true];
+        let shown = |all: bool| (0..4).filter(|&i| face_edge_shown(&m, i, all)).collect::<Vec<_>>();
+        assert_eq!(shown(true), [0, 1, 2], "every boundary between two faces");
+        assert_eq!(shown(false), [0], "the View setting off hides smooth joins and patch seams");
     }
 
     #[test]

@@ -277,7 +277,10 @@ pub struct UiState {
     pub show_browser: bool,
     pub show_timeline: bool,
     pub show_grid: bool,
-    /// Draw the tangent (smooth) edges of shaded bodies too, so every edge shows.
+    /// Draw the tangent (smooth) edges and the joins between a surface's patches of shaded
+    /// bodies too, so every face boundary shows, as NX does by default (owner). Saved under a
+    /// new key: windows that kept the old default (off) start with it on.
+    #[serde(rename = "faceEdges")]
     pub tangent_edges: bool,
     pub show_origin: bool,
     pub perspective: bool,
@@ -315,7 +318,7 @@ impl Default for UiState {
             show_browser: true,
             show_timeline: true,
             show_grid: true,
-            tangent_edges: false,
+            tangent_edges: true,
             show_origin: true,
             perspective: false,
             show_sketches: true,
