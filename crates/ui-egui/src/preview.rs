@@ -498,6 +498,13 @@ pub(crate) fn extrusion_target_error(s: &Session, cmds: &[(String, Value)], befo
     None
 }
 
+/// Half the side of a new plane's preview: a third of the model's size (owner: a plane along
+/// a path on a 200 mm part was a 20 mm square hidden at the part's corner), 10 mm at least.
+fn plane_preview_half(b: &Aabb3) -> f64 {
+    let size = (b.max - b.min).len();
+    if size.is_finite() { (size / 6.0).clamp(10.0, 1e5) } else { 10.0 }
+}
+
 fn state_bounds(st: &ModelState) -> Aabb3 {
     st.bodies.iter().fold(Aabb3::EMPTY, |b, x| b.union(&x.mesh().bounds()))
 }
@@ -573,22 +580,25 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
     let mut sc = GpuScene::default();
     let mut replaced = Vec::new();
+    let half = plane_preview_half(&state_bounds(after));
     for construct in &after.construct {
         if before.construct.iter().any(|old| old == construct) {
             continue;
         }
         if let solidcraft_engine::doc::construct::ConstructGeom::Plane(plane) = construct.geom {
-            let (o, x, y) = (plane.origin, plane.x * 10.0, plane.y * 10.0);
+            let (o, x, y) = (plane.origin, plane.x * half, plane.y * half);
             let quad = [o - x - y, o + x - y, o + x + y, o - x + y];
-            let color = [c.added[0], c.added[1], c.added[2], 64];
+            let color = [c.added[0], c.added[1], c.added[2], 96];
             for triangle in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
                 for p in triangle {
                     sc.xray_tri(p.to_f32(), plane.normal().to_f32(), color);
                 }
             }
             for (a, b) in Ring::from(quad).edges() {
-                sc.line(a.to_f32(), b.to_f32(), c.added, 1.3, true);
+                sc.line(a.to_f32(), b.to_f32(), c.added, 2.5, true);
             }
+            // Its normal, so which way it faces shows.
+            sc.line(o.to_f32(), (o + plane.normal() * half * 0.5).to_f32(), c.added, 2.5, true);
         }
     }
     for a in &after.bodies {
@@ -849,6 +859,16 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Owner: Plane Along Path showed no plane on a 200 mm part. Its preview is sized to the
+    /// model (a third of it), not a fixed 20 mm square.
+    #[test]
+    fn a_new_planes_preview_is_sized_to_the_model() {
+        let b = |s: f64| Aabb3 { min: solidcraft_engine::geom::Vec3::ZERO, max: solidcraft_engine::geom::Vec3::new(s, 0.0, 0.0) };
+        assert!((plane_preview_half(&b(240.0)) - 40.0).abs() < 1e-9);
+        assert_eq!(plane_preview_half(&b(6.0)), 10.0, "10 mm at least");
+        assert_eq!(plane_preview_half(&Aabb3::EMPTY), 10.0, "no model: 10 mm");
+    }
 
     #[test]
     fn tool_preview_follows_tab_without_recolouring_removal_or_idle_previews() {
