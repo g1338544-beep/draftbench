@@ -345,6 +345,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.home.show(app.session.revision);
         }
         x = home.right() + 8.0;
+        // The AI assistant, top left beside Home (owner: "put it at the top left").
+        if crate::agent_chat::app_bar_button_shown(app) {
+            assistant_button(app, ui, Rect::from_center_size(pos2(x + 12.0, r.center().y), vec2(32.0, 32.0)));
+            x += 34.0;
+        }
         app_bar_separator(ui, r, x, "brand");
         x += 16.0;
         // While a file loads the design waits: no menus or commands from the bar.
@@ -469,9 +474,6 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         icons::paint_app_bar(ui.painter(), gear.shrink(7.0), "settings", 1.0);
         crate::scenario::publish_rect("titlebar:preferences", gear);
-        if crate::agent_chat::app_bar_button_shown(app) {
-            assistant_button(app, ui, Rect::from_center_size(pos2(report.left() - 86.0, r.center().y), vec2(32.0, 32.0)));
-        }
         crate::scenario::publish_handle("titlebar:preferences", gear.center());
         let prefs_tip = if cfg!(target_os = "macos") {
             format!("{} (Cmd+,)", app.tr("ui.preferences"))
@@ -2530,8 +2532,8 @@ mod header_report_tests {
         assert!(at("appbar:file") < at("titlebar:save") && at("titlebar:save") < at("appbar:undo") && at("appbar:undo") < at("appbar:redo"));
         assert!(rect("appbar:redo").right() < second.left());
         assert!(second.right() < rect("tab:design:0").left());
-        assert!(at("tab:design:0") < at("titlebar:assistant"));
-        assert!(at("titlebar:assistant") < at("titlebar:preferences"));
+        // The assistant sits top left, beside Home (owner).
+        assert!(rect("titlebar:home").right() <= rect("titlebar:assistant").left() && rect("titlebar:assistant").right() < first.left());
         for name in ["titlebar:assistant", "titlebar:preferences", "appbar:help"] {
             assert_eq!(rect(name).size(), vec2(32.0, 32.0));
             assert!(rect(name).top() >= 0.0 && rect(name).bottom() <= APP_BAR_HEIGHT);
@@ -3191,14 +3193,10 @@ mod fill_width_tests {
                 let report = crate::scenario::rect_of("titlebar:report").unwrap();
                 let tabs_end = crate::scenario::handles("tab:design:").iter().map(|(_, p)| p.x).fold(0.0, f32::max);
                 assert!(tabs_end < report.left(), "{at}: the document tabs run into Report a bug");
-                let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
                 let help = crate::scenario::rect_of("appbar:help").unwrap();
                 let prefs = crate::scenario::rect_of("titlebar:preferences").unwrap();
-                assert!(tabs_end < assistant.left(), "{at}: the document tabs run into Assistant");
-                assert!(
-                    assistant.right() <= prefs.left() && prefs.right() <= help.left() && help.right() <= report.left(),
-                    "{at}: the title bar's right-hand controls overlap"
-                );
+                assert!(tabs_end < prefs.left(), "{at}: the document tabs run into Preferences");
+                assert!(prefs.right() <= help.left() && help.right() <= report.left(), "{at}: the title bar's right-hand controls overlap");
             }
         }
     }

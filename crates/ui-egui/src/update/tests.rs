@@ -374,8 +374,8 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     let at = h.widget(&label).unwrap_or_else(|| panic!("no `{label}` in the title bar"));
     let pill = crate::scenario::rect_of("titlebar:update").unwrap();
     assert!(pill.contains(egui::pos2(at[0] as f32, at[1] as f32)));
-    let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
-    assert!(pill.right() < assistant.left() && assistant.left() - pill.right() < 12.0, "beside Assistant: {pill:?} {assistant:?}");
+    let prefs = crate::scenario::rect_of("titlebar:preferences").unwrap();
+    assert!(pill.right() < prefs.left(), "left of Preferences: {pill:?} {prefs:?}");
     assert!((pill.center().y - report.center().y).abs() < 1.0 && pill.height() <= report.height());
     assert_eq!(crate::scenario::rect_of("titlebar:report"), Some(report), "Report a bug stays where it was");
     assert!(!h.app.updater.open, "no window pops up by itself");
