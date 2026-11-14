@@ -440,7 +440,7 @@ fn trimline_curves(state: &ModelState) -> Vec<solidcraft_kernel::NamedCurve> {
     let mut out = Vec::new();
     for ss in state.sketches.iter().filter(|ss| ss.name.starts_with("Trimline")) {
         let wires: Vec<&solidcraft_doc::sketch::Wire> =
-            ss.sketch.wires.iter().filter(|w| w.space == solidcraft_doc::sketch::WireSpace::World && w.pts.len() >= 2).collect();
+            ss.sketch.wires.iter().filter(|w| w.pts.len() >= 2).collect();
         for (i, w) in wires.iter().enumerate() {
             let name = if wires.len() == 1 { ss.name.clone() } else { format!("{} ({})", ss.name, i + 1) };
             out.push(solidcraft_kernel::NamedCurve { name, points: w.pts.iter().map(|q| [q.x, q.y, q.z]).collect() });

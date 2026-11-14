@@ -476,10 +476,27 @@ fn trimline_steps(s: &mut Session, p: &Value) -> Result<Value> {
                 pts.push(q);
             }
         }
+        // Points that came too close to another side of the outline (near a corner the offset
+        // of one side runs past the other) are dropped: every point stays the gap off the edge.
+        let off_edge = |q: Vec3| -> f64 {
+            (0..outline.len())
+                .map(|i| {
+                    let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
+                    let d = b - a;
+                    let t = if d.len2() > 0.0 { ((q - a).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+                    (a + d * t).dist(q)
+                })
+                .fold(f64::MAX, f64::min)
+        };
+        pts.retain(|q| off_edge(*q) >= g * 0.98);
+        // A curve's points must differ one from the next.
+        pts.dedup_by(|a, b| a.dist(*b) < 1e-6);
         if pts.len() < 4 {
             continue;
         }
-        if let Some(first) = pts.first().copied() {
+        if let Some(first) = pts.first().copied()
+            && pts.last().is_some_and(|l| l.dist(first) > 1e-6)
+        {
             pts.push(first);
         }
         let name = format!("Trimline {}", trim_number(g));

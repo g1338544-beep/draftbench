@@ -145,6 +145,12 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
             {
                 fit.push([last.x, last.y, last.z]);
             }
+            // A curve's points must differ one from the next.
+            fit.dedup_by(|a, b| (a[0] - b[0]).abs() + (a[1] - b[1]).abs() + (a[2] - b[2]).abs() < 1e-6);
+            if fit.len() < 2 {
+                let _ = s.execute("sketch.finish", &json!({}));
+                continue;
+            }
             let ok = s.execute("sketch.spline3d", &json!({"points": fit})).is_ok();
             let _ = s.execute("sketch.finish", &json!({}));
             if ok {
