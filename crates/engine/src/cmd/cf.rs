@@ -680,6 +680,14 @@ mod tests {
         let text = String::from_utf8(solidcraft_io::export(&state, &[], solidcraft_io::Format::Step, "Part").unwrap()).unwrap();
         assert!(text.contains("GEOMETRIC_CURVE_SET('Trimline 1'") && text.contains("GEOMETRIC_CURVE_SET('Trimline 3'"), "{}", &text[..text.len().min(400)]);
         drop(state);
+        // Read back by another design: the curves come in as 3D sketches of their names.
+        let path = std::env::temp_dir().join(format!("cf_trimlines_{}.step", std::process::id()));
+        std::fs::write(&path, &text).unwrap();
+        let mut other = Session::default();
+        let r = other.execute("file.insert_step", &json!({"path": path.to_string_lossy()})).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(r["curves"], json!(["Trimline 1", "Trimline 3"]), "{r}");
+        assert!(other.world_state().sketches.iter().any(|ss| ss.name == "Trimline 3" && !ss.sketch.wires.is_empty()));
         let r = s.execute("cf.trimlines", &json!({"faces": [[20, 10, 5]], "from": 0.5, "to": 2, "step": 0.5})).unwrap();
         assert_eq!(r["sketches"].as_array().unwrap().len(), 4);
     }

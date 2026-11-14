@@ -125,6 +125,36 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
     }
+    // The file's named curves (another program's trimlines): a 3D sketch each, by its name.
+    if !options.y_up && (path.to_ascii_lowercase().ends_with(".step") || path.to_ascii_lowercase().ends_with(".stp")) {
+        let curves = solidcraft_io::vfs::read(path, solidcraft_io::MAX_STEP_BYTES)
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok())
+            .map(|t| solidcraft_kernel::step_curves(&t))
+            .unwrap_or_default();
+        let mut made = Vec::new();
+        for (name, pts) in curves.into_iter().take(200) {
+            if s.execute("sketch.create", &json!({"plane": "XY", "name": name})).is_err() {
+                continue;
+            }
+            let _ = s.execute("sketch.options", &json!({"sketch_3d": true}));
+            let step = (pts.len() / 200).max(1);
+            let mut fit: Vec<[f64; 3]> = pts.iter().step_by(step).map(|q| [q.x, q.y, q.z]).collect();
+            if let Some(last) = pts.last()
+                && fit.last() != Some(&[last.x, last.y, last.z])
+            {
+                fit.push([last.x, last.y, last.z]);
+            }
+            let ok = s.execute("sketch.spline3d", &json!({"points": fit})).is_ok();
+            let _ = s.execute("sketch.finish", &json!({}));
+            if ok {
+                made.push(name);
+            }
+        }
+        if !made.is_empty() {
+            out["curves"] = json!(made);
+        }
+    }
     Ok(out)
 }
 

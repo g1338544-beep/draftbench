@@ -1199,6 +1199,51 @@ pub fn step_cache_alive() -> (usize, usize) {
 }
 
 /// Read a STEP file: its solids (as bodies, placed by the assembly structure) and the tree.
+/// The named curves of a STEP file (owner: "show the lines other programs put in a STEP
+/// file", CF trimlines): each GEOMETRIC_CURVE_SET or GEOMETRIC_SET's polylines and B-spline
+/// curves, sampled (mm), named after their set. Curves of other kinds are left out.
+pub fn step_curves(text: &str) -> Vec<(String, Vec<solidcraft_geom::Vec3>)> {
+    use mt::{BoundedCurve as _, ParametricCurve as _};
+    let Ok(ex) = p21::parse(text) else { return Vec::new() };
+    let mut cache = HashMap::new();
+    let mut ids: Vec<u64> = ex.entities.iter().filter(|(_, e)| matches!(e.name(), "GEOMETRIC_CURVE_SET" | "GEOMETRIC_SET")).map(|(i, _)| *i).collect();
+    ids.sort_unstable();
+    let mut out = Vec::new();
+    for id in ids.into_iter().take(10_000) {
+        let Some(set) = ex.get(id) else { continue };
+        let name = set.params().first().and_then(Param::as_str).filter(|n| !n.trim().is_empty()).map_or_else(|| format!("Curve {id}"), str::to_string);
+        // Its units: the context of the representation holding it.
+        let ctx = ex.entities.values().filter_map(representation).find(|(items, _)| items.contains(&id)).and_then(|(_, c)| c);
+        let u = context_units(&ex, ctx, &mut cache);
+        let cx = Ctx { ex: &ex, len: u.len, ang: u.ang, tol: u.tol, snap: u.snap };
+        let items: Vec<u64> = set.params().get(1).and_then(Param::as_list).map(|l| l.iter().filter_map(Param::as_ref_id).collect()).unwrap_or_default();
+        let many = items.len() > 1;
+        for (k, item) in items.into_iter().take(10_000).enumerate() {
+            let sampled = guard("STEP curves", || {
+                let pts: Vec<solidcraft_geom::Vec3> = match geom::curve(&cx, item, 0) {
+                    Ok(geom::CurveGeo::BSpline(c)) => {
+                        let (t0, t1) = c.range_tuple();
+                        (0..=200).map(|i| c.subs(t0 + (t1 - t0) * i as f64 / 200.0)).map(|q| solidcraft_geom::Vec3::new(q.x, q.y, q.z)).collect()
+                    }
+                    Ok(geom::CurveGeo::Nurbs(c)) => {
+                        let (t0, t1) = c.range_tuple();
+                        (0..=200).map(|i| c.subs(t0 + (t1 - t0) * i as f64 / 200.0)).map(|q| solidcraft_geom::Vec3::new(q.x, q.y, q.z)).collect()
+                    }
+                    _ => Vec::new(),
+                };
+                Ok(pts)
+            });
+            if let Ok(pts) = sampled
+                && pts.len() >= 2
+                && pts.iter().all(|q| q.is_finite())
+            {
+                out.push((if many { format!("{name} ({})", k + 1) } else { name.clone() }, pts));
+            }
+        }
+    }
+    out
+}
+
 pub fn step_import(text: &str) -> Result<StepImport> {
     step_import_with_workers(text, parallel::workers())
 }

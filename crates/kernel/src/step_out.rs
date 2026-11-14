@@ -1903,6 +1903,9 @@ mod tests {
         assert_eq!(text.matches("GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION(").count(), 1);
         let back = crate::step_import(&text).unwrap();
         assert_eq!(back.bodies.len(), 1, "the solid reads back");
+        let read = crate::step_in::step_curves(&text);
+        assert_eq!(read.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["Trimline 0.5", "Trimline 3"], "read back by name");
+        assert!(read[1].1.iter().all(|q| (q.z - 10.0).abs() < 1e-9) && (read[1].1[0].x - 3.0).abs() < 1e-9);
         // Curves alone are a file too.
         assert!(step_export_bodies_and_curves(&[], &curves, &StepHeader::default()).is_ok());
     }
