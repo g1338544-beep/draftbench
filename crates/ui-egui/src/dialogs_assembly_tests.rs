@@ -116,7 +116,9 @@ fn edit_joint_runs_edit_and_limits() {
         .unwrap();
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
-    assert!(d.inputs.is_empty());
+    // Its parts can be picked again (owner); left empty, the joint is edited in place.
+    assert_eq!(d.inputs.len(), 2);
+    assert!(d.inputs.iter().all(|i| i.items.is_empty()));
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
         assert_eq!(TYPES[f.kind], "slider");
         f.limits[0] = (true, "0 mm".into(), "15 mm".into());
