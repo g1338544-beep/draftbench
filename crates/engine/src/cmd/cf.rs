@@ -15,13 +15,92 @@ use super::CommandSpec;
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("cf.block", "CF Block", block).at("SOLID", "CF").icon("box").params(
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("cf.material_cost", "Material Cost", material_cost).at("SOLID", "CF").icon("mass_properties").noundo().params(
+        "material: one of `cf.material_cost` materials' ids (ss400, s45c, skd11, sus304, al6061, al5052, al7075, brass, copper, pom, mc_nylon, \
+         resin_board); size?: [width, length, thickness] mm (a plate or block of stock) | bodies?: [names] (each body's stock: its bounding \
+         box grown by `margin` on every side); margin?: mm (default 0); quantity?: count (default 1); price_per_kg?: THB (instead of the \
+         built-in estimate). → material, density (g/cm³), price_per_kg, items: [{name, size, mass_kg, price}], mass_kg, price (THB), \
+         prices_date. Prices are rough estimates for Thailand; use the supplier's quote.",
+    ),
+    CommandSpec::new("cf.block", "CF Block", block).at("SOLID", "CF").icon("box").params(
     "faces: [[x,y,z]] (points on the part's faces the block supports; they should face roughly one way); body?; gap?: length (default 3: \
      how far the block stays off the faces, out along their mean normal, outside the part); depth?: length (default 20: how far the block reaches \
      past the gap surface's farthest point); margin?: length (default 5: the block reaches this far past the faces' outline, across that \
      direction); flip?: bool (the block on the faces' other side). The block stands square to the faces' mean normal. → body: the block; \
      surface: the gap surface it is trimmed by (hidden); direction",
-)];
+    ),
+];
+
+/// Stock materials: id, name, density (g/cm³), a rough price in Thailand (THB per kg, for cut
+/// stock in small quantities, as of [`PRICES_DATE`]; the owner types his supplier's).
+pub const MATERIALS: [(&str, &str, f64, f64); 12] = [
+    ("ss400", "Steel SS400", 7.85, 35.0),
+    ("s45c", "Steel S45C", 7.85, 45.0),
+    ("skd11", "Tool steel SKD11", 7.70, 300.0),
+    ("sus304", "Stainless SUS304", 7.93, 130.0),
+    ("al6061", "Aluminium 6061", 2.70, 180.0),
+    ("al5052", "Aluminium 5052", 2.68, 170.0),
+    ("al7075", "Aluminium 7075", 2.81, 330.0),
+    ("brass", "Brass C3604", 8.50, 330.0),
+    ("copper", "Copper C1100", 8.94, 420.0),
+    ("pom", "POM (acetal)", 1.41, 250.0),
+    ("mc_nylon", "MC Nylon", 1.15, 280.0),
+    ("resin_board", "Resin (tooling) board", 0.70, 600.0),
+];
+
+/// When the built-in prices were estimated.
+pub const PRICES_DATE: &str = "2026-11";
+
+fn material_cost(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "cf.material_cost";
+    let id = p.get("material").and_then(Value::as_str).unwrap_or("ss400");
+    let &(id, name, density, default_price) =
+        MATERIALS.iter().find(|m| m.0 == id).ok_or_else(|| bad(cmd, format!("unknown material `{id}`")))?;
+    let price_per_kg = match p.get("price_per_kg") {
+        None | Some(Value::Null) => default_price,
+        Some(v) => v.as_f64().filter(|x| x.is_finite() && *x >= 0.0 && *x < 1e7).ok_or_else(|| bad(cmd, "`price_per_kg` must be a price"))?,
+    };
+    let quantity = match p.get("quantity") {
+        None | Some(Value::Null) => 1.0,
+        Some(v) => v.as_f64().filter(|x| x.is_finite() && *x >= 1.0 && *x <= 1e6).ok_or_else(|| bad(cmd, "`quantity` must be 1 or more"))?.round(),
+    };
+    let margin = num(s, p, "margin", 0.0, cmd)?.max(0.0);
+    let mut stock: Vec<(String, [f64; 3])> = Vec::new();
+    if let Some(list) = p.get("bodies").and_then(Value::as_array) {
+        let st = s.world_state();
+        for b in list.iter().filter_map(Value::as_str).take(1000) {
+            let body = st.body(b).ok_or_else(|| bad(cmd, format!("no body `{b}`")))?;
+            let bb = body.mesh().bounds();
+            let d = bb.max - bb.min;
+            let mut size = [d.x + 2.0 * margin, d.y + 2.0 * margin, d.z + 2.0 * margin];
+            size.sort_by(|a, b| b.total_cmp(a));
+            stock.push((b.to_string(), [size[1], size[0], size[2]]));
+        }
+    } else if let Some(v) = p.get("size").and_then(Value::as_array) {
+        let n: Vec<f64> = v.iter().filter_map(Value::as_f64).collect();
+        match n[..] {
+            [w, l, t] if [w, l, t].iter().all(|x| x.is_finite() && *x > 0.0 && *x < 1e6) => stock.push(("Stock".into(), [w, l, t])),
+            _ => return Err(bad(cmd, "`size` must be [width, length, thickness] in mm, each more than 0")),
+        }
+    }
+    if stock.is_empty() {
+        return Err(bad(cmd, "give a `size` [width, length, thickness] or pick `bodies`"));
+    }
+    let mut items = Vec::new();
+    let (mut mass, mut price) = (0.0, 0.0);
+    for (n, [w, l, t]) in stock {
+        let m = w * l * t * 1e-3 * density / 1000.0 * quantity;
+        let c = m * price_per_kg;
+        mass += m;
+        price += c;
+        items.push(json!({"name": n, "size": [w, l, t], "mass_kg": m, "price": c}));
+    }
+    Ok(json!({
+        "material": id, "name": name, "density": density, "price_per_kg": price_per_kg, "quantity": quantity,
+        "items": items, "mass_kg": mass, "price": price, "prices_date": PRICES_DATE,
+    }))
+}
 
 /// Bodies in the model now.
 fn bodies(s: &Session) -> HashSet<String> {
@@ -263,6 +342,25 @@ fn polyline_mid(pts: &[Vec3]) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Owner: a material price estimate. A 100 × 200 × 20 SS400 plate: 0.4 L at 7.85 kg/L is
+    /// 3.14 kg, at 35 THB/kg 109.9 THB; two of them twice that; a typed price wins; a body's stock
+    /// is its box grown by the margin.
+    #[test]
+    fn material_cost_from_a_size_or_a_body() {
+        let mut s = Session::default();
+        let r = s.execute("cf.material_cost", &json!({"material": "ss400", "size": [100, 200, 20]})).unwrap();
+        assert!((r["mass_kg"].as_f64().unwrap() - 3.14).abs() < 1e-9, "{r}");
+        assert!((r["price"].as_f64().unwrap() - 109.9).abs() < 1e-6, "{r}");
+        let r = s.execute("cf.material_cost", &json!({"material": "ss400", "size": [100, 200, 20], "quantity": 2, "price_per_kg": 40})).unwrap();
+        assert!((r["price"].as_f64().unwrap() - 3.14 * 2.0 * 40.0).abs() < 1e-6, "{r}");
+        s.execute("solid.box", &json!({"length": 50, "width": 30, "height": 10})).unwrap();
+        let r = s.execute("cf.material_cost", &json!({"material": "al6061", "bodies": ["Body1"], "margin": 2})).unwrap();
+        // Stock 34 × 54 × 14 of aluminium (2.7 g/cm³).
+        assert!((r["mass_kg"].as_f64().unwrap() - 34.0 * 54.0 * 14.0 * 2.7e-6).abs() < 1e-9, "{r}");
+        assert!(s.execute("cf.material_cost", &json!({"material": "unobtainium", "size": [1, 1, 1]})).is_err());
+        assert!(s.execute("cf.material_cost", &json!({"material": "ss400", "size": [-1, 1, 1]})).is_err());
+    }
 
     /// A part with a domed top (an arc, radius 50 at its highest point z = 50, over a flat
     /// bottom at z = 40), 40 deep.

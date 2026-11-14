@@ -253,7 +253,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &["view.apply", "view.save", "view.rename", "view.delete", "view.list", "view.navigate"],
     },
     // Checking fixtures: the block under a part in one step, and the surface tools it is made of.
-    Section { tab: "CF", panel: "FIXTURE", promoted: 1, ids: &["cf.block"] },
+    Section { tab: "CF", panel: "FIXTURE", promoted: 2, ids: &["cf.block", "cf.material_cost"] },
     // The part's surface made ready: offset, extended, holes and notches closed, joined.
     Section {
         tab: "CF",
@@ -408,6 +408,7 @@ pub const SECTIONS: &[Section] = &[
 /// Compact source labels for painted big buttons only. Menus, search and tooltips
 /// retain the engine label. Route these through `tr_label`, like other UI labels.
 pub const RIBBON_LABELS: &[(&str, &str)] = &[
+    ("cf.material_cost", "Cost"),
     ("appearance.assign", "Colour & Material"),
     ("component.capture_position", "Capture Pos."),
     ("component.create", "New Comp."),

@@ -90,6 +90,7 @@ mod look_at_tests;
 #[cfg(test)]
 mod manage_dialogs_tests;
 mod material_card_review;
+mod material_cost;
 pub mod relation_bar;
 pub mod reveal;
 pub mod script_panel;
@@ -424,6 +425,8 @@ pub struct SolveApp {
     /// The Run Script window, when open.
     pub script: Option<script_panel::ScriptPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
+    /// The Material Cost window, when open.
+    pub material_cost: Option<material_cost::CostWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
     /// Mouse gestures: the ring of tools and its customization window.
@@ -591,6 +594,7 @@ impl SolveApp {
             bom: None,
             script: None,
             material_card_review: None,
+            material_cost: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
             tree: browser::TreeState::default(),
@@ -1004,6 +1008,11 @@ impl SolveApp {
             if let Some(item) = context_menu::items(self, &target).into_iter().find(|item| item.id == "ui.moveOccurrence") {
                 context_menu::run_item(self, &item, egui::Pos2::ZERO);
             }
+            return;
+        }
+        if id == "cf.material_cost" {
+            self.material_cost = Some(material_cost::CostWindow::new());
+            self.home.open = false;
             return;
         }
         if id == "material.properties.validate" {
@@ -2036,6 +2045,7 @@ impl SolveApp {
         bom_panel::show(self, ui.ctx());
         script_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
+        material_cost::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());
