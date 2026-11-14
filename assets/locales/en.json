@@ -672,6 +672,7 @@
   "cmd.file_slicers": "Installed Slicers",
   "cmd.inspect_accessibility": "Accessibility Analysis",
   "cmd.inspect_center_of_mass": "Center of Mass",
+  "cmd.inspect_center_of_mass_point": "Center of Mass Point",
   "cmd.inspect_clearance": "Clearance",
   "cmd.inspect_compare": "Compare Bodies",
   "cmd.inspect_continuity": "Continuity Analysis",

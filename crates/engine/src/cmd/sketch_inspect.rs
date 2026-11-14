@@ -24,6 +24,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("iso_analysis")
         .noundo()
         .params("faces: [[x,y,z]…] points on faces; count?: curves each way (default 8): the faces' isoparametric curves"),
+    CommandSpec::new("inspect.center_of_mass_point", "Center of Mass Point", center_of_mass_point)
+        .at("SKETCH", "INSPECT")
+        .icon("center_of_mass")
+        .params("bodies?: [names] (default the selected bodies, else all); name?: (default `Center of Mass`). Keeps the centre of mass as a construction point there (a point to measure from, place a part or a joint at)"),
     CommandSpec::new("inspect.center_of_mass", "Center of Mass", center_of_mass)
         .at("SKETCH", "INSPECT")
         .icon("center_of_mass")
@@ -411,5 +415,45 @@ mod tests {
         };
         assert!(curves.iter().filter(|c| flat(c)).count() >= 4, "rings at constant height");
         assert!(s.execute("inspect.isocurve", &json!({"faces": []})).is_err());
+    }
+}
+
+/// Center of Mass, kept as a point (owner: "Keep as Point"): a construction point where the
+/// centre of mass is now, named `Center of Mass`.
+fn center_of_mass_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "inspect.center_of_mass_point";
+    let mut q = serde_json::json!({});
+    if let Some(b) = p.get("bodies") {
+        q["bodies"] = b.clone();
+    } else {
+        let picked: Vec<String> = s.selection.iter().filter_map(|x| if let crate::Sel::Body { name } = x { Some(name.clone()) } else { None }).collect();
+        if !picked.is_empty() {
+            q["bodies"] = serde_json::json!(picked);
+        }
+    }
+    let r = center_of_mass(s, &q)?;
+    let c = r.get("center").and_then(crate::params::vec3).ok_or_else(|| crate::params::bad(cmd, "no centre of mass (no solid bodies?)"))?;
+    let name = p.get("name").and_then(Value::as_str).filter(|n| !n.trim().is_empty()).unwrap_or("Center of Mass");
+    let depth = s.undo.len();
+    let made = s.execute("construct.point.vertex", &serde_json::json!({"point": {"point": [c.x, c.y, c.z]}, "name": name}));
+    s.undo.truncate(depth);
+    Ok(serde_json::json!({"center": [c.x, c.y, c.z], "point": made?}))
+}
+
+#[cfg(test)]
+mod center_point_tests {
+    use super::*;
+
+    /// Owner: Center of Mass "Keep as Point": a 20 × 10 × 4 box's centre (10, 5, 2) kept as a
+    /// construction point named Center of Mass; one undo step.
+    #[test]
+    fn the_centre_of_mass_is_kept_as_a_point() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 4})).unwrap();
+        let undo = s.undo.len();
+        let r = s.execute("inspect.center_of_mass_point", &json!({})).unwrap();
+        assert_eq!(r["center"], json!([10.0, 5.0, 2.0]));
+        assert_eq!(s.undo.len(), undo + 1);
+        assert!(s.doc.find_feature("Center of Mass").is_some(), "the point is in the timeline");
     }
 }

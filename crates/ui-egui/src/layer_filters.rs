@@ -3,7 +3,6 @@
 //! selected (or every visible body when none is) and selects the ones that match, so New Layer
 //! then takes them.
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
 
 use crate::SolveApp;
 
@@ -24,8 +23,8 @@ struct Facts {
     size: [f64; 3],
     volume: f64,
     area: f64,
-    lo: Vec3,
-    hi: Vec3,
+    lo: [f64; 3],
+    hi: [f64; 3],
     surface: bool,
 }
 
@@ -47,8 +46,8 @@ fn facts(app: &SolveApp) -> Vec<Facts> {
                 size,
                 volume: meas.volume.abs(),
                 area: meas.area,
-                lo: bb.min,
-                hi: bb.max,
+                lo: [bb.min.x, bb.min.y, bb.min.z],
+                hi: [bb.max.x, bb.max.y, bb.max.z],
                 surface: b.body.is_surface(),
             }
         })

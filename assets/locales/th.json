@@ -365,6 +365,7 @@
   "cmd.file_slicers": "สไลเซอร์ที่ติดตั้ง",
   "cmd.inspect_accessibility": "วิเคราะห์การเข้าถึง",
   "cmd.inspect_center_of_mass": "จุดศูนย์ถ่วง",
+  "cmd.inspect_center_of_mass_point": "จุดศูนย์ถ่วง (เก็บเป็นจุด)",
   "cmd.inspect_clearance": "ระยะห่าง",
   "cmd.inspect_compare": "เปรียบเทียบชิ้นงาน",
   "cmd.inspect_continuity": "วิเคราะห์ความต่อเนื่อง",
