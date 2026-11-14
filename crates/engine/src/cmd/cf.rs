@@ -674,6 +674,12 @@ mod tests {
             assert!((lo.z - 5.0).abs() < 1e-6 && (hi.z - 5.0).abs() < 1e-6, "on the top");
         }
         drop(st);
+        // Exported to STEP with the part, each as a curve set of its name (owner: "other programs
+        // see the lines").
+        let state = s.world_state();
+        let text = String::from_utf8(solidcraft_io::export(&state, &[], solidcraft_io::Format::Step, "Part").unwrap()).unwrap();
+        assert!(text.contains("GEOMETRIC_CURVE_SET('Trimline 1'") && text.contains("GEOMETRIC_CURVE_SET('Trimline 3'"), "{}", &text[..text.len().min(400)]);
+        drop(state);
         let r = s.execute("cf.trimlines", &json!({"faces": [[20, 10, 5]], "from": 0.5, "to": 2, "step": 0.5})).unwrap();
         assert_eq!(r["sketches"].as_array().unwrap().len(), 4);
     }

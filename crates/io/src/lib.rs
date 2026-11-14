@@ -433,6 +433,22 @@ pub fn export(state: &ModelState, bodies: &[String], format: Format, name: &str)
 
 /// The STEP or IGES header of an export named `file_name`: the design's author, organization
 /// and description (#1015).
+/// The CF trimlines (3D sketches named `Trimline …`, from CF Trimlines) as named curves for a
+/// STEP file, so other programs show them with the part (owner). Each curve is named after its
+/// sketch (and numbered when a sketch has several).
+fn trimline_curves(state: &ModelState) -> Vec<solidcraft_kernel::NamedCurve> {
+    let mut out = Vec::new();
+    for ss in state.sketches.iter().filter(|ss| ss.name.starts_with("Trimline")) {
+        let wires: Vec<&solidcraft_doc::sketch::Wire> =
+            ss.sketch.wires.iter().filter(|w| w.space == solidcraft_doc::sketch::WireSpace::World && w.pts.len() >= 2).collect();
+        for (i, w) in wires.iter().enumerate() {
+            let name = if wires.len() == 1 { ss.name.clone() } else { format!("{} ({})", ss.name, i + 1) };
+            out.push(solidcraft_kernel::NamedCurve { name, points: w.pts.iter().map(|q| [q.x, q.y, q.z]).collect() });
+        }
+    }
+    out
+}
+
 fn step_header(file_name: String, meta: &Metadata) -> solidcraft_kernel::StepHeader {
     solidcraft_kernel::StepHeader {
         file_name,
@@ -486,7 +502,12 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
         Format::Step => {
             let bs: Vec<solidcraft_kernel::ExportBody> =
                 sel.iter().map(|b| solidcraft_kernel::ExportBody { name: b.name.clone(), body: &b.body, color: b.body.color() }).collect();
-            solidcraft_kernel::step_export_bodies(&bs, &step_header(format!("{name}.step"), meta))?.into_bytes()
+            let curves = trimline_curves(state);
+            if curves.is_empty() {
+                solidcraft_kernel::step_export_bodies(&bs, &step_header(format!("{name}.step"), meta))?.into_bytes()
+            } else {
+                solidcraft_kernel::step_export_bodies_and_curves(&bs, &curves, &step_header(format!("{name}.step"), meta))?.into_bytes()
+            }
         }
         Format::Iges => {
             let bs: Vec<solidcraft_kernel::ExportBody> =

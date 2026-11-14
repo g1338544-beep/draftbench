@@ -1601,14 +1601,40 @@ fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
 
 /// STEP text (AP242) for products with bodies and assembly placements; `root` is the top product.
 pub fn step_export_products(products: &[ExportProduct], root: usize, header: &StepHeader) -> Result<String> {
+    export_products(products, root, header, &[])
+}
+
+/// A named 3D curve for a STEP file (a polyline through its points, mm): written as a
+/// GEOMETRIC_CURVE_SET of that name, so other CAD programs show it (and its name) with the part.
+pub struct NamedCurve {
+    pub name: String,
+    pub points: Vec<[f64; 3]>,
+}
+
+/// STEP text for bodies of one part and named curves beside them (CF trimlines).
+pub fn step_export_bodies_and_curves(bodies: &[ExportBody], curves: &[NamedCurve], header: &StepHeader) -> Result<String> {
+    let name = if header.file_name.is_empty() {
+        "Part".to_string()
+    } else {
+        header.file_name.trim_end_matches(".step").trim_end_matches(".stp").to_string()
+    };
+    let p = ExportProduct {
+        name,
+        bodies: bodies.iter().map(|b| ExportBody { name: b.name.clone(), body: b.body, color: b.color }).collect(),
+        children: Vec::new(),
+    };
+    export_products(&[p], 0, header, curves)
+}
+
+fn export_products(products: &[ExportProduct], root: usize, header: &StepHeader, curves: &[NamedCurve]) -> Result<String> {
     MERGES.with(|m| m.set(0));
-    let text = products_text(products, root, header, true)?;
+    let text = products_text(products, root, header, true, curves)?;
     // Faces merged per surface, and sheets rewritten as cylinders and cones, must read back as
     // cleanly as truck's pieces (a merge can leave a loop the reader cannot lay out); otherwise
     // the pieces are written as truck made them. Without a change there is nothing to check.
     let clean = |t: &str| crate::step_in::step_import(t).is_ok_and(|i| i.warnings.is_empty());
     if MERGES.with(|m| m.get()) > 0 && !clean(&text) {
-        let plain = products_text(products, root, header, false)?;
+        let plain = products_text(products, root, header, false, curves)?;
         if clean(&plain) {
             return Ok(plain);
         }
@@ -1621,11 +1647,12 @@ thread_local! {
     static MERGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, merge: bool) -> Result<String> {
+fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, merge: bool, curves: &[NamedCurve]) -> Result<String> {
     if products.is_empty() || root >= products.len() {
         return Err(KernelError::Invalid("nothing to export".into()));
     }
-    if products.iter().all(|p| p.bodies.is_empty()) {
+    let curves: Vec<&NamedCurve> = curves.iter().filter(|c| c.points.len() >= 2 && c.points.iter().flatten().all(|x| x.is_finite())).take(10_000).collect();
+    if products.iter().all(|p| p.bodies.is_empty()) && curves.is_empty() {
         return Err(KernelError::Invalid("nothing to export".into()));
     }
     for p in products {
@@ -1754,6 +1781,20 @@ fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, m
             let absr = o.add(format!("ADVANCED_BREP_SHAPE_REPRESENTATION({},({list}),#{ctx})", string(&name)));
             o.add(format!("SHAPE_REPRESENTATION_RELATIONSHIP('','',#{srep},#{absr})"));
         }
+        // Named curves (the root part's): each a curve set of its own name, in a wireframe
+        // representation beside the solids.
+        if pi == root && !curves.is_empty() {
+            let mut sets = Vec::new();
+            for c in &curves {
+                let pts: Vec<u64> = c.points.iter().map(|q| o.point(*q)).collect();
+                let list = pts.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
+                let poly = o.add(format!("POLYLINE({},({list}))", string(&c.name)));
+                sets.push(o.add(format!("GEOMETRIC_CURVE_SET({},(#{poly}))", string(&c.name))));
+            }
+            let list = sets.iter().chain(std::iter::once(&origin)).map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
+            let wire = o.add(format!("GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION({},({list}),#{ctx})", string(&name)));
+            o.add(format!("SHAPE_REPRESENTATION_RELATIONSHIP('','',#{srep},#{wire})"));
+        }
     }
     if !product_ids.is_empty() {
         let list = product_ids.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
@@ -1846,6 +1887,25 @@ pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Owner: trimlines exported to STEP so other programs see them. Named curves are written as
+    /// curve sets of their names beside the part's solid, and the file still reads back.
+    #[test]
+    fn named_curves_go_into_the_step_file() {
+        let b = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let curves = [
+            NamedCurve { name: "Trimline 0.5".into(), points: vec![[0.5, 0.5, 10.0], [9.5, 0.5, 10.0], [9.5, 9.5, 10.0], [0.5, 0.5, 10.0]] },
+            NamedCurve { name: "Trimline 3".into(), points: vec![[3.0, 3.0, 10.0], [7.0, 3.0, 10.0]] },
+        ];
+        let text = step_export_bodies_and_curves(&[ExportBody { name: "Part".into(), body: &b, color: None }], &curves, &StepHeader::default()).unwrap();
+        assert_eq!(text.matches("GEOMETRIC_CURVE_SET(").count(), 2, "{text}");
+        assert!(text.contains("GEOMETRIC_CURVE_SET('Trimline 0.5'") && text.contains("POLYLINE('Trimline 3'"));
+        assert_eq!(text.matches("GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION(").count(), 1);
+        let back = crate::step_import(&text).unwrap();
+        assert_eq!(back.bodies.len(), 1, "the solid reads back");
+        // Curves alone are a file too.
+        assert!(step_export_bodies_and_curves(&[], &curves, &StepHeader::default()).is_ok());
+    }
 
     #[test]
     fn islands_are_solids_of_their_own_not_voids() {
