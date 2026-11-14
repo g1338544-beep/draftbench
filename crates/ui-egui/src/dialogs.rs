@@ -3383,6 +3383,62 @@ pub(crate) fn emboss_profile_plane(app: &SolveApp, sketch: u64) -> Result<Option
 
 /// The commands (id, parameters) a dialog's OK runs.
 fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
+    let mut cmds = dialog_commands_world(app, d)?;
+    if let Some(w) = app.session.wcs.filter(|w| *w != solidcraft_engine::cmd::wcs::Wcs::WORLD) {
+        for (id, p) in cmds.iter_mut() {
+            in_wcs(&w, id, p);
+        }
+    }
+    Ok(cmds)
+}
+
+/// Owner: "once the origin is moved, every command counts from it" (cut, mirror, patterns,
+/// revolve, primitives …). The origin axes and planes a dialog sends by name become the WCS's
+/// own (XC, YC, ZC through its origin; its planes), and a primitive with nowhere picked stands at
+/// the WCS origin along ZC. A pick in the view is already where it is.
+pub(crate) fn in_wcs(w: &solidcraft_engine::cmd::wcs::Wcs, id: &str, p: &mut Value) {
+    let dir = |name: &str| match name {
+        "X" => Some(w.x),
+        "Y" => Some(w.y),
+        "Z" => Some(w.z()),
+        _ => None,
+    };
+    let normal = |name: &str| match name {
+        "XY" => Some(w.z()),
+        "XZ" => Some(w.y),
+        "YZ" => Some(w.x),
+        _ => None,
+    };
+    // A sketch's plane carries its own axes (the sketch dialogs place it on the WCS already).
+    if id.starts_with("sketch.") {
+        return;
+    }
+    let Some(o) = p.as_object_mut() else { return };
+    // Commands whose `axis` is a direction only (the placement point is separate).
+    let direction_only = matches!(id, "solid.cylinder" | "solid.coil");
+    if let Some(d) = o.get("axis").and_then(Value::as_str).and_then(dir) {
+        let v = if direction_only { pt(d) } else { json!({"origin": pt(w.origin), "dir": pt(d)}) };
+        o.insert("axis".into(), v);
+    }
+    for key in ["plane", "mirror_plane"] {
+        if let Some(n) = o.get(key).and_then(Value::as_str).and_then(normal) {
+            o.insert(key.into(), json!({"origin": pt(w.origin), "normal": pt(n)}));
+        }
+    }
+    match id {
+        "solid.box" | "solid.sphere" | "solid.torus" if !o.contains_key("corner") && !o.contains_key("center") => {
+            let key = if id == "solid.box" { "corner" } else { "center" };
+            o.insert(key.into(), pt(w.origin));
+        }
+        "solid.cylinder" | "solid.coil" if !o.contains_key("base") => {
+            o.insert("base".into(), pt(w.origin));
+            o.entry("axis").or_insert_with(|| pt(w.z()));
+        }
+        _ => {}
+    }
+}
+
+fn dialog_commands_world(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let need = |i: usize, what: &str| -> Result<(), String> { if sels(d, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) } };
     let profiles = || -> (Value, Value) {

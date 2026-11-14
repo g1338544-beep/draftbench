@@ -203,3 +203,22 @@ fn typed_points_count_from_the_moved_wcs_origin() {
     app.session.wcs = None;
     assert_eq!(params(&app, &d).unwrap()["translate"], json!(["10 mm", "0 mm", "0 mm"]), "after Reset: the world's X again");
 }
+
+/// Owner: every command counts from the moved origin (cut, mirror, patterns …): the origin axes
+/// and planes a dialog names become the WCS's, and a primitive stands at the WCS origin.
+#[test]
+fn origin_axes_planes_and_primitives_follow_the_moved_wcs() {
+    let w = solidcraft_engine::cmd::wcs::Wcs { origin: Vec3::new(100.0, 50.0, 0.0), x: Vec3::Y, y: -Vec3::X };
+    let mut p = json!({"bodies": ["Body1"], "axis": "X", "count": 4});
+    crate::dialogs::in_wcs(&w, "solid.pattern.circular", &mut p);
+    assert_eq!(p["axis"], json!({"origin": [100.0, 50.0, 0.0], "dir": [0.0, 1.0, 0.0]}), "XC through the WCS origin");
+    let mut p = json!({"bodies": ["Body1"], "plane": "YZ"});
+    crate::dialogs::in_wcs(&w, "solid.mirror", &mut p);
+    assert_eq!(p["plane"], json!({"origin": [100.0, 50.0, 0.0], "normal": [0.0, 1.0, 0.0]}), "the WCS's YC-ZC plane");
+    let mut p = json!({"length": "10 mm", "width": "10 mm", "height": "10 mm"});
+    crate::dialogs::in_wcs(&w, "solid.box", &mut p);
+    assert_eq!(p["corner"], json!([100.0, 50.0, 0.0]), "a box at the WCS origin");
+    let mut p = json!({"plane": "XY"});
+    crate::dialogs::in_wcs(&w, "sketch.create", &mut p);
+    assert_eq!(p["plane"], json!("XY"), "a sketch's plane is the sketch dialog's business");
+}
