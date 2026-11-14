@@ -1079,6 +1079,7 @@ impl Sketch {
 
     /// Remove links that no longer own any curve or point.
     pub(crate) fn prune_links(&mut self) {
+        self.prune_relations3d();
         if self.links.is_empty() {
             return;
         }

@@ -648,6 +648,9 @@ pub struct Sketch {
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
+    /// Relations and dimensions between the drawn 3D curves (a 3D sketch's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relations3d: Vec<crate::wire_relations::Relation3d>,
     /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]
     counters: std::collections::BTreeMap<String, u64>,
@@ -677,6 +680,7 @@ impl Sketch {
             offsets: Vec::new(),
             freeform_offsets: Vec::new(),
             wires: Vec::new(),
+            relations3d: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
         }

@@ -271,10 +271,20 @@ impl Sketch {
                 changes.push((index, fit, pts));
             }
         }
+        let before = (!self.relations3d.is_empty()).then(|| self.wires.clone());
         for (index, fit, pts) in changes {
             if let Some(w) = self.wires.get_mut(index) {
                 w.fit = fit;
                 w.pts = pts;
+            }
+        }
+        // The relations follow: the moved point stays where it was put, the rest moves to keep
+        // them; where they cannot all hold, the point does not move.
+        if let Some(before) = before {
+            let report = self.solve_relations3d(&[(wire.to_string(), index)])?;
+            if !report.ok {
+                self.wires = before;
+                return Err(SketchError::Invalid("the 3D relations hold this point: it cannot go there".into()));
             }
         }
         Ok(n)

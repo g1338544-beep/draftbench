@@ -40,6 +40,7 @@ mod text;
 mod thin;
 mod union_find;
 mod wire;
+mod wire_relations;
 
 pub use curves::{
     MAX_SPLINE_POINTS, bspline_beziers, conic_point, conic_rho_from_point, ellipse_point, end_curvature, fit_beziers, fit_beziers_mode,
@@ -56,6 +57,7 @@ pub use model::{
     SketchView,
 };
 pub use offset::OffsetChain;
+pub use wire_relations::{DrawnPoint, MAX_RELATIONS_3D, Relation3d, Report3d, TOLERANCE_3D};
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
