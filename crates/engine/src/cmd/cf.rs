@@ -419,9 +419,18 @@ fn trimline_steps(s: &mut Session, p: &Value) -> Result<Value> {
     let len = |l: &[Vec3]| l.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>();
     loops.sort_by(|a, b| len(b).total_cmp(&len(a)));
     let outline = loops.into_iter().next().ok_or_else(|| bad(cmd, "the faces' outer edge is not one closed loop"))?;
+    // The outline's own corners kept, its long spans divided (about every 2 mm, 400 points at most).
     let total = len(&outline);
-    let n = ((total / 2.0).ceil() as usize).clamp(24, 400);
-    let ring: Vec<Vec3> = (0..n).filter_map(|i| at_length(&outline, total * i as f64 / n as f64)).collect();
+    let step = (total / 400.0).max(2.0);
+    let mut ring: Vec<Vec3> = Vec::new();
+    for i in 0..outline.len() {
+        let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
+        let pieces = ((a.dist(b) / step).ceil() as usize).clamp(1, 400);
+        for k in 0..pieces {
+            ring.push(a + (b - a) * (k as f64 / pieces as f64));
+        }
+    }
+    ring.dedup_by(|x, y| x.dist(*y) < 1e-9);
     // The nearest point on the faces and its normal.
     let nearest = |q: Vec3| -> Option<(Vec3, Vec3)> {
         tris.iter()
@@ -437,9 +446,13 @@ fn trimline_steps(s: &mut Session, p: &Value) -> Result<Value> {
         let mut pts = Vec::with_capacity(ring.len());
         for i in 0..ring.len() {
             let (prev, here, next) = (ring[(i + ring.len() - 1) % ring.len()], ring[i], ring[(i + 1) % ring.len()]);
-            let Some(t) = (next - prev).normalized() else { continue };
             let Some((_, normal)) = nearest(here) else { continue };
-            let Some(side) = normal.cross(t).normalized() else { continue };
+            // Across each side's span; at a corner the mitre between them, longer so both sides
+            // stay the gap off (at most three times, at a sharp corner).
+            let (Some(t1), Some(t2)) = ((here - prev).normalized(), (next - here).normalized()) else { continue };
+            let (Some(s1), Some(s2)) = (normal.cross(t1).normalized(), normal.cross(t2).normalized()) else { continue };
+            let Some(mid) = (s1 + s2).normalized() else { continue };
+            let side = mid * (1.0 / mid.dot(s1).max(1.0 / 3.0));
             // Into the faces: the side whose step lands on them.
             let mut best: Option<(f64, Vec3)> = None;
             for dir in [side, side * -1.0] {
@@ -454,7 +467,7 @@ fn trimline_steps(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 let off = nearest(q).map_or(f64::MAX, |(on, _)| on.dist(q));
                 let moved = q.dist(here);
-                let score = off + (moved - g).abs() * 0.5;
+                let score = off + (moved - g * side.len()).abs() * 0.5;
                 if best.is_none_or(|b| score < b.0) {
                     best = Some((score, q));
                 }
@@ -550,9 +563,10 @@ fn close_holes_steps(s: &mut Session, p: &Value) -> Result<Value> {
             let holes: Vec<Vec3> = closed_loops(open)
                 .into_iter()
                 .filter(|l| {
+                    // Its size across: the largest side of its box (a round hole's diameter).
                     let mut bb = solidcraft_geom::Aabb3::EMPTY;
                     l.iter().for_each(|q| bb.add(*q));
-                    let d = bb.size().len();
+                    let d = bb.size().x.max(bb.size().y).max(bb.size().z);
                     d <= up_to && d < face_size * 0.5
                 })
                 .filter_map(|l| l.first().copied())
