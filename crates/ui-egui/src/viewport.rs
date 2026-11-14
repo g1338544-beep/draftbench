@@ -3281,7 +3281,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let d = q - from;
                     let moving: Vec<(usize, Vec2)> =
                         own.iter().filter_map(|&p| if grab.is_some() { sk.point(p).map(|x| (p, x + d)) } else { Some((p, q)) }).collect();
-                    crate::drag_snap::find(sk, &moving, &exclude, mm_px)
+                    crate::drag_snap::find_with(sk, &moving, &exclude, mm_px, &sketch_model_targets(app, &ss.plane))
                 })
             };
             if let Some(s) = snap {
@@ -3615,6 +3615,36 @@ pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bo
 
 /// The rest of the selected sketch geometry when the point or curve `id` is part of it (#2621):
 /// a drag that starts on a selected entity moves the whole selection with it.
+/// The model's points and edges a dragged sketch point snaps to, in the sketch's coordinates:
+/// the visible bodies' vertices, hole centres and straight edges' middles, and their edges
+/// (owner: a re-grabbed line snapped to nothing of the part).
+pub(crate) fn sketch_model_targets(app: &SolveApp, plane: &solidcraft_engine::geom::Plane) -> crate::drag_snap::ModelTargets {
+    let mut out = crate::drag_snap::ModelTargets::default();
+    let st = app.session.world_state();
+    let mut budget = 6000usize;
+    for b in st.bodies.iter().take(60).filter(|b| app.session.body_visible(&b.name)) {
+        for e in &b.mesh().edges {
+            if budget == 0 {
+                break;
+            }
+            budget -= 1;
+            let (Some(&a), Some(&z)) = (e.first(), e.last()) else { continue };
+            if crate::sketch3d::edge_circle_centre(e).is_none() {
+                out.points.push((plane.to_local(a), "Pt"));
+                out.points.push((plane.to_local(z), "Pt"));
+                if e.len() == 2 {
+                    out.points.push((plane.to_local((a + z) * 0.5), "Mid"));
+                }
+            }
+            out.edges.push(e.iter().map(|q| plane.to_local(*q)).collect());
+        }
+    }
+    for c in crate::sketch3d::circle_centres(app) {
+        out.points.push((plane.to_local(c), "Center"));
+    }
+    out
+}
+
 fn dragged_with(app: &SolveApp, id: &str) -> Vec<String> {
     fn geometry(s: &Sel) -> Option<&str> {
         match s {

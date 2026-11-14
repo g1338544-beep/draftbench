@@ -26,6 +26,18 @@ pub enum Target {
     On(String),
     /// Lined up with other points: no constraint.
     Align,
+    /// The model's geometry (a vertex, a hole's centre, an edge's middle, onto an edge): the
+    /// point goes there, with no constraint (owner: a re-grabbed line snapped to nothing of the
+    /// part).
+    Model(&'static str),
+}
+
+/// The model's geometry a dragged sketch point can snap to, in sketch coordinates: points with
+/// their label ("Pt", "Center", "Mid") and edges as polylines.
+#[derive(Clone, Debug, Default)]
+pub struct ModelTargets {
+    pub points: Vec<(Vec2, &'static str)>,
+    pub edges: Vec<Vec<Vec2>>,
 }
 
 /// A snap: the moving point (its id) and where it goes, the move added to the cursor's, the
@@ -46,6 +58,7 @@ impl Snap {
             Target::Mid(_) => "Mid",
             Target::On(_) => "On",
             Target::Align => "",
+            Target::Model(l) => l,
         }
     }
 }
@@ -86,6 +99,11 @@ fn keep(s: Option<Snap>) -> Option<Snap> {
 /// `mm_px` millimetres per pixel. Points in `exclude` (the ones moving with the drag) are not
 /// targets, nor are curves using them.
 pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64) -> Option<Snap> {
+    find_with(sk, moving, exclude, mm_px, &ModelTargets::default())
+}
+
+/// [`find`], with the model's points and edges as targets too.
+pub fn find_with(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64, model: &ModelTargets) -> Option<Snap> {
     if suppressed() || moving.is_empty() || !(mm_px > 0.0 && mm_px.is_finite()) {
         return keep(None);
     }
@@ -109,6 +127,13 @@ pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64
                 offer(&mut best, d, Snap { point: id(mi), at: t, offset: t - p, target: Target::Point(id(ti)), guides: Vec::new() });
             }
         }
+        // The part's vertices and hole centres (a little behind the sketch's own points).
+        for &(t, label) in model.points.iter().filter(|m| m.1 != "Mid") {
+            let d = p.dist(t);
+            if d < POINT_PX * mm_px {
+                offer(&mut best, d + 1e-9, Snap { point: id(mi), at: t, offset: t - p, target: Target::Model(label), guides: Vec::new() });
+            }
+        }
     }
     if best.is_none() {
         for &(mi, p) in moving {
@@ -120,6 +145,12 @@ pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64
                 let d = p.dist(m);
                 if d < POINT_PX * mm_px {
                     offer(&mut best, d, Snap { point: id(mi), at: m, offset: m - p, target: Target::Mid(cu.id.clone()), guides: Vec::new() });
+                }
+            }
+            for &(m, _) in model.points.iter().filter(|m| m.1 == "Mid") {
+                let d = p.dist(m);
+                if d < POINT_PX * mm_px {
+                    offer(&mut best, d + 1e-9, Snap { point: id(mi), at: m, offset: m - p, target: Target::Model("Mid"), guides: Vec::new() });
                 }
             }
         }
@@ -134,6 +165,19 @@ pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64
                     offer(&mut best, d, Snap { point: id(mi), at: q, offset: q - p, target: Target::On(cu.id.clone()), guides: Vec::new() });
                 }
             }
+            for e in &model.edges {
+                for w in e.windows(2) {
+                    let (a, b) = (w[0], w[1]);
+                    let ab = b - a;
+                    let l2 = ab.dot(ab);
+                    let t = if l2 > 1e-18 { ((p - a).dot(ab) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                    let q = a + ab * t;
+                    let d = p.dist(q);
+                    if d < CURVE_PX * mm_px {
+                        offer(&mut best, d + 1e-9, Snap { point: id(mi), at: q, offset: q - p, target: Target::Model("On"), guides: Vec::new() });
+                    }
+                }
+            }
         }
     }
     if let Some((_, s)) = best {
@@ -142,8 +186,9 @@ pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64
     // Lining up: the nearest horizontal and the nearest vertical alignment, each on its own axis.
     let tol = ALIGN_PX * mm_px;
     let (mut hx, mut vy): (Option<(f64, usize, Vec2, Vec2)>, Option<(f64, usize, Vec2, Vec2)>) = (None, None);
+    let lineup: Vec<Vec2> = targets.iter().map(|t| t.1).chain(model.points.iter().filter(|m| m.1 != "Mid").map(|m| m.0)).collect();
     for &(mi, p) in moving {
-        for &(_, t) in &targets {
+        for &t in &lineup {
             let (dy, dx) = ((p.y - t.y).abs(), (p.x - t.x).abs());
             if dy < tol && dx > tol && hx.is_none_or(|h| dy < h.0) {
                 hx = Some((dy, mi, p, t));
@@ -206,7 +251,7 @@ pub fn release() -> Option<Value> {
         Target::Point(t) => ("sketch.constraint.coincident", json!({"a": s.point, "b": t})),
         Target::Mid(l) => ("sketch.constraint.midpoint", json!({"point": s.point, "line": l})),
         Target::On(c) => ("sketch.constraint.coincident", json!({"a": s.point, "b": c})),
-        Target::Align => return None,
+        Target::Align | Target::Model(_) => return None,
     };
     Some(json!({"command": cmd, "params": params}))
 }

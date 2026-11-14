@@ -374,3 +374,28 @@ fn a_window_selected_circle_still_takes_its_radius_from_a_drag_on_its_edge() {
     let r = sk.radius(sk.curve_index("c1").expect("the circle")).expect("a radius");
     assert!((r - 15.0).abs() < 0.05, "{r}");
 }
+
+/// Owner (a video): a line drawn earlier and grabbed again snapped to nothing of the part. A
+/// dragged end now snaps to the part's hole centre, its edges' middles and onto its edges, and
+/// lines up with its corners.
+#[test]
+fn a_regrabbed_line_end_snaps_to_the_parts_centres_middles_and_edges() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut h, "solid.cylinder", json!({"base": [25, 15, 0], "axis": [0, 0, 1], "radius": 3, "height": 10, "operation": "cut"}));
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(&mut h, "sketch.line", json!({"points": [[-10, -10], [-20, 20]], "ids": ["l"], "infer": false}));
+    h.settle();
+    for (near, want) in [((25.3, 15.2), (25.0, 15.0)), ((20.3, 0.2), (20.0, 0.0)), ((0.15, 12.0), (0.0, 12.0)), ((40.2, 50.0), (40.0, 50.0))] {
+        let end = point(&h, "l.end");
+        let a = screen(&mut h, end.x, end.y);
+        let b = screen(&mut h, near.0, near.1);
+        let mut path = vec![a];
+        path.extend(steps(a, b, 6));
+        press_and_move(&mut h, &path);
+        release(&mut h, b);
+        let at = point(&h, "l.end");
+        assert!(at.dist(Vec2::new(want.0, want.1)) < 1e-6, "near {near:?}: {at:?} wants {want:?}");
+    }
+}

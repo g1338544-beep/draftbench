@@ -23,6 +23,10 @@ thread_local! {
     static TRIAD: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
     /// A triad drag: axis (None: in the sketch plane), undo depth, grab offset.
     static DRAG: RefCell<Option<(Option<Vec3>, usize, Vec3)>> = const { RefCell::new(None) };
+    /// The drag holds the point itself (not a triad handle): it snaps like drawing.
+    static FREE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Where that drag snapped on screen and to what, for its ring and label.
+    static SNAP3: RefCell<Option<(Pos2, &'static str)>> = const { RefCell::new(None) };
     /// Where the cursor would put a point (for the rubber band), and its snap label.
     static ARC: RefCell<(bool, bool, Option<Vec3>)> = const { RefCell::new((false, false, None)) };
     static HOVER: RefCell<Option<(Vec3, &'static str)>> = const { RefCell::new(None) };
@@ -67,7 +71,15 @@ fn seg_ray_closest(a: Vec3, b: Vec3, o: Vec3, d: Vec3) -> Vec3 {
 /// The 3D point under the cursor and what it snapped to: a drawn 3D point, a model vertex, a
 /// point on a model edge or face, a sketch point, or the sketch plane.
 pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'static str)> {
-    for (_, _, p) in drawn_points(app) {
+    point_at_except(app, proj, pos, None)
+}
+
+/// [`point_at`] leaving out one drawn point (wire, index): the one being dragged.
+fn point_at_except(app: &SolveApp, proj: &Proj, pos: Pos2, skip: Option<(&str, usize)>) -> Option<(Vec3, &'static str)> {
+    for (w, i, p) in drawn_points(app) {
+        if skip.is_some_and(|(sw, si)| sw == w && si == i) {
+            continue;
+        }
         if proj.to_screen(p).is_some_and(|s| s.distance(pos) < 8.0) {
             return Some((p, "Pt"));
         }
@@ -468,6 +480,19 @@ pub fn delete_selected(app: &mut SolveApp) -> bool {
 
 /// A drag starting on a triad handle (true: the triad took it).
 pub fn drag_start(app: &SolveApp, proj: &Proj, press: Pos2) -> bool {
+    // A drawn point grabbed itself: it follows the pointer and snaps to points, hole centres,
+    // edges and faces, as drawing does (owner: a re-grabbed point snapped to nothing).
+    if active(app)
+        && !drawing(app)
+        && handles(app, proj).iter().all(|(_, tip, _)| tip.distance(press) >= 9.0)
+        && let Some((w, i, _)) = drawn_points(app).into_iter().find(|(_, _, p)| proj.to_screen(*p).is_some_and(|s| s.distance(press) < 8.0))
+    {
+        TRIAD.with(|t| *t.borrow_mut() = Some((w, i)));
+        FREE.with(|f| f.set(true));
+        DRAG.with(|d| *d.borrow_mut() = Some((None, app.session.undo.len(), Vec3::ZERO)));
+        return true;
+    }
+    FREE.with(|f| f.set(false));
     let Some((axis, _, _)) = handles(app, proj).into_iter().find(|(_, tip, _)| tip.distance(press) < 9.0) else { return false };
     let Some((_, _, p)) = triad_point(app) else { return false };
     let grab = target(app, proj, press, axis, p).map(|g| p - g).unwrap_or(Vec3::ZERO);
@@ -505,7 +530,14 @@ pub fn dragging() -> bool {
 pub fn drag_to(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
     let Some((axis, depth, grab)) = DRAG.with(|d| *d.borrow()) else { return };
     let Some((w, i, p)) = triad_point(app) else { return };
-    let Some(to) = target(app, proj, pos, axis, p).map(|t| t + grab) else { return };
+    let free = FREE.with(std::cell::Cell::get) && axis.is_none();
+    let snapped = if free && !crate::drag_snap::suppressed() { point_at_except(app, proj, pos, Some((&w, i))) } else { None };
+    SNAP3.with(|s| *s.borrow_mut() = snapped.filter(|x| x.1 != "Plane").and_then(|(q, l)| Some((proj.to_screen(q)?, l))));
+    let to = match snapped {
+        Some((q, _)) => Some(q),
+        None => target(app, proj, pos, axis, p).map(|t| t + grab),
+    };
+    let Some(to) = to else { return };
     if app.session.execute("sketch.move3d", &json!({"wire": w, "index": i, "to": [to.x, to.y, to.z]})).is_ok() {
         app.session.undo.truncate(depth + 1);
     }
@@ -513,6 +545,8 @@ pub fn drag_to(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
 
 pub fn drag_end() {
     DRAG.with(|d| *d.borrow_mut() = None);
+    FREE.with(|f| f.set(false));
+    SNAP3.with(|s| *s.borrow_mut() = None);
 }
 
 /// Draw the drawn 3D points and the triad.
@@ -530,6 +564,12 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
     if !active(app) {
         return;
+    }
+    if let Some((at, label)) = SNAP3.with(|s| *s.borrow()) {
+        painter.circle_stroke(at, 6.0, Stroke::new(1.5, tk.accent));
+        let r = Rect::from_min_size(at + vec2(12.0, -24.0), vec2(42.0, 14.0));
+        painter.rect_filled(r, 3.0, tk.accent_soft);
+        painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(tk.font_micro), tk.text);
     }
     for (name, tip) in handle_points(app, proj) {
         crate::scenario::publish_handle(&format!("triad_{name}"), tip);
