@@ -26,13 +26,37 @@ pub struct ToolbarCustom {
     pub panels: BTreeMap<String, Vec<String>>,
     /// `"<tab>/<command>"` → how far the user moved that button off its place (Alt + drag), in points.
     pub offsets: BTreeMap<String, [f32; 2]>,
+    /// The tabs in the user's order (owner: "move SURFACE in front of MODEL"); empty: as built.
+    pub tab_order: Vec<String>,
+    /// `"<tab>"` → its panels (groups) in the user's order; tabs not listed: as built.
+    pub panel_order: BTreeMap<String, Vec<String>>,
     /// The Customize Toolbar window is open (not kept).
     pub customizing: bool,
 }
 
+/// `names` in the user's `order`: the listed ones first as listed, the rest after as they were.
+pub fn ordered<'a>(names: Vec<&'a str>, order: &[String]) -> Vec<&'a str> {
+    let mut out: Vec<&str> = order.iter().filter_map(|o| names.iter().find(|n| **n == o.as_str()).copied()).collect();
+    for n in names {
+        if !out.contains(&n) {
+            out.push(n);
+        }
+    }
+    out
+}
+
+/// Move `name` one place earlier (`-1`) or later (`1`) in `list`.
+pub fn shift(list: &mut Vec<String>, name: &str, by: i32) {
+    let Some(i) = list.iter().position(|x| x == name) else { return };
+    let j = i as i64 + by as i64;
+    if j >= 0 && (j as usize) < list.len() {
+        list.swap(i, j as usize);
+    }
+}
+
 impl ToolbarCustom {
     pub fn prefs(&self) -> Value {
-        json!({"version": 2, "panels": self.panels, "offsets": self.offsets})
+        json!({"version": 2, "panels": self.panels, "offsets": self.offsets, "tab_order": self.tab_order, "panel_order": self.panel_order})
     }
     pub fn load(&mut self, v: &Value) {
         let current = v.get("version").and_then(Value::as_u64) == Some(2);
@@ -66,6 +90,13 @@ impl ToolbarCustom {
         } else {
             BTreeMap::new()
         };
+        let names = |v: &Value| -> Vec<String> { v.as_array().map(|a| a.iter().take(50).filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default() };
+        self.tab_order = v.get("tab_order").map(names).unwrap_or_default();
+        self.panel_order = v
+            .get("panel_order")
+            .and_then(Value::as_object)
+            .map(|o| o.iter().take(50).map(|(k, v)| (k.clone(), names(v))).collect())
+            .unwrap_or_default();
         if !current {
             self.migrate();
         }
@@ -301,6 +332,8 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     let tab = app.ui.tab.clone();
     let mut changes: Vec<(&'static str, bool)> = Vec::new();
     let mut reset_tab = false;
+    let mut move_tab: Option<(String, i32)> = None;
+    let mut move_panel: Option<(String, i32)> = None;
     let t = crate::theme::Tokens::get();
     // This long card grows as sections open. A top-left pivot keeps its controls at their
     // published positions instead of shifting them after egui measures the taller content.
@@ -312,6 +345,35 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
         .actions("", "Close", None)
         .show(ctx, true, |ui| {
             ui_kit::text(ui, &crate::i18n::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]), ui_kit::Text::Note("customize"));
+            // Tabs and groups in the user's order (owner: "pull them up and down").
+            ui_kit::section(ui, "tab_order", crate::i18n::tr_label("Tab and group order"), false, |ui| {
+                let tabs: Vec<&str> = ordered(crate::workspace::TABS.to_vec(), &app.toolbar_custom.tab_order);
+                for name in &tabs {
+                    ui.horizontal(|ui| {
+                        if ui_kit::button(ui, "▲", ui_kit::Button::Small).clicked() {
+                            move_tab = Some((name.to_string(), -1));
+                        }
+                        if ui_kit::button(ui, "▼", ui_kit::Button::Small).clicked() {
+                            move_tab = Some((name.to_string(), 1));
+                        }
+                        ui.label(app.tr_label(name));
+                    });
+                }
+                ui.separator();
+                ui_kit::text(ui, &format!("{} {}", crate::i18n::tr_label("Groups of"), app.tr_label(&tab)), ui_kit::Text::Hint("groups"));
+                let panels: Vec<&str> = ordered(crate::workspace::panels(&tab), app.toolbar_custom.panel_order.get(&tab).map_or(&[][..], Vec::as_slice));
+                for name in &panels {
+                    ui.horizontal(|ui| {
+                        if ui_kit::button(ui, "◀", ui_kit::Button::Small).clicked() {
+                            move_panel = Some((name.to_string(), -1));
+                        }
+                        if ui_kit::button(ui, "▶", ui_kit::Button::Small).clicked() {
+                            move_panel = Some((name.to_string(), 1));
+                        }
+                        ui.label(app.tr_label(name));
+                    });
+                }
+            });
             egui::ScrollArea::vertical()
                 .max_height(
                     (ctx.content_rect().height() - crate::theme::Tokens::get().control_height * 8.0)
@@ -351,8 +413,24 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
             remove(app, &tab, id);
         }
     }
+    if let Some((name, by)) = move_tab {
+        let mut list: Vec<String> = ordered(crate::workspace::TABS.to_vec(), &app.toolbar_custom.tab_order).into_iter().map(str::to_string).collect();
+        shift(&mut list, &name, by);
+        app.toolbar_custom.tab_order = list;
+    }
+    if let Some((name, by)) = move_panel {
+        let mut list: Vec<String> = ordered(crate::workspace::panels(&tab), app.toolbar_custom.panel_order.get(&tab).map_or(&[][..], Vec::as_slice))
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        shift(&mut list, &name, by);
+        app.toolbar_custom.panel_order.insert(tab.clone(), list);
+    }
     if reset_tab {
         reset(app, &tab);
+        // Reset also puts the tabs and this tab's groups back as built.
+        app.toolbar_custom.tab_order.clear();
+        app.toolbar_custom.panel_order.remove(&tab);
     }
     app.toolbar_custom.customizing = !closed && action != ui_kit::Action::Cancel;
 }
@@ -395,5 +473,28 @@ mod migration_tests {
         assert!(!custom.panels["DESIGN/MODEL/CREATE"].contains(&"solid.extrude".into()));
         assert!(!custom.panels["DESIGN/MANAGE/RULES"].contains(&"plastic.manage_rules".into()));
         assert_eq!(custom.panels["DESIGN/SKETCH/CONSTRAIN"], vec!["sketch.dimension"]);
+    }
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    /// Owner: tabs and groups can be moved up and down, remembered, and Reset puts them back.
+    #[test]
+    fn tabs_and_groups_keep_the_users_order() {
+        let tabs = crate::workspace::TABS.to_vec();
+        let mut order: Vec<String> = ordered(tabs.clone(), &[]).into_iter().map(str::to_string).collect();
+        assert_eq!(order, tabs);
+        shift(&mut order, "SURFACE", -1);
+        assert_eq!(ordered(tabs.clone(), &order)[..2], ["SURFACE", "MODEL"]);
+        let mut c = ToolbarCustom { tab_order: order.clone(), ..Default::default() };
+        c.panel_order.insert("MODEL".into(), vec!["MODIFY".into(), "CREATE".into()]);
+        let mut back = ToolbarCustom::default();
+        back.load(&c.prefs());
+        assert_eq!(back.tab_order, order, "remembered");
+        assert_eq!(back.panel_order["MODEL"], ["MODIFY", "CREATE"]);
+        // A name the build no longer has is dropped; a new tab goes at the end.
+        assert_eq!(ordered(vec!["A", "B", "C"], &["C".into(), "X".into()]), ["C", "A", "B"]);
     }
 }

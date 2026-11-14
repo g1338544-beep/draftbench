@@ -602,7 +602,7 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
     if crate::render_workspace::active(app) {
         return vec!["RENDER"];
     }
-    let mut tabs = TABS.to_vec();
+    let mut tabs = crate::toolbar_custom::ordered(TABS.to_vec(), &app.toolbar_custom.tab_order);
     if app.session.active_sketch.is_some() {
         tabs.push("SKETCH");
     }

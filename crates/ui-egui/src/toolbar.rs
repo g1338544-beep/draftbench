@@ -1187,7 +1187,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut overflow = Vec::new();
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
-        let lists: Vec<_> = crate::toolbar_custom::panel_lists(&tab)
+        let mut by_order = crate::toolbar_custom::panel_lists(&tab);
+        // The user's group order (Customize Toolbar).
+        if let Some(order) = app.toolbar_custom.panel_order.get(&tab) {
+            let names = crate::toolbar_custom::ordered(by_order.iter().map(|l| l.0).collect(), order);
+            by_order.sort_by_key(|l| names.iter().position(|n| *n == l.0).unwrap_or(usize::MAX));
+        }
+        let lists: Vec<_> = by_order
             .into_iter()
             .map(|(panel, cmds, promote)| {
                 // The icon grid lists every command of a panel, so no icon hides behind a drop-down;
