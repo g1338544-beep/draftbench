@@ -312,9 +312,31 @@ struct Extension<'a> {
     rec: Rebuild,
 }
 
-/// How far an imported face's boundary may lie off its surface (mm): other systems' modelling
-/// tolerance.
-pub(crate) const IMPORT_ACCEPT: f64 = 0.03;
+/// How far an imported face's boundary may lie off its surface (mm), tried in turn: other
+/// systems' modelling tolerance (NX, SolidWorks, CATIA: up to 0.025), then coarser exports
+/// (IGES, files converted more than once) — owner: "make it work widely". Never more than a
+/// thousandth of the body's size.
+pub(crate) const IMPORT_ACCEPT: [f64; 4] = [0.03, 0.1, 0.3, 1.0];
+
+/// `make` at the strict tolerance, then, while it says a boundary is off its surface, at each
+/// import tolerance in turn; with the tolerance that worked.
+pub(crate) fn loose_frames<T>(strict: f64, size: f64, mut make: impl FnMut(f64) -> Result<T>) -> Result<(T, f64)> {
+    let mut last = match make(strict) {
+        Ok(t) => return Ok((t, strict)),
+        Err(e) => e,
+    };
+    for accept in IMPORT_ACCEPT.into_iter().filter(|a| *a > strict && *a <= (size * 1e-3).max(0.03)) {
+        match &last {
+            KernelError::Failed(m) if m.contains("does not lie on its surface") => {}
+            _ => break,
+        }
+        match make(accept) {
+            Ok(t) => return Ok((t, accept)),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
 
 impl<'a> Extension<'a> {
     fn new(body: &'a Body, opts: &'a ExtendOptions<'a>, side: Option<ToolSide>) -> Extension<'a> {
@@ -369,14 +391,8 @@ impl<'a> Extension<'a> {
             // that system's tolerance (often 0.01 to 0.025 mm): the strict check refused them
             // (owner: "the face's boundary does not lie on its surface"). Then the import
             // tolerance stands for this extension.
-            let frame = match Frame::new(face, ids, self.accept) {
-                Ok(f) => f,
-                Err(KernelError::Failed(m)) if m.contains("does not lie on its surface") && self.accept < IMPORT_ACCEPT => {
-                    self.accept = IMPORT_ACCEPT;
-                    Frame::new(face, ids, self.accept)?
-                }
-                Err(e) => return Err(e),
-            };
+            let (frame, accept) = loose_frames(self.accept, self.size, |accept| Frame::new(face, ids, accept))?;
+            self.accept = accept;
             match self.opts.mode {
                 ExtendMode::Natural => {
                     let extended = self.natural(&frame)?;
@@ -1436,6 +1452,23 @@ mod tests {
         let before = area(&sheet);
         let out = extend_surface(&sheet, &[Vec3::new(10.0, 5.0, 5.0 + off)], &natural(3.0)).unwrap();
         assert!(area(&out) > before + 20.0, "{} after {before}", area(&out));
+    }
+
+    /// Owner: customers' files come from many systems. The import tolerances are tried in turn
+    /// up to a thousandth of the part's size: a boundary 0.2 mm off goes at 0.3 on a 500 mm
+    /// part, not on a 10 mm one; another error is never retried.
+    #[test]
+    fn import_tolerances_are_tried_in_turn_within_the_parts_size() {
+        let off = |gap: f64| move |a: f64| if a >= gap { Ok(a) } else { Err(KernelError::Failed("the face's boundary does not lie on its surface".into())) };
+        assert_eq!(loose_frames(1e-4, 500.0, off(0.2)).unwrap().1, 0.3);
+        assert_eq!(loose_frames(1e-4, 500.0, off(0.02)).unwrap().1, 0.03);
+        assert!(loose_frames(1e-4, 10.0, off(0.2)).is_err(), "too loose for a 10 mm part");
+        let mut tries = 0;
+        let other = loose_frames(1e-4, 500.0, |_| -> Result<f64> {
+            tries += 1;
+            Err(KernelError::Invalid("something else".into()))
+        });
+        assert!(other.is_err() && tries == 1);
     }
 
     /// The default (natural, by a distance, neighbours lengthened) on a plane's straight edges
