@@ -179,6 +179,7 @@
   "Filter": "筛选",
   "Find in Browser": "在浏览器中查找",
   "Finish": "完成",
+  "Fixed parts: a layer": "固定零件：图层",
   "Flat Pattern": "展开图",
   "Flat size": "平板尺寸",
   "Follow camera (Look At sketches)": "跟随相机（注视草图）",
@@ -264,6 +265,7 @@
   "Move here": "移到此处",
   "Move later": "向后移动",
   "Move up": "上移",
+  "Moving parts: a layer": "运动零件：图层",
   "Name": "名称",
   "Nearest": "最近",
   "New": "新建",
@@ -2141,5 +2143,6 @@
   "update.up_to_date": "SolidCraft 已是最新版本。",
   "update.update_now": "立即更新",
   "update.you_have": "当前版本为 {version}。",
+  "—": "—",
   "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ 选择 · Enter / Tab 补全 · Esc 关闭"
 }

@@ -72,6 +72,7 @@
   "Feature": "ฟีเจอร์",
   "Filter": "กรอง",
   "Finish": "เสร็จสิ้น",
+  "Fixed parts: a layer": "ชิ้นยึด: ทั้งเลเยอร์",
   "Flat Pattern": "แบบคลี่",
   "Font": "ฟอนต์",
   "Gap": "ช่องว่าง",
@@ -119,6 +120,7 @@
   "Motion": "การเคลื่อนที่",
   "Move down": "เลื่อนลง",
   "Move up": "เลื่อนขึ้น",
+  "Moving parts: a layer": "ชิ้นขยับ: ทั้งเลเยอร์",
   "Name": "ชื่อ",
   "New": "ใหม่",
   "New Sketch": "สเก็ตช์ใหม่",
@@ -1133,5 +1135,6 @@
   "ui.y_up": "Y ขึ้น",
   "ui.z_up": "Z ขึ้น",
   "ui.zoom": "ซูม",
-  "ui.zoom_to_the_cursor": "ซูมไปที่เคอร์เซอร์"
+  "ui.zoom_to_the_cursor": "ซูมไปที่เคอร์เซอร์",
+  "—": "—"
 }

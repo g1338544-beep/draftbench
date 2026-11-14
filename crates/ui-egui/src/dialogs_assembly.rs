@@ -674,6 +674,28 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             // Each type shows only the options it uses (owner).
             let jk = f.joint_kind();
             if f.as_built && f.editing.is_none() {
+                // A whole layer as the fixed or the moving parts (owner: "pick a layer, the whole
+                // set goes").
+                let layers: Vec<(String, Vec<String>)> =
+                    app.session.visibility.layers.iter().map(|l| (l.name.clone(), l.items.clone())).collect();
+                if !layers.is_empty() {
+                    let names: Vec<&str> = std::iter::once("—").chain(layers.iter().map(|l| l.0.as_str())).collect();
+                    for (input, label, id) in [(0usize, "Fixed parts: a layer", "jt_layer_fixed"), (1, "Moving parts: a layer", "jt_layer_moving")] {
+                        let mut pick = 0usize;
+                        choice_row(ui, label, id, &mut pick, &names);
+                        if let Some((_, items)) = pick.checked_sub(1).and_then(|i| layers.get(i))
+                            && let Some(inp) = inputs.get_mut(input)
+                        {
+                            let st = app.session.world_state();
+                            for b in items.iter().filter(|b| st.body(b).is_some()) {
+                                let sel = Sel::Body { name: b.clone() };
+                                if !inp.items.iter().any(|x| crate::selection::same_item(x, &sel)) {
+                                    inp.items.push(sel);
+                                }
+                            }
+                        }
+                    }
+                }
                 if has_axis(jk) {
                     choice_row(ui, "Axis", "jt_axis", &mut f.axis, &AXIS_LABELS);
                 }

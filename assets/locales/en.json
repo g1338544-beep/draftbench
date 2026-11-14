@@ -179,6 +179,7 @@
   "Filter": "Filter",
   "Find in Browser": "Find in Browser",
   "Finish": "Finish",
+  "Fixed parts: a layer": "Fixed parts: a layer",
   "Flat Pattern": "Flat Pattern",
   "Flat size": "Flat size",
   "Follow camera (Look At sketches)": "Follow camera (Look At sketches)",
@@ -264,6 +265,7 @@
   "Move here": "Move here",
   "Move later": "Move later",
   "Move up": "Move up",
+  "Moving parts: a layer": "Moving parts: a layer",
   "Name": "Name",
   "Nearest": "Nearest",
   "New": "New",
@@ -2141,5 +2143,6 @@
   "update.up_to_date": "SolidCraft is up to date.",
   "update.update_now": "Update now",
   "update.you_have": "You have {version}.",
+  "—": "—",
   "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ choose · Enter / Tab complete · Esc dismiss"
 }
