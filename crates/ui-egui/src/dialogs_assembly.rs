@@ -388,7 +388,13 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
             *l = (true, fmt(*lo), fmt(*hi));
         }
     }
-    Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), vec![]))
+    // Its parts and places can be picked again (owner); left empty, the joint keeps them.
+    let mut d = Dialog::new(
+        Kind::Assembly(Asm::Joint(Box::new(f))),
+        vec![SelInput::new("Fixed part (pick to change)", SNAPS, false), SelInput::new("Moving part (pick to change)", SNAPS, false)],
+    );
+    d.active = 0;
+    Some(d)
 }
 
 /// The Drive Joints dialog on a joint (by id).
@@ -1380,6 +1386,18 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let jk = f.joint_kind();
             let limits: Vec<Value> =
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
+            // Edit Joint with new parts or places picked (owner: "when editing, let me pick here
+            // again"): the joint is made again on the new picks, its settings kept.
+            if let Some(id) = f.editing
+                && !sel_items(inputs, 0).is_empty()
+                && !sel_items(inputs, 1).is_empty()
+            {
+                let mut again = f.clone();
+                again.editing = None;
+                let mut out = cmd("joint.delete", json!({"joint": id}));
+                out.extend(commands(app, &Asm::Joint(again), inputs)?);
+                return Ok(out);
+            }
             if let Some(id) = f.editing {
                 let mut out = cmd("joint.edit", json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2], "angle": f.angle}));
                 for (i, l) in limits.iter().enumerate() {
