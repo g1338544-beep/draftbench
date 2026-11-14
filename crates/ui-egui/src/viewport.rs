@@ -745,6 +745,13 @@ struct BodyDraw {
     on_gpu: bool,
 }
 
+/// The faces a click on face `index` takes: with face edges shown (every boundary drawn, the
+/// default) the face alone, as its lines show it (owner: a click took the whole run of joined
+/// faces); otherwise the pieces of its surface joined across hidden seams.
+pub(crate) fn picked_faces(m: &solidcraft_engine::geom::Mesh, index: usize) -> Vec<usize> {
+    if TANGENT_EDGES.load(std::sync::atomic::Ordering::Relaxed) { vec![index] } else { m.surface_patch(index) }
+}
+
 /// Whether edge `ei` of `m` is drawn: with face edges on (`all_faces`), every edge between two
 /// different faces too (smooth joins, joins between a surface's patches); never a closed
 /// surface's own seam.
@@ -753,7 +760,7 @@ pub(crate) fn face_edge_shown(m: &solidcraft_engine::geom::Mesh, ei: usize, all_
 }
 
 /// Whether shaded bodies also show their tangent (smooth) edges; set from the View menu.
-static TANGENT_EDGES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static TANGENT_EDGES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 impl BodyDraw {
     /// Everything [`BodyDraw::build`] reads.
@@ -2599,7 +2606,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 let k = t.hover_face_lift;
                 let c = body_rgb(app, body);
                 let m = drawn_mesh(app, b);
-                let patch = m.surface_patch(*index);
+                let patch = picked_faces(&m, *index);
                 let lit = shown(b);
                 for &f in &patch {
                     face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
@@ -3718,7 +3725,7 @@ pub(crate) fn grouped_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Ve
         Sel::Face { body, index, .. } => {
             if let Some(b) = st.body(body) {
                 let m = b.mesh();
-                let mut patch = m.surface_patch(*index);
+                let mut patch = picked_faces(&m, *index);
                 patch.sort_by_key(|i| usize::from(i != index));
                 return patch
                     .into_iter()
@@ -6403,6 +6410,14 @@ mod tests {
         let shown = |all: bool| (0..4).filter(|&i| face_edge_shown(&m, i, all)).collect::<Vec<_>>();
         assert_eq!(shown(true), [0, 1, 2], "every boundary between two faces");
         assert_eq!(shown(false), [0], "the View setting off hides smooth joins and patch seams");
+        // Owner: a click takes the face its lines show, not the whole run joined across seams.
+        TANGENT_EDGES.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(picked_faces(&m, 2), [2]);
+        TANGENT_EDGES.store(false, std::sync::atomic::Ordering::Relaxed);
+        let mut joined = picked_faces(&m, 2);
+        joined.sort_unstable();
+        assert_eq!(joined, [2, 3], "with face edges off, the pieces of one surface go together");
+        TANGENT_EDGES.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     #[test]
