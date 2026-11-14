@@ -10,6 +10,45 @@ use crate::model::{Result, SketchError};
 
 static DEFAULT_FONT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/liberation-sans/LiberationSans-Regular.ttf"));
 
+/// Fonts that come with the program (all SIL OFL 1.1, see ATTRIBUTION.md), on every platform
+/// including the web, which has no installed fonts to offer: family, bold face, bytes. Thai
+/// families first after the default (owner: more fonts, Thai too).
+macro_rules! font {
+    ($path:literal) => {
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/", $path))
+    };
+}
+static BUNDLED: &[(&str, bool, &[u8])] = &[
+    ("Sarabun", false, font!("sarabun/Sarabun-Regular.ttf")),
+    ("Sarabun", true, font!("sarabun/Sarabun-Bold.ttf")),
+    ("Kanit", false, font!("kanit/Kanit-Regular.ttf")),
+    ("Prompt", false, font!("prompt/Prompt-Regular.ttf")),
+    ("Chakra Petch", false, font!("chakra-petch/ChakraPetch-Regular.ttf")),
+    ("Noto Sans Thai", false, font!("noto-sans-thai/NotoSansThai-Variable.ttf")),
+    ("IBM Plex Mono", false, font!("ibm-plex-mono/IBMPlexMono-Regular.ttf")),
+    ("Bebas Neue", false, font!("bebas-neue/BebasNeue-Regular.ttf")),
+    ("Anton", false, font!("anton/Anton-Regular.ttf")),
+];
+
+/// The fonts that come with the program, besides the default, in the order a list offers them.
+pub fn bundled_families() -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for (family, _, _) in BUNDLED {
+        if !out.contains(family) {
+            out.push(family);
+        }
+    }
+    out
+}
+
+/// A font that comes with the program, by family: its bold face when asked and there is one.
+fn bundled(name: &str, bold: bool) -> Option<(&'static [u8], bool)> {
+    let want = normalize(name);
+    let faces: Vec<&(&str, bool, &[u8])> = BUNDLED.iter().filter(|(f, _, _)| normalize(f) == want).collect();
+    let face = faces.iter().find(|(_, b, _)| *b == bold).or_else(|| faces.first())?;
+    Some((face.2, face.1))
+}
+
 /// Family name of the built-in font (also what an empty or absent font name means).
 pub const DEFAULT_FONT_FAMILY: &str = "Liberation Sans";
 /// Largest font file read.
@@ -43,6 +82,7 @@ pub struct FontData {
 #[derive(Clone)]
 enum FontBytes {
     Builtin,
+    Static(&'static [u8]),
     File(Arc<Vec<u8>>),
 }
 
@@ -50,6 +90,7 @@ impl FontData {
     pub fn bytes(&self) -> &[u8] {
         match &self.bytes {
             FontBytes::Builtin => DEFAULT_FONT,
+            FontBytes::Static(b) => b,
             FontBytes::File(b) => b.as_slice(),
         }
     }
@@ -65,6 +106,9 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
     }
     if name.len() > MAX_FONT_NAME {
         return Err(SketchError::Invalid("the font name is too long".into()));
+    }
+    if let Some((bytes, _)) = bundled(name, false) {
+        return Ok(FontData { bytes: FontBytes::Static(bytes), index: 0 });
     }
     if is_path(name) {
         let path = expand(name);
@@ -87,6 +131,13 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
 /// be slanted instead. A bold style the font does not have is an error (bold is not made up).
 pub fn font_data_styled(name: Option<&str>, bold: bool, italic: bool) -> Result<(FontData, bool)> {
     let trimmed = name.map(str::trim).unwrap_or("");
+    // A font that comes with the program: its bold face, or slanted for italic.
+    if let Some((bytes, face_bold)) = bundled(trimmed, bold) {
+        if bold && !face_bold {
+            return Err(SketchError::Invalid(format!("the font `{trimmed}` has no bold face")));
+        }
+        return Ok((FontData { bytes: FontBytes::Static(bytes), index: 0 }, italic));
+    }
     let installed = !(trimmed.is_empty() || normalize(trimmed) == normalize(DEFAULT_FONT_FAMILY) || is_path(trimmed));
     if !installed || !(bold || italic) {
         let data = font_data(name)?;

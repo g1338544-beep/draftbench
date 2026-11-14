@@ -580,8 +580,15 @@ fn font_row(ui: &mut egui::Ui, k: &mut Tx) {
     let current = if k.font.trim().is_empty() { builtin.clone() } else { k.font.clone() };
     let families = families(ui.ctx());
     let mut options = vec![ui_kit::SearchOption { value: "", label: &builtin, handle: Some("dialog:Font built-in") }];
+    // The fonts that come with the program (Thai ones too), then the installed ones.
+    let bundled = solidcraft_engine::sketch::bundled_families();
+    options.extend(bundled.iter().map(|family| ui_kit::SearchOption { value: family, label: family, handle: None }));
     if let Some(list) = &families {
-        options.extend(list.iter().map(|family| ui_kit::SearchOption { value: family, label: family, handle: None }));
+        options.extend(list.iter().filter(|f| !bundled.iter().any(|b| b.eq_ignore_ascii_case(f))).map(|family| ui_kit::SearchOption {
+            value: family,
+            label: family,
+            handle: None,
+        }));
     }
     let custom = is_font_file(&k.font_filter).then(|| crate::i18n::format("sketch_text.use_font_file", &[("path", k.font_filter.trim())]));
     if let Some(font) = ui_kit::searchable_dropdown(

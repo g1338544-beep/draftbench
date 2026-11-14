@@ -59,6 +59,19 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf | The BIZ UDGothic Project Authors | https://github.com/googlefonts/morisawa-biz-ud-gothic (Google Fonts), unmodified; licence text in assets/fonts/biz-udp-gothic/OFL.txt; used for web UI Japanese font | SIL OFL 1.1 |
 | assets/fonts/noto-sans-thai/OFL.txt | The Noto Project Authors | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/fonts/noto-sans-thai/NotoSansThai-Variable.ttf | The Noto Project Authors | https://github.com/google/fonts/tree/main/ofl/notosansthai (Google Fonts), unmodified; licence text in assets/fonts/noto-sans-thai/OFL.txt; Thai text in the interface (web and desktop) and in PDF export | SIL OFL 1.1 |
+| assets/fonts/sarabun/Sarabun-Regular.ttf | Cadson Demak (The Sarabun Project Authors) | https://github.com/google/fonts/tree/main/ofl/sarabun (Google Fonts), unmodified; licence text in assets/fonts/sarabun/OFL.txt; a built-in font for sketch Text | SIL OFL 1.1 |
+| assets/fonts/sarabun/Sarabun-Bold.ttf | Cadson Demak (The Sarabun Project Authors) | https://github.com/google/fonts/tree/main/ofl/sarabun (Google Fonts), unmodified; licence text in assets/fonts/sarabun/OFL.txt; a built-in font for sketch Text | SIL OFL 1.1 |
+| assets/fonts/kanit/Kanit-Regular.ttf | The Kanit Project Authors (Cadson Demak) | https://github.com/google/fonts/tree/main/ofl/kanit (Google Fonts), unmodified; licence text in assets/fonts/kanit/OFL.txt; a built-in font for sketch Text | SIL OFL 1.1 |
+| assets/fonts/prompt/Prompt-Regular.ttf | The Prompt Project Authors (Cadson Demak) | https://github.com/google/fonts/tree/main/ofl/prompt (Google Fonts), unmodified; licence text in assets/fonts/prompt/OFL.txt; a built-in font for sketch Text | SIL OFL 1.1 |
+| assets/fonts/chakra-petch/ChakraPetch-Regular.ttf | The Chakra Petch Project Authors (Cadson Demak) | https://github.com/google/fonts/tree/main/ofl/chakrapetch (Google Fonts), unmodified; licence text in assets/fonts/chakra-petch/OFL.txt; a built-in font for sketch Text | SIL OFL 1.1 |
+| assets/fonts/bebas-neue/BebasNeue-Regular.ttf | Dharma Type (Bebas Neue) | https://github.com/google/fonts/tree/main/ofl/bebasneue (Google Fonts), unmodified; licence text in assets/fonts/bebas-neue/OFL.txt; a built-in font for sketch Text | SIL OFL 1.1 |
+| assets/fonts/anton/Anton-Regular.ttf | The Anton Project Authors | https://github.com/google/fonts/tree/main/ofl/anton (Google Fonts), unmodified; licence text in assets/fonts/anton/OFL.txt; a built-in font for sketch Text | SIL OFL 1.1 |
+| assets/fonts/sarabun/OFL.txt | Cadson Demak (The Sarabun Project Authors) | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/fonts/kanit/OFL.txt | The Kanit Project Authors | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/fonts/prompt/OFL.txt | The Prompt Project Authors | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/fonts/chakra-petch/OFL.txt | The Chakra Petch Project Authors | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/fonts/bebas-neue/OFL.txt | Dharma Type | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/fonts/anton/OFL.txt | The Anton Project Authors | Unmodified accompanying font licence | SIL OFL 1.1 |
 | tests/step-conformance/cone_point.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/cone_point_vertex.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/cylinder.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |

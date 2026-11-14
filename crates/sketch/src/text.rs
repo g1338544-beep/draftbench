@@ -441,6 +441,26 @@ mod tests {
         assert!(e.contains("unknown font"), "{e}");
     }
 
+    /// Owner: more fonts, Thai too. The fonts that come with the program draw on every
+    /// platform (the web has no installed fonts), Thai letters with them, and Sarabun has a bold.
+    #[test]
+    fn the_fonts_that_come_with_the_program_draw_thai_and_latin() {
+        let fams = crate::bundled_families();
+        assert!(fams.len() >= 8 && fams.contains(&"Sarabun") && fams.contains(&"Kanit"), "{fams:?}");
+        for f in fams {
+            let thai = text_geometry_in(Some(f), "สวัสดี", Vec2::ZERO, 8.0, 0.0);
+            let latin = text_geometry_in(Some(f), "AB12", Vec2::ZERO, 8.0, 0.0).unwrap();
+            assert!(!latin.is_empty(), "{f}");
+            if !["IBM Plex Mono", "Bebas Neue", "Anton"].contains(&f) {
+                assert!(thai.as_ref().is_ok_and(|g| g.len() > 20), "{f}: Thai outlines");
+            }
+        }
+        let style = TextStyle { bold: true, ..TextStyle::default() };
+        let bold = text_geometry_styled(Some("sarabun"), "A", Vec2::ZERO, 8.0, 0.0, &style, None).unwrap();
+        assert_ne!(bold, text_geometry_in(Some("Sarabun"), "A", Vec2::ZERO, 8.0, 0.0).unwrap(), "the bold face");
+        assert!(text_geometry_styled(Some("Kanit"), "A", Vec2::ZERO, 8.0, 0.0, &style, None).is_err(), "no bold face");
+    }
+
     #[test]
     fn cubic_outlines_stay_exact_splines() {
         let mut ob = Outline { out: Vec::new(), start: Vec2::ZERO, cur: Vec2::ZERO, map: Box::new(|x, y| Vec2::new(f64::from(x), f64::from(y))) };

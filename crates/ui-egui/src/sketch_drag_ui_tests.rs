@@ -396,6 +396,7 @@ fn a_regrabbed_line_end_snaps_to_the_parts_centres_middles_and_edges() {
         press_and_move(&mut h, &path);
         release(&mut h, b);
         let at = point(&h, "l.end");
-        assert!(at.dist(Vec2::new(want.0, want.1)) < 1e-6, "near {near:?}: {at:?} wants {want:?}");
+        // Onto an edge: exactly on it; along it, where the pointer let go.
+        assert!((at.x - want.0).abs() < 1e-6 && (at.y - want.1).abs() < 1e-3, "near {near:?}: {at:?} wants {want:?}");
     }
 }
