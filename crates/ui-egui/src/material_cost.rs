@@ -138,7 +138,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 ui_kit::text(
                     ui,
-                    format!("{} {PRICES_DATE}", tr_label("Built-in prices are rough Thai estimates for cut stock, as of")),
+                    &format!("{} {PRICES_DATE}", tr_label("Built-in prices are rough Thai estimates for cut stock, as of")),
                     ui_kit::Text::Hint("cost"),
                 );
                 match window.params(app).and_then(|p| app.session.execute("cf.material_cost", &p).map_err(|e| e.to_string())) {
@@ -148,18 +148,20 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 let size = it["size"].as_array().map(|a| a.iter().filter_map(Value::as_f64).map(|x| format!("{x:.0}")).collect::<Vec<_>>().join(" × ")).unwrap_or_default();
                                 ui_kit::text(
                                     ui,
-                                    format!("{}  {size} mm  {:.2} kg  {}", it["name"].as_str().unwrap_or(""), it["mass_kg"].as_f64().unwrap_or(0.0), baht(it["price"].as_f64().unwrap_or(0.0))),
+                                    &format!("{}  {size} mm  {:.2} kg  {}", it["name"].as_str().unwrap_or(""), it["mass_kg"].as_f64().unwrap_or(0.0), baht(it["price"].as_f64().unwrap_or(0.0))),
                                     ui_kit::Text::Report("cost_item", false),
                                 );
                             }
                         } else if let Some(size) = r["items"][0]["size"].as_array() {
                             let size = size.iter().filter_map(Value::as_f64).map(|x| format!("{x:.0}")).collect::<Vec<_>>().join(" × ");
-                            ui_kit::text(ui, format!("{}  {size} mm", tr_label("Stock")), ui_kit::Text::Report("cost_size", false));
+                            ui_kit::text(ui, &format!("{}  {size} mm", tr_label("Stock")), ui_kit::Text::Report("cost_size", false));
                         }
-                        ui_kit::text(ui, format!("{}  {:.3} kg", tr_label("Weight"), r["mass_kg"].as_f64().unwrap_or(0.0)), ui_kit::Text::Report("cost_mass", false));
-                        ui_kit::text(ui, format!("{}  {}", tr_label("Estimated price"), baht(r["price"].as_f64().unwrap_or(0.0))), ui_kit::Text::Report("cost_price", false));
+                        ui_kit::text(ui, &format!("{}  {:.3} kg", tr_label("Weight"), r["mass_kg"].as_f64().unwrap_or(0.0)), ui_kit::Text::Report("cost_mass", false));
+                        ui_kit::text(ui, &format!("{}  {}", tr_label("Estimated price"), baht(r["price"].as_f64().unwrap_or(0.0))), ui_kit::Text::Report("cost_price", false));
                     }
-                    Err(e) => ui_kit::text(ui, e, ui_kit::Text::Report("cost_error", true)),
+                    Err(e) => {
+                        ui_kit::text(ui, &e, ui_kit::Text::Report("cost_error", true));
+                    }
                 }
                 ui_kit::ComputeStatus { text: None, busy: false, applying: false }
             },

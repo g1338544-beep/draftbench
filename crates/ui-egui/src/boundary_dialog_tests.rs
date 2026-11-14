@@ -151,3 +151,14 @@ fn extend_takes_a_picked_faces_whole_rim() {
     }
     h.step(&json!({"expect": {"area": 600}})).unwrap();
 }
+
+/// Owner: trimlines at many gaps, typed as a list or a range ("0.5-6").
+#[test]
+fn trimline_gaps_are_typed_as_a_list_or_a_range() {
+    use crate::dialogs_surface::trimline_gaps;
+    use serde_json::json;
+    assert_eq!(trimline_gaps("0.5, 1, 2, 3, 6").unwrap(), vec![("gaps", json!([0.5, 1.0, 2.0, 3.0, 6.0]))]);
+    assert_eq!(trimline_gaps("0.5-6").unwrap(), vec![("from", json!(0.5)), ("to", json!(6.0)), ("step", json!(0.5))]);
+    assert_eq!(trimline_gaps("1-3 step 1").unwrap(), vec![("from", json!(1.0)), ("to", json!(3.0)), ("step", json!(1.0))]);
+    assert!(trimline_gaps("abc").is_err() && trimline_gaps("").is_err());
+}

@@ -27,6 +27,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         "body: surface; up_to?: length (default 30: holes this size or smaller across are closed, larger ones stay). Every face of \\
          the surface loses its small holes in place (Untrim), so an imported part's surface is ready to offset. → closed: count",
     ),
+    CommandSpec::new("cf.trimlines", "CF Trimlines", trimlines).at("SOLID", "CF").icon("sketch_3d").params(
+        "faces: [[x,y,z]] (points on the part's faces whose edge is checked); body?; gaps?: [length…] (e.g. [0.5, 1, 2, 3, 6]) | \\
+         from?, to?, step?: lengths (a range, e.g. 0.5 to 6 by 0.5; default the gaps 0.5, 1, 2, 3, 6). For each gap a 3D sketch \\
+         `Trimline <gap>` of the faces' outer edge moved that far in across the faces. → sketches: [{gap, sketch, curves}]",
+    ),
     CommandSpec::new("cf.block", "CF Block", block).at("SOLID", "CF").icon("box").params(
     "faces: [[x,y,z]] (points on the part's faces the block supports; they should face roughly one way); body?; gap?: length (default 3: \
      how far the block stays off the faces, out along their mean normal, outside the part); depth?: length (default 20: how far the block reaches \
@@ -329,6 +334,174 @@ impl Rot {
     }
 }
 
+/// The gaps a trimline command asks for: a list, or a range from/to/step; at most 60.
+fn gap_list(s: &Session, p: &Value, cmd: &str) -> Result<Vec<f64>> {
+    let mut gaps: Vec<f64> = if let Some(list) = p.get("gaps").and_then(Value::as_array) {
+        list.iter()
+            .map(|v| v.as_f64().filter(|x| x.is_finite() && *x > 0.0 && *x < 1e4).ok_or_else(|| bad(cmd, "each gap must be a length more than 0")))
+            .collect::<Result<_>>()?
+    } else if p.get("from").is_some() || p.get("to").is_some() {
+        let (from, to, step) = (num(s, p, "from", 0.5, cmd)?, num(s, p, "to", 6.0, cmd)?, num(s, p, "step", 0.5, cmd)?);
+        if !(from > 0.0 && to >= from && step > 0.0) || (to - from) / step > 60.0 {
+            return Err(bad(cmd, "the range must run from more than 0 up to `to`, in at most 60 steps"));
+        }
+        let n = ((to - from) / step + 1e-9).floor() as usize;
+        (0..=n).map(|i| ((from + step * i as f64) * 1e6).round() / 1e6).collect()
+    } else {
+        vec![0.5, 1.0, 2.0, 3.0, 6.0]
+    };
+    gaps.sort_by(f64::total_cmp);
+    gaps.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    if gaps.is_empty() || gaps.len() > 60 {
+        return Err(bad(cmd, "give 1 to 60 gaps"));
+    }
+    Ok(gaps)
+}
+
+/// CF trimlines (owner: "trimlines at several gaps, 0.5 to 6, each named and coloured, to
+/// export to STEP for other programs"): the picked faces' outer edge moved in across the faces
+/// by each gap, each gap a 3D sketch of its own named `Trimline <gap>`. One undo step.
+fn trimlines(s: &mut Session, p: &Value) -> Result<Value> {
+    let depth = s.undo.len();
+    let r = trimline_steps(s, p);
+    s.undo.truncate(depth);
+    r
+}
+
+fn trimline_steps(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "cf.trimlines";
+    let picks: Vec<Vec3> = p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    if picks.is_empty() || picks.len() > 500 {
+        return Err(bad(cmd, "`faces` must list 1 to 500 points on the part's faces"));
+    }
+    let gaps = gap_list(s, p, cmd)?;
+    // The faces' triangles and their boundary (edges with the picked faces on one side only).
+    let (tris, edges): (Vec<[Vec3; 3]>, Vec<Vec<Vec3>>) = {
+        let st = s.world_state();
+        let body = match p.get("body").and_then(Value::as_str) {
+            Some(b) => st.body(b),
+            None => st.bodies.iter().min_by(|a, b| {
+                let d = |x: &solidcraft_doc::ModelBody| x.mesh().positions.iter().map(|q| q.dist(picks[0])).fold(f64::MAX, f64::min);
+                d(a).total_cmp(&d(b))
+            }),
+        }
+        .ok_or_else(|| bad(cmd, "no part under the picked points"))?;
+        let m = body.mesh();
+        let tri = |t: &[u32; 3]| -> Option<[Vec3; 3]> { Some([*m.positions.get(t[0] as usize)?, *m.positions.get(t[1] as usize)?, *m.positions.get(t[2] as usize)?]) };
+        let mut faces: Vec<u32> = Vec::new();
+        for q in &picks {
+            if let Some(f) = m
+                .triangles
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| tri(t).map(|[a, b, c]| (i, solidcraft_geom::compare::closest_on_triangle(*q, a, b, c).dist(*q))))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .and_then(|(i, _)| m.tri_face.get(i).copied())
+                && !faces.contains(&f)
+            {
+                faces.push(f);
+            }
+        }
+        let tris: Vec<[Vec3; 3]> =
+            m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| faces.contains(f)).filter_map(|(t, _)| tri(t)).collect();
+        let edges: Vec<Vec<Vec3>> = (0..m.edges.len())
+            .filter(|&e| m.edge_faces.get(e).is_some_and(|fs| fs.iter().filter(|f| faces.contains(f)).count() == 1))
+            .filter(|&e| !m.seams.get(e).copied().unwrap_or(false))
+            .filter_map(|e| m.edges.get(e).cloned())
+            .collect();
+        (tris, edges)
+    };
+    if tris.is_empty() {
+        return Err(bad(cmd, "no faces under the picked points"));
+    }
+    // The outer edge: the longest closed loop (or chain) of the boundary.
+    let mut loops = closed_loops(edges);
+    let len = |l: &[Vec3]| l.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>();
+    loops.sort_by(|a, b| len(b).total_cmp(&len(a)));
+    let outline = loops.into_iter().next().ok_or_else(|| bad(cmd, "the faces' outer edge is not one closed loop"))?;
+    let total = len(&outline);
+    let n = ((total / 2.0).ceil() as usize).clamp(24, 400);
+    let ring: Vec<Vec3> = (0..n).filter_map(|i| at_length(&outline, total * i as f64 / n as f64)).collect();
+    // The nearest point on the faces and its normal.
+    let nearest = |q: Vec3| -> Option<(Vec3, Vec3)> {
+        tris.iter()
+            .filter_map(|[a, b, c]| {
+                let on = solidcraft_geom::compare::closest_on_triangle(q, *a, *b, *c);
+                Some((on.dist(q), on, (*b - *a).cross(*c - *a).normalized()?))
+            })
+            .min_by(|x, y| x.0.total_cmp(&y.0))
+            .map(|(_, on, n)| (on, n))
+    };
+    let mut out = Vec::new();
+    for g in gaps {
+        let mut pts = Vec::with_capacity(ring.len());
+        for i in 0..ring.len() {
+            let (prev, here, next) = (ring[(i + ring.len() - 1) % ring.len()], ring[i], ring[(i + 1) % ring.len()]);
+            let Some(t) = (next - prev).normalized() else { continue };
+            let Some((_, normal)) = nearest(here) else { continue };
+            let Some(side) = normal.cross(t).normalized() else { continue };
+            // Into the faces: the side whose step lands on them.
+            let mut best: Option<(f64, Vec3)> = None;
+            for dir in [side, side * -1.0] {
+                let mut q = here;
+                // Small steps follow a curved face.
+                let steps = ((g / 0.5).ceil() as usize).clamp(1, 40);
+                for _ in 0..steps {
+                    q = q + dir * (g / steps as f64);
+                    if let Some((on, _)) = nearest(q) {
+                        q = on;
+                    }
+                }
+                let off = nearest(q).map_or(f64::MAX, |(on, _)| on.dist(q));
+                let moved = q.dist(here);
+                let score = off + (moved - g).abs() * 0.5;
+                if best.is_none_or(|b| score < b.0) {
+                    best = Some((score, q));
+                }
+            }
+            if let Some((_, q)) = best {
+                pts.push(q);
+            }
+        }
+        if pts.len() < 4 {
+            continue;
+        }
+        if let Some(first) = pts.first().copied() {
+            pts.push(first);
+        }
+        let name = format!("Trimline {}", trim_number(g));
+        s.execute("sketch.create", &json!({"plane": "XY", "name": name}))?;
+        s.execute("sketch.options", &json!({"sketch_3d": true}))?;
+        let r = s.execute("sketch.spline3d", &json!({"points": pts.iter().map(|q| [q.x, q.y, q.z]).collect::<Vec<_>>()}))?;
+        let sketch = s.active_sketch;
+        s.execute("sketch.finish", &json!({}))?;
+        out.push(json!({"gap": g, "name": name, "sketch": sketch, "curves": r["created"]["curves"]}));
+    }
+    if out.is_empty() {
+        return Err(bad(cmd, "no trimline could be made on these faces"));
+    }
+    Ok(json!({"sketches": out}))
+}
+
+/// `0.5`, `3` (no trailing zeros).
+fn trim_number(v: f64) -> String {
+    let t = format!("{v:.3}");
+    t.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// The point `at` along a polyline.
+fn at_length(pts: &[Vec3], at: f64) -> Option<Vec3> {
+    let mut left = at;
+    for w in pts.windows(2) {
+        let l = w[0].dist(w[1]);
+        if left <= l && l > 0.0 {
+            return Some(w[0] + (w[1] - w[0]) * (left / l));
+        }
+        left -= l;
+    }
+    pts.last().copied()
+}
+
 /// Close a surface's small holes (owner: "close the small gaps, holes and notches automatically
 /// for CF work"): each face's closed inner loops no larger than `up_to` across, untrimmed in
 /// place. One undo step.
@@ -473,6 +646,36 @@ mod tests {
         assert_eq!(s.undo.len(), undo + 1, "one undo step");
         let area = solidcraft_kernel::measure(&s.world_state().body(&top).unwrap().body).unwrap().area;
         assert!((area - 800.0).abs() < 1e-6, "{area}");
+    }
+
+    /// Owner: trimlines at several gaps. A 40 × 20 box's top: for the gaps 1 and 3 a 3D sketch each,
+    /// named for its gap, its curve that far in from the top's edge all round (a rectangle 38 × 18,
+    /// then 34 × 14); a range 0.5 to 2 by 0.5 gives four.
+    #[test]
+    fn trimlines_at_several_gaps() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 5})).unwrap();
+        let undo = s.undo.len();
+        let r = s.execute("cf.trimlines", &json!({"faces": [[20, 10, 5]], "gaps": [3, 1]})).unwrap();
+        assert_eq!(s.undo.len(), undo + 1, "one undo step");
+        let sk = r["sketches"].as_array().unwrap();
+        assert_eq!(sk.iter().map(|x| x["name"].as_str().unwrap()).collect::<Vec<_>>(), ["Trimline 1", "Trimline 3"]);
+        let st = s.world_state();
+        for (x, g) in sk.iter().zip([1.0, 3.0]) {
+            let id = x["sketch"].as_u64().unwrap();
+            let ss = st.sketch(id).unwrap();
+            let pts: Vec<Vec3> = ss.sketch.wires.iter().flat_map(|w| w.fit.iter().copied()).collect();
+            assert!(!pts.is_empty(), "the trimline's curve");
+            let (lo, hi) = pts.iter().fold((Vec3::new(1e9, 1e9, 1e9), Vec3::new(-1e9, -1e9, -1e9)), |(lo, hi), q| {
+                (Vec3::new(lo.x.min(q.x), lo.y.min(q.y), lo.z.min(q.z)), Vec3::new(hi.x.max(q.x), hi.y.max(q.y), hi.z.max(q.z)))
+            });
+            assert!((lo.x - g).abs() < 0.2 && (hi.x - (40.0 - g)).abs() < 0.2, "{g}: {lo:?} {hi:?}");
+            assert!((lo.y - g).abs() < 0.2 && (hi.y - (20.0 - g)).abs() < 0.2, "{g}: {lo:?} {hi:?}");
+            assert!((lo.z - 5.0).abs() < 1e-6 && (hi.z - 5.0).abs() < 1e-6, "on the top");
+        }
+        drop(st);
+        let r = s.execute("cf.trimlines", &json!({"faces": [[20, 10, 5]], "from": 0.5, "to": 2, "step": 0.5})).unwrap();
+        assert_eq!(r["sketches"].as_array().unwrap().len(), 4);
     }
 
     /// Owner: a material price estimate. A 100 × 200 × 20 SS400 plate: 0.4 L at 7.85 kg/L is

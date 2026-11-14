@@ -114,6 +114,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             SplitFace,
             /// CF Block: the block on the picked faces' outer side, `gap` off them, `depth` past
             /// that, square to their mean normal.
+            /// CF Trimlines: the gaps as typed ("0.5, 1, 2, 3, 6" or a range "0.5-6 step 0.5").
+            CfTrimlines {
+                gaps: String,
+            },
             /// Close Holes: a surface's holes up to `up_to` across closed.
             CloseHoles {
                 up_to: String,
@@ -146,6 +150,7 @@ impl Surf {
             Surf::SplitFace => "SPLIT FACE",
             Surf::CfBlock { .. } => "CF BLOCK",
             Surf::CloseHoles { .. } => "CLOSE HOLES",
+            Surf::CfTrimlines { .. } => "CF TRIMLINES",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
         }
     }
@@ -222,6 +227,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         Surf::Untrim { .. } => vec![SelInput::new("Face", FACES, false), SelInput::new("Holes (edges on them)", EDGES, true)],
         Surf::CfBlock { .. } => vec![SelInput::new("Part faces the block supports", FACES, true)],
         Surf::CloseHoles { .. } => vec![SelInput::new("Surface", BODIES | FACES, false)],
+        Surf::CfTrimlines { .. } => vec![SelInput::new("Part faces (their outer edge)", FACES, true)],
         Surf::SplitFace => vec![
             SelInput::new("1. Faces to divide (click the faces)", FACES, true),
             SelInput::new(
@@ -251,6 +257,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
         "solid.split_face" | "solid.split_line" => Surf::SplitFace,
         "cf.close_holes" => Surf::CloseHoles { up_to: "30 mm".into() },
+        "cf.trimlines" => Surf::CfTrimlines { gaps: "0.5, 1, 2, 3, 6".into() },
         "cf.block" => Surf::CfBlock { gap: "3 mm".into(), margin: "5 mm".into(), depth: "20 mm".into(), flip: false },
         _ => Surf::simple_start(id)?.0,
     };
@@ -316,6 +323,10 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
         }
         Surf::CloseHoles { up_to } => {
             enter |= expr_row(ui, "Close holes up to (across)", up_to);
+        }
+        Surf::CfTrimlines { gaps } => {
+            enter |= crate::ui_kit::text_row(ui, "Gaps (mm)", gaps, "0.5, 1, 2, 3, 6").0;
+            crate::ui_kit::caption(ui, "Gaps (mm)", crate::i18n::tr_label("A list (0.5, 1, 2, 3, 6) or a range (0.5-6 step 0.5). One 3D sketch per gap, named Trimline <gap>."));
         }
         Surf::CfBlock { gap, margin, depth, flip } => {
             enter |= expr_row(ui, "Gap (block to part)", gap);
@@ -384,6 +395,22 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
 }
 
 /// One body and points on the picked faces of it (none: a whole body picked).
+/// The trimline gaps as typed: "0.5, 1, 2" → gaps; "0.5-6" or "0.5-6 step 0.5" → a range.
+pub(crate) fn trimline_gaps(text: &str) -> Result<Vec<(&'static str, Value)>, String> {
+    let t = text.trim().replace("mm", "");
+    let num = |x: &str| x.trim().parse::<f64>().map_err(|_| format!("`{}` is not a number", x.trim()));
+    if let Some((range, step)) = t.split_once("step").map(|(a, b)| (a.to_string(), Some(b.to_string()))).or_else(|| t.contains('-').then(|| (t.clone(), None))) {
+        let (from, to) = range.split_once('-').ok_or("a range is written 0.5-6")?;
+        let step = step.as_deref().map(num).transpose()?.unwrap_or(0.5);
+        return Ok(vec![("from", json!(num(from)?)), ("to", json!(num(to)?)), ("step", json!(step))]);
+    }
+    let gaps: Vec<f64> = t.split([',', ' ', ';']).filter(|x| !x.trim().is_empty()).map(num).collect::<Result<_, _>>()?;
+    if gaps.is_empty() {
+        return Err("type the gaps, e.g. 0.5, 1, 2, 3, 6".into());
+    }
+    Ok(vec![("gaps", json!(gaps))])
+}
+
 fn body_and_faces(picks: &[Sel]) -> Result<(String, Vec<Value>), String> {
     let body_of = |x: &Sel| match x {
         Sel::Body { name } | Sel::Face { body: name, .. } => Some(name.clone()),
@@ -920,6 +947,15 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                 p["in_place"] = json!(true);
             }
             ("surface.untrim", p)
+        }
+        Surf::CfTrimlines { gaps } => {
+            need(0, "the part's faces")?;
+            let (body, faces) = body_and_faces(items(inputs, 0))?;
+            let mut p = json!({"body": body, "faces": faces});
+            for (k, v) in trimline_gaps(gaps)? {
+                p[k] = v;
+            }
+            ("cf.trimlines", p)
         }
         Surf::CloseHoles { up_to } => {
             need(0, "the surface")?;

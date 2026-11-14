@@ -1024,9 +1024,7 @@ fn a_slots_face_gives_its_centre_line() {
 #[test]
 fn joint_placement_and_motion_link_type_switch_dialogs() {
     let mut h = crate::scenario::Harness::new();
-    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30)], |id, p| {
-        h.app.run(id, p).unwrap();
-    });
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30)], |id, p| h.app.run(id, p).unwrap());
     h.settle();
     h.app.session.selection = ["Body1", "Body2"].iter().map(|b| Sel::Body { name: b.to_string() }).collect();
     h.app.start("joint.create");
@@ -1039,5 +1037,5 @@ fn joint_placement_and_motion_link_type_switch_dialogs() {
     assert!(h.widget("Make a joint").is_some(), "offers to make the joints first");
     crate::dialogs_assembly::SWITCH.with(|c| c.set(Some("joint.gear")));
     h.frames(2);
-    assert!(h.app.dialog.as_ref().is_some_and(|d| crate::dialogs_dense::command(&d.kind) == Some("joint.gear")), "the gear link");
+    assert!(h.app.dialog.as_ref().is_some_and(|d| crate::dialogs::command_of(d) == Some("joint.gear")), "the gear link");
 }

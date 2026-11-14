@@ -69,6 +69,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_surface::Surf::SplitFace => "solid.split_face",
             crate::dialogs_surface::Surf::CfBlock { .. } => "cf.block",
             crate::dialogs_surface::Surf::CloseHoles { .. } => "cf.close_holes",
+            crate::dialogs_surface::Surf::CfTrimlines { .. } => "cf.trimlines",
             _ => k.simple_metadata().map_or("", |(command, _)| command),
         }),
         Kind::Sheet(k) => match k {
