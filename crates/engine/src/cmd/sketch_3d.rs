@@ -46,13 +46,15 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.relation3d", "3D Relation", relation3d).icon("constraint").enabled(in_sketch).params(concat!(
         "type: along (wire, axis: x|y|z) | parallel | perpendicular | equal | tangent (a, b: two drawn 3D curves; tangent: where they meet) | ",
         "length (wire, value: mm, a size) | distance (a, b: [curve, point index], value: mm) | fix (at: [curve, point index], point?: [x,y,z] world, default where it is) | ",
-        "on_face (at: [curve, point index], origin: [x,y,z], normal: [x,y,z] world: the face's plane) | normal (wire, normal: [x,y,z] world). ",
+        "on_face (at: [curve, point index], origin: [x,y,z], normal: [x,y,z] world: the face's plane) | normal (wire, normal: [x,y,z] world) | ",
+        "coincident (a, b: [curve, point index]) | angle (a, b, value: degrees) | in_plane (wire, origin, normal: the whole line on a face) | parallel_face (wire, normal) | ",
+        "parallel_edge (wire, dir) | on_edge (at, origin, dir: a point on a straight model edge) | collinear (wire, origin, dir) | face_distance (at, origin, normal, value: mm along the normal). ",
         "The drawn points move as little as they can until it holds; refused when it conflicts (→ index: the relation's place in the list)"
     )),
     CommandSpec::new("sketch.relation3d_value", "Change 3D Size", relation3d_value)
         .icon("dimension")
         .enabled(in_sketch)
-        .params("index: a length or distance relation's place, value: mm; the curves follow"),
+        .params("index: a length, distance or angle relation's place, value: mm (degrees for an angle); the curves follow"),
     CommandSpec::new("sketch.relation3d_delete", "Delete 3D Relations", relation3d_delete)
         .icon("delete")
         .enabled(in_sketch)
@@ -122,6 +124,35 @@ fn relation3d(s: &mut Session, p: &Value) -> Result<Value> {
                 let wire = text("wire")?;
                 R::Normal { normal: arr(dir(sk, &wire, v3("normal")?)), wire }
             }
+            "coincident" => R::Coincident { a: drawn_point(cmd, p.get("a"), "a")?, b: drawn_point(cmd, p.get("b"), "b")? },
+            "angle" => {
+                let value = num("value")?;
+                R::Angle { a: text("a")?, b: text("b")?, value: value.to_radians() }
+            }
+            "in_plane" | "on_face_line" => {
+                let wire = text("wire")?;
+                R::InPlane { origin: arr(pt(sk, &wire, v3("origin")?)), normal: arr(dir(sk, &wire, v3("normal")?)), wire }
+            }
+            "parallel_face" => {
+                let wire = text("wire")?;
+                R::ParallelPlane { normal: arr(dir(sk, &wire, v3("normal")?)), wire }
+            }
+            "parallel_edge" => {
+                let wire = text("wire")?;
+                R::ParallelTo { dir: arr(dir(sk, &wire, v3("dir")?)), wire }
+            }
+            "on_edge" => {
+                let at = drawn_point(cmd, p.get("at"), "at")?;
+                R::OnLine { origin: arr(pt(sk, &at.0, v3("origin")?)), dir: arr(dir(sk, &at.0, v3("dir")?)), at }
+            }
+            "collinear" => {
+                let wire = text("wire")?;
+                R::Collinear { origin: arr(pt(sk, &wire, v3("origin")?)), dir: arr(dir(sk, &wire, v3("dir")?)), wire }
+            }
+            "face_distance" => {
+                let at = drawn_point(cmd, p.get("at"), "at")?;
+                R::PlaneDistance { origin: arr(pt(sk, &at.0, v3("origin")?)), normal: arr(dir(sk, &at.0, v3("normal")?)), value: num("value")?, at }
+            }
             other => return Err(bad(cmd, format!("unknown 3D relation `{other}`"))),
         };
         sk.add_relation3d(r)?;
@@ -133,9 +164,10 @@ fn relation3d(s: &mut Session, p: &Value) -> Result<Value> {
 fn relation3d_value(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.relation3d_value";
     let index = p.get("index").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok()).ok_or_else(|| bad(cmd, "`index` must be a relation's place"))?;
-    let value = p.get("value").and_then(Value::as_f64).ok_or_else(|| bad(cmd, "`value` must be a length (mm)"))?;
+    let value = p.get("value").and_then(Value::as_f64).ok_or_else(|| bad(cmd, "`value` must be a number (mm, or degrees for an angle)"))?;
     let ((), info) = edit(s, p, cmd, false, |sk, _| {
-        sk.set_relation3d_value(index, value)?;
+        let angle = matches!(sk.relations3d.get(index), Some(solidcraft_sketch::Relation3d::Angle { .. }));
+        sk.set_relation3d_value(index, if angle { value.to_radians() } else { value })?;
         Ok(())
     })?;
     Ok(json!({"sketch": info}))

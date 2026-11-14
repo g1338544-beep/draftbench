@@ -253,7 +253,18 @@ fn picked_3d_lines_offer_their_relations_and_a_size_box() {
     assert!((q - p).len() > 39.999 && (q - p).cross(Vec3::Z).len() < 1e-5, "{p:?} {q:?}");
     drop(st);
     h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a.clone() }, solidcraft_engine::Sel::SketchCurve { id: b }];
-    assert_eq!(labels(&h), ["Parallel", "Perpendicular", "Equal", "Tangent"]);
-    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a }];
+    assert_eq!(labels(&h), ["Coincident", "Parallel", "Perpendicular", "Equal", "Tangent", "Angle"]);
+    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a.clone() }];
     assert!(labels(&h).contains(&"Remove relations".to_string()), "a curve with relations can lose them");
+    // A line and a model face; a line and a straight model edge (owner: relations to the part).
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [50, 0, 0]})).unwrap();
+    let face = crate::dialogs::face_sel(&h.app.session, Vec3::new(60.0, 10.0, 10.0)).unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a.clone() }, face];
+    assert_eq!(labels(&h), ["On face", "On face (whole line)", "Parallel to face", "Normal to face", "Distance to face"]);
+    let edge = crate::dialogs::edge_sel(&h.app.session, Vec3::new(70.0, 0.0, 10.0)).unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a.clone() }, edge];
+    assert_eq!(labels(&h), ["On edge", "Parallel to edge", "Collinear"]);
+    let parallel = crate::relation_bar::items(&h.app).into_iter().find(|i| i.label == "Parallel to edge").unwrap();
+    // Along Z and parallel to an X edge cannot both hold: refused, said why.
+    assert!(crate::relation_bar::run_wire_item(&mut h.app, &parallel).is_err());
 }

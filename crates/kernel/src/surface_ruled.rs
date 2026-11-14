@@ -30,6 +30,8 @@ const SAMPLES: usize = 16;
 const MAX_FIT_SAMPLES: usize = 513;
 /// Rulings closer than this (as unit vectors) agree: their strips share a side edge.
 const SAME_RULING: f64 = 1e-7;
+/// Edges whose far edges turn by less than this (the sine: 5°) meet smoothly.
+const SMOOTH_SIN: f64 = 0.0872;
 
 /// The direction a ruled strip leaves its edge.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -487,6 +489,16 @@ impl Joint {
             let top = mt::Vertex::new(p3((ea.top + eb.top) * 0.5));
             return Ok(Joint::Shared(mt::Edge::new_unchecked(&vertex, &top, mt::Curve::Line(mt::Line(vertex.point(), top.point())))));
         }
+        // Edges that run on smoothly (the rim of a formed part: tangent within a few degrees)
+        // make no corner to mitre: their strips meet over a sliver of a turn, which a mitre
+        // can't close (the far edges are near parallel and "cross"). Joined where the gap is
+        // within tolerance, else rounded over the sliver, whatever Corners says (owner: a
+        // smooth rim was refused).
+        let smooth = ea.tangent.dot(eb.tangent) > 0.0 && ea.tangent.cross(eb.tangent).len() < SMOOTH_SIN;
+        if smooth && ea.top.dist(eb.top) <= eps * 10.0 {
+            let top = mt::Vertex::new(p3((ea.top + eb.top) * 0.5));
+            return Ok(Joint::Shared(mt::Edge::new_unchecked(&vertex, &top, mt::Curve::Line(mt::Line(vertex.point(), top.point())))));
+        }
         // Where the far edges, carried on straight, meet: λ along the incoming one past its
         // end, μ along the outgoing one past its start.
         let meet = || -> Option<(Vec3, f64, f64)> {
@@ -506,7 +518,7 @@ impl Joint {
         let inside = eb.ruling.dot(ea.tangent) - ea.ruling.dot(eb.tangent) < -1e-9;
         let corner_at = vertex.point();
         let refuse = |what: &str| KernelError::Invalid(format!("{what} at the corner at {:?}", from_p3(corner_at)));
-        if corners == RuledCorners::Mitre || inside {
+        if (corners == RuledCorners::Mitre || inside) && !smooth {
             let (m, lam, mu) = meet().ok_or_else(|| refuse("the strips' far edges don't meet: try round corners,"))?;
             let convex = lam > 0.0 && mu < 0.0;
             let concave = lam < 0.0 && mu > 0.0;
@@ -768,6 +780,29 @@ mod tests {
             let sewn = crate::stitch(&[&s], 0.0).unwrap();
             assert_eq!((sewn.face_count(), shared(&sewn), uses(&sewn).len()), (faces, joins, uses(&s).len()), "{r:?}");
         }
+    }
+
+    /// Owner: a smooth rim (edges running on within a few degrees, like a formed part's) was
+    /// refused with "the strips cross". A 90-sided prism's top (4° turns), mitred: the strips
+    /// meet over the slivers, the ring about the width of a band round the top.
+    #[test]
+    fn a_smooth_rim_joins_without_mitring() {
+        let pts: Vec<Vec2> = (0..90).map(|k| {
+            let a = k as f64 * std::f64::consts::TAU / 90.0;
+            Vec2::new(20.0 * a.cos(), 20.0 * a.sin())
+        }).collect();
+        let prism = crate::extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&pts), holes: vec![] }], 0.0, 10.0).unwrap().pop().unwrap();
+        let rim: Vec<Vec3> = (0..90)
+            .map(|k| {
+                let a = (k as f64 + 0.5) * std::f64::consts::TAU / 90.0;
+                let r = 20.0 * (std::f64::consts::PI / 90.0).cos();
+                Vec3::new(r * a.cos(), r * a.sin(), 10.0)
+            })
+            .collect();
+        let s = ruled_surface(&prism, &rim, &ruled(RuledMode::Tangent, 2.0, Vec3::new(0.0, 0.0, 10.0))).unwrap();
+        // A band 2 wide round a perimeter of about 2π·20.
+        let want = 2.0 * std::f64::consts::TAU * 20.0;
+        assert!(rel(area(&s), want) < 0.05, "{} vs {want}", area(&s));
     }
 
     /// An inside corner (an L-shaped prism's top: 20 × 10 and 10 × 10) is cut back, mitred or

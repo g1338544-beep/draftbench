@@ -51,18 +51,45 @@ pub enum Relation3d {
     OnPlane { at: DrawnPoint, origin: [f64; 3], normal: [f64; 3] },
     /// A line square to a plane (a model face).
     Normal { wire: String, normal: [f64; 3] },
+    /// Two drawn points at one place (curves joined end to end).
+    Coincident { a: DrawnPoint, b: DrawnPoint },
+    /// The angle between two lines (a dimension, radians).
+    Angle { a: String, b: String, value: f64 },
+    /// A whole line on a plane (a model face's, where it was picked: on a curved face, its
+    /// tangent plane there).
+    InPlane { wire: String, origin: [f64; 3], normal: [f64; 3] },
+    /// A line parallel to a plane (square to its normal).
+    ParallelPlane { wire: String, normal: [f64; 3] },
+    /// A line parallel to a direction (a model edge's).
+    ParallelTo { wire: String, dir: [f64; 3] },
+    /// A drawn point on a line (a model edge's, straight there).
+    OnLine { at: DrawnPoint, origin: [f64; 3], dir: [f64; 3] },
+    /// A whole line along a line (collinear with a model edge).
+    Collinear { wire: String, origin: [f64; 3], dir: [f64; 3] },
+    /// A drawn point's distance from a plane (a dimension).
+    PlaneDistance { at: DrawnPoint, origin: [f64; 3], normal: [f64; 3], value: f64 },
 }
 
 impl Relation3d {
     /// The curves it names.
     pub fn wires(&self) -> Vec<&str> {
         match self {
-            Relation3d::Along { wire, .. } | Relation3d::Length { wire, .. } | Relation3d::Normal { wire, .. } => vec![wire],
-            Relation3d::Parallel { a, b } | Relation3d::Perpendicular { a, b } | Relation3d::Equal { a, b } | Relation3d::Tangent { a, b } => {
-                vec![a, b]
+            Relation3d::Along { wire, .. }
+            | Relation3d::Length { wire, .. }
+            | Relation3d::Normal { wire, .. }
+            | Relation3d::InPlane { wire, .. }
+            | Relation3d::ParallelPlane { wire, .. }
+            | Relation3d::ParallelTo { wire, .. }
+            | Relation3d::Collinear { wire, .. } => vec![wire],
+            Relation3d::Parallel { a, b }
+            | Relation3d::Perpendicular { a, b }
+            | Relation3d::Equal { a, b }
+            | Relation3d::Tangent { a, b }
+            | Relation3d::Angle { a, b, .. } => vec![a, b],
+            Relation3d::Distance { a, b, .. } | Relation3d::Coincident { a, b } => vec![&a.0, &b.0],
+            Relation3d::Fix { at, .. } | Relation3d::OnPlane { at, .. } | Relation3d::OnLine { at, .. } | Relation3d::PlaneDistance { at, .. } => {
+                vec![&at.0]
             }
-            Relation3d::Distance { a, b, .. } => vec![&a.0, &b.0],
-            Relation3d::Fix { at, .. } | Relation3d::OnPlane { at, .. } => vec![&at.0],
         }
     }
 
@@ -81,6 +108,14 @@ impl Relation3d {
             Relation3d::Fix { .. } => "Fix",
             Relation3d::OnPlane { .. } => "On face",
             Relation3d::Normal { .. } => "Normal to face",
+            Relation3d::Coincident { .. } => "Coincident",
+            Relation3d::Angle { .. } => "Angle",
+            Relation3d::InPlane { .. } => "On face (whole line)",
+            Relation3d::ParallelPlane { .. } => "Parallel to face",
+            Relation3d::ParallelTo { .. } => "Parallel to edge",
+            Relation3d::OnLine { .. } => "On edge",
+            Relation3d::Collinear { .. } => "Collinear",
+            Relation3d::PlaneDistance { .. } => "Distance to face",
         }
     }
 
@@ -96,7 +131,25 @@ impl Relation3d {
             Relation3d::OnPlane { origin, normal, .. } if !finite3(origin) || !finite3(normal) || Vec3::from(*normal).len() < 1e-9 => {
                 bad("the plane must be finite, with a normal")
             }
-            Relation3d::Normal { normal, .. } if !finite3(normal) || Vec3::from(*normal).len() < 1e-9 => bad("the normal must not be zero"),
+            Relation3d::Normal { normal, .. } | Relation3d::ParallelPlane { normal, .. } | Relation3d::ParallelTo { dir: normal, .. }
+                if !finite3(normal) || Vec3::from(*normal).len() < 1e-9 =>
+            {
+                bad("the direction must not be zero")
+            }
+            Relation3d::InPlane { origin, normal, .. }
+            | Relation3d::OnLine { origin, dir: normal, .. }
+            | Relation3d::Collinear { origin, dir: normal, .. }
+            | Relation3d::PlaneDistance { origin, normal, .. }
+                if !finite3(origin) || !finite3(normal) || Vec3::from(*normal).len() < 1e-9 =>
+            {
+                bad("the plane or line must be finite, with a direction")
+            }
+            Relation3d::PlaneDistance { value, .. } if !(value.is_finite() && value.abs() < 1e7) => bad("the distance must be finite"),
+            Relation3d::Angle { value, .. } if !(value.is_finite() && *value > 0.0 && *value < std::f64::consts::PI) => {
+                bad("the angle must be between 0° and 180°")
+            }
+            Relation3d::Coincident { a, b } if a == b => bad("pick two different points"),
+            Relation3d::Angle { a, b, .. } if a == b => bad("pick two different curves"),
             Relation3d::Parallel { a, b } | Relation3d::Perpendicular { a, b } | Relation3d::Equal { a, b } | Relation3d::Tangent { a, b }
                 if a == b =>
             {
@@ -128,7 +181,13 @@ impl Sketch {
                 return Err(SketchError::Invalid(format!("`{w}` is not a curve drawn in this 3D sketch")));
             }
         }
-        if let Relation3d::Distance { a, .. } | Relation3d::Fix { at: a, .. } | Relation3d::OnPlane { at: a, .. } = &r {
+        if let Relation3d::Distance { a, .. }
+        | Relation3d::Coincident { a, .. }
+        | Relation3d::Fix { at: a, .. }
+        | Relation3d::OnPlane { at: a, .. }
+        | Relation3d::OnLine { at: a, .. }
+        | Relation3d::PlaneDistance { at: a, .. } = &r
+        {
             for p in [Some(a), b_of(&r)].into_iter().flatten() {
                 if self.drawn_point(p).is_none() {
                     return Err(SketchError::Invalid(format!("`{}` has no drawn point {}", p.0, p.1)));
@@ -152,7 +211,12 @@ impl Sketch {
     pub fn set_relation3d_value(&mut self, index: usize, value: f64) -> Result<Report3d> {
         let before = self.clone();
         match self.relations3d.get_mut(index) {
-            Some(Relation3d::Length { value: v, .. } | Relation3d::Distance { value: v, .. }) => *v = value,
+            Some(
+                Relation3d::Length { value: v, .. }
+                | Relation3d::Distance { value: v, .. }
+                | Relation3d::Angle { value: v, .. }
+                | Relation3d::PlaneDistance { value: v, .. },
+            ) => *v = value,
             _ => return Err(SketchError::Invalid(format!("relation {index} is not a size"))),
         }
         if let Some(r) = self.relations3d.get(index) {
@@ -308,6 +372,56 @@ impl Sketch {
                             out.push((p(i) - Vec3::from(*origin)).dot(n));
                         }
                     }
+                    Relation3d::Coincident { a, b } => {
+                        if let (Some(i), Some(j)) = (place_of(self, a), place_of(self, b)) {
+                            let d = p(i) - p(j);
+                            out.extend([d.x, d.y, d.z]);
+                        }
+                    }
+                    Relation3d::Angle { a, b, value } => {
+                        if let (Some(u), Some(v)) = (dir(a), dir(b)) {
+                            let c = u.dot(v) / (u.len() * v.len()).max(1e-9);
+                            let s = u.cross(v).len() / (u.len() * v.len()).max(1e-9);
+                            // The angle by atan2 (well behaved near 0° and 180°).
+                            out.push(s.atan2(c) - value);
+                        }
+                    }
+                    Relation3d::InPlane { wire, origin, normal } => {
+                        if let (Some((i, _, _, j)), Some(n)) = (ends_of(self, wire), Vec3::from(*normal).normalized()) {
+                            out.push((p(i) - Vec3::from(*origin)).dot(n));
+                            out.push((p(j) - Vec3::from(*origin)).dot(n));
+                        }
+                    }
+                    Relation3d::ParallelPlane { wire, normal } => {
+                        if let (Some(d), Some(n)) = (dir(wire), Vec3::from(*normal).normalized()) {
+                            out.push(d.dot(n) / d.len().max(1e-9));
+                        }
+                    }
+                    Relation3d::ParallelTo { wire, dir: e } => {
+                        if let (Some(d), Some(e)) = (dir(wire), Vec3::from(*e).normalized()) {
+                            let c = d.cross(e) * (1.0 / d.len().max(1e-9));
+                            out.extend([c.x, c.y, c.z]);
+                        }
+                    }
+                    Relation3d::OnLine { at, origin, dir: e } => {
+                        if let (Some(i), Some(e)) = (place_of(self, at), Vec3::from(*e).normalized()) {
+                            let c = (p(i) - Vec3::from(*origin)).cross(e);
+                            out.extend([c.x, c.y, c.z]);
+                        }
+                    }
+                    Relation3d::Collinear { wire, origin, dir: e } => {
+                        if let (Some((i, _, _, j)), Some(e)) = (ends_of(self, wire), Vec3::from(*e).normalized()) {
+                            for k in [i, j] {
+                                let c = (p(k) - Vec3::from(*origin)).cross(e);
+                                out.extend([c.x, c.y, c.z]);
+                            }
+                        }
+                    }
+                    Relation3d::PlaneDistance { at, origin, normal, value } => {
+                        if let (Some(i), Some(n)) = (place_of(self, at), Vec3::from(*normal).normalized()) {
+                            out.push((p(i) - Vec3::from(*origin)).dot(n) - value);
+                        }
+                    }
                     Relation3d::Normal { wire, normal } => {
                         if let (Some(d), Some(n)) = (dir(wire), Vec3::from(*normal).normalized()) {
                             let c = d.cross(n) * (1.0 / d.len().max(1e-9));
@@ -408,7 +522,7 @@ impl Sketch {
 
 fn b_of(r: &Relation3d) -> Option<&DrawnPoint> {
     match r {
-        Relation3d::Distance { b, .. } => Some(b),
+        Relation3d::Distance { b, .. } | Relation3d::Coincident { b, .. } => Some(b),
         _ => None,
     }
 }
@@ -466,6 +580,33 @@ mod tests {
         assert_eq!(sk, before);
         assert!(sk.add_relation3d(Relation3d::Equal { a: a.clone(), b: a.clone() }).is_err(), "two different curves");
         assert!(sk.add_relation3d(Relation3d::Length { wire: "nope".into(), value: 3.0 }).is_err());
+    }
+
+    /// Owner: relations to the part and between lines: a line's end onto a model edge, the
+    /// whole line parallel to a face at a set distance, two lines at an angle and joined.
+    #[test]
+    fn relations_to_faces_edges_and_angles_hold() {
+        let mut sk = Sketch::new();
+        let a = sk.add_drawn_wire_in(&[Vec3::new(0.0, 0.0, 1.0), Vec3::new(10.0, 1.0, 2.0)], WireSpace::Component).unwrap();
+        let b = sk.add_drawn_wire_in(&[Vec3::new(11.0, 1.0, 2.0), Vec3::new(12.0, 9.0, 3.0)], WireSpace::Component).unwrap();
+        sk.add_relation3d(Relation3d::Coincident { a: (a.clone(), 1), b: (b.clone(), 0) }).unwrap();
+        sk.add_relation3d(Relation3d::OnLine { at: (a.clone(), 0), origin: [0.0, 0.0, 0.0], dir: [1.0, 0.0, 0.0] }).unwrap();
+        sk.add_relation3d(Relation3d::InPlane { wire: a.clone(), origin: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0] }).unwrap();
+        sk.add_relation3d(Relation3d::ParallelPlane { wire: b.clone(), normal: [0.0, 0.0, 1.0] }).unwrap();
+        sk.add_relation3d(Relation3d::Angle { a: a.clone(), b: b.clone(), value: 60f64.to_radians() }).unwrap();
+        let (p, q) = line(&sk, &a);
+        let (r, s) = line(&sk, &b);
+        assert!(p.y.abs() < 1e-6 && p.z.abs() < 1e-6, "on the X edge: {p:?}");
+        assert!(q.z.abs() < 1e-6 && r.dist(q) < 1e-6 && (s.z - r.z).abs() < 1e-6, "{q:?} {r:?} {s:?}");
+        let ang = (q - p).cross(s - r).len().atan2((q - p).dot(s - r)).to_degrees();
+        assert!((ang - 60.0).abs() < 1e-4, "{ang}");
+        let i = sk.relations3d.len();
+        sk.add_relation3d(Relation3d::PlaneDistance { at: (b.clone(), 1), origin: [0.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0], value: 0.0 }).unwrap();
+        sk.set_relation3d_value(i, 0.0).unwrap();
+        assert!(line(&sk, &b).1.z.abs() < 1e-6);
+        sk.add_relation3d(Relation3d::Collinear { wire: a.clone(), origin: [0.0, 0.0, 0.0], dir: [1.0, 0.0, 0.0] }).unwrap();
+        let (p, q) = line(&sk, &a);
+        assert!(q.y.abs() < 1e-6 && p.y.abs() < 1e-6);
     }
 
     #[test]

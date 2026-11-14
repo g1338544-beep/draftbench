@@ -19,7 +19,7 @@ thread_local! {
     /// The selection the bar was placed for and where: a new pick moves the bar to the pointer.
     static ANCHOR: std::cell::RefCell<Option<(String, Pos2)>> = const { std::cell::RefCell::new(None) };
     /// A 3D length just added: its relation's place, the text typed, focus wanted.
-    static SIZE: std::cell::RefCell<Option<(usize, String, bool)>> = const { std::cell::RefCell::new(None) };
+    static SIZE: std::cell::RefCell<Option<(usize, String, bool, &'static str)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The relations the current sketch selection allows (empty outside a sketch, while a tool or
@@ -102,11 +102,22 @@ fn wire_items(app: &SolveApp) -> Option<Vec<Item>> {
         return None;
     }
     let drawn = |id: &str| ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i)).filter(|w| w.fit.len() >= 2 && w.link.is_none());
-    let (mut wires, mut vertex, mut face) = (Vec::new(), None, None);
+    let (mut wires, mut vertex, mut face, mut edge) = (Vec::new(), None, None, None);
     for x in &app.session.selection {
         match x {
             Sel::SketchCurve { id } if drawn(id).is_some() => wires.push(id.clone()),
             Sel::Vertex { point, .. } if vertex.is_none() => vertex = Some(*point),
+            // A straight model edge: its line (a point and the way it runs).
+            Sel::Edge { body, index, .. } if edge.is_none() => {
+                let e = st.body(body).and_then(|b| b.mesh().edges.get(*index).cloned())?;
+                let (a, z) = (*e.first()?, *e.last()?);
+                let d = (z - a).normalized()?;
+                let straight = e.iter().all(|q| (*q - a).cross(d).len() < 1e-3 * (z - a).len().max(1.0));
+                if !straight {
+                    return None;
+                }
+                edge = Some((a, d));
+            }
             Sel::Face { body, index, point } if face.is_none() => {
                 let normal = crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| n);
                 face = Some((*point, normal?));
@@ -125,8 +136,9 @@ fn wire_items(app: &SolveApp) -> Option<Vec<Item>> {
         let n = w.fit.len();
         Some(if w.fit.first()?.dist(at) <= w.fit.last()?.dist(at) { 0 } else { n - 1 })
     };
-    Some(match (wires.as_slice(), vertex, face) {
-        ([a], None, None) => {
+    let arr = |v: solidcraft_engine::geom::Vec3| json!([v.x, v.y, v.z]);
+    Some(match (wires.as_slice(), vertex, face, edge) {
+        ([a], None, None, None) => {
             let length = drawn(a).map(|w| w.fit.windows(2).map(|q| q[0].dist(q[1])).sum::<f64>()).unwrap_or(0.0);
             let mut v = vec![
                 rel("Along X", "", json!({"type": "along", "wire": a, "axis": "x"})),
@@ -142,21 +154,58 @@ fn wire_items(app: &SolveApp) -> Option<Vec<Item>> {
             }
             v
         }
-        ([a, b], None, None) => vec![
-            rel("Parallel", "", json!({"type": "parallel", "a": a, "b": b})),
-            rel("Perpendicular", "", json!({"type": "perpendicular", "a": a, "b": b})),
-            rel("Equal", "", json!({"type": "equal", "a": a, "b": b})),
-            rel("Tangent", "", json!({"type": "tangent", "a": a, "b": b})),
-        ],
-        ([a], Some(v), None) => {
-            let i = nearest(a, v)?;
-            vec![rel("Fix to vertex", "", json!({"type": "fix", "at": [a, i], "point": [v.x, v.y, v.z]}))]
-        }
-        ([a], None, Some((at, n))) => {
-            let i = nearest(a, at)?;
+        ([a, b], None, None, None) => {
+            let (wa, wb) = (drawn(a)?, drawn(b)?);
+            let (ua, ub) = (*wa.fit.last()? - *wa.fit.first()?, *wb.fit.last()? - *wb.fit.first()?);
+            let angle = (ua.cross(ub).len()).atan2(ua.dot(ub)).to_degrees();
+            // The two ends nearest each other join.
+            let ends = |w: &solidcraft_engine::sketch::Wire| [(0usize, w.fit[0]), (w.fit.len() - 1, *w.fit.last().unwrap_or(&w.fit[0]))];
+            let (mut best, mut pair) = (f64::INFINITY, (0usize, 0usize));
+            for (i, p) in ends(wa) {
+                for (j, q) in ends(wb) {
+                    if p.dist(q) < best {
+                        best = p.dist(q);
+                        pair = (i, j);
+                    }
+                }
+            }
             vec![
-                rel("On face", "", json!({"type": "on_face", "at": [a, i], "origin": [at.x, at.y, at.z], "normal": [n.x, n.y, n.z]})),
-                rel("Normal to face", "", json!({"type": "normal", "wire": a, "normal": [n.x, n.y, n.z]})),
+                rel("Coincident", "", json!({"type": "coincident", "a": [a, pair.0], "b": [b, pair.1]})),
+                rel("Parallel", "", json!({"type": "parallel", "a": a, "b": b})),
+                rel("Perpendicular", "", json!({"type": "perpendicular", "a": a, "b": b})),
+                rel("Equal", "", json!({"type": "equal", "a": a, "b": b})),
+                rel("Tangent", "", json!({"type": "tangent", "a": a, "b": b})),
+                rel("Angle", "", json!({"type": "angle", "a": a, "b": b, "value": (angle.clamp(0.5, 179.5) * 100.0).round() / 100.0})),
+            ]
+        }
+        ([a], Some(v), None, None) => {
+            let i = nearest(a, v)?;
+            vec![rel("Fix to vertex", "", json!({"type": "fix", "at": [a, i], "point": arr(v)}))]
+        }
+        ([a], None, Some((at, n)), None) => {
+            let i = nearest(a, at)?;
+            let gap = drawn(a).and_then(|w| w.fit.get(i).copied()).map_or(0.0, |q| (q - at).dot(n.normalized().unwrap_or(n)));
+            vec![
+                rel("On face", "", json!({"type": "on_face", "at": [a, i], "origin": arr(at), "normal": arr(n)})),
+                rel("On face (whole line)", "", json!({"type": "in_plane", "wire": a, "origin": arr(at), "normal": arr(n)})),
+                rel("Parallel to face", "", json!({"type": "parallel_face", "wire": a, "normal": arr(n)})),
+                rel("Normal to face", "", json!({"type": "normal", "wire": a, "normal": arr(n)})),
+                rel(
+                    "Distance to face",
+                    "dimension",
+                    json!({"type": "face_distance", "at": [a, i], "origin": arr(at), "normal": arr(n), "value": (gap * 1000.0).round() / 1000.0}),
+                ),
+            ]
+        }
+        ([a], None, None, Some((o, d))) => {
+            let w = drawn(a)?;
+            // The end nearest the edge's line goes onto it.
+            let off = |q: solidcraft_engine::geom::Vec3| (q - o).cross(d).len();
+            let i = if off(*w.fit.first()?) <= off(*w.fit.last()?) { 0 } else { w.fit.len() - 1 };
+            vec![
+                rel("On edge", "", json!({"type": "on_edge", "at": [a, i], "origin": arr(o), "dir": arr(d)})),
+                rel("Parallel to edge", "", json!({"type": "parallel_edge", "wire": a, "dir": arr(d)})),
+                rel("Collinear", "", json!({"type": "collinear", "wire": a, "origin": arr(o), "dir": arr(d)})),
             ]
         }
         _ => return None,
@@ -179,11 +228,15 @@ pub(crate) fn run_wire_item(app: &mut SolveApp, item: &Item) -> Result<(), Strin
     }
     let rel = p.get("rel3d").cloned().ok_or("no relation")?;
     let r = app.run("sketch.relation3d", rel.clone())?;
-    if rel.get("type").and_then(serde_json::Value::as_str) == Some("length")
-        && let Some(index) = r.get("index").and_then(serde_json::Value::as_u64)
-    {
+    let label = match rel.get("type").and_then(serde_json::Value::as_str) {
+        Some("length") => Some("Length (mm)"),
+        Some("angle") => Some("Angle (deg)"),
+        Some("face_distance") => Some("Distance (mm)"),
+        _ => None,
+    };
+    if let (Some(label), Some(index)) = (label, r.get("index").and_then(serde_json::Value::as_u64)) {
         let value = rel.get("value").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-        SIZE.with(|s| *s.borrow_mut() = Some((index as usize, format!("{value}"), true)));
+        SIZE.with(|s| *s.borrow_mut() = Some((index as usize, format!("{value}"), true, label)));
     }
     Ok(())
 }
@@ -196,13 +249,13 @@ pub(crate) fn size_pending() -> Option<usize> {
 
 /// The size box of a 3D length just added: type the length, Enter sets it.
 fn size_box(app: &mut SolveApp, ui: &egui::Ui, at: Pos2) {
-    let Some((index, mut text, mut focus)) = SIZE.with(|s| s.borrow().clone()) else { return };
+    let Some((index, mut text, mut focus, label)) = SIZE.with(|s| s.borrow().clone()) else { return };
     let mut done = false;
     let mut cancel = false;
     Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new("sc_size3d")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
         Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(crate::i18n::tr_label("Length (mm)"));
+                ui.label(crate::i18n::tr_label(label));
                 let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(70.0));
                 if focus {
                     r.request_focus();
@@ -218,20 +271,25 @@ fn size_box(app: &mut SolveApp, ui: &egui::Ui, at: Pos2) {
         });
     });
     if done {
-        let value = app.session.doc.eval(&text, solidcraft_engine::doc::expr::Kind::Length).ok();
+        let kind = if label.starts_with("Angle") { solidcraft_engine::doc::expr::Kind::Angle } else { solidcraft_engine::doc::expr::Kind::Length };
+        // An angle typed as a bare number is degrees; the command takes degrees.
+        let value = match kind {
+            solidcraft_engine::doc::expr::Kind::Angle => text.trim().parse::<f64>().ok().or_else(|| app.session.doc.eval(&text, kind).ok().map(f64::to_degrees)),
+            _ => app.session.doc.eval(&text, kind).ok(),
+        };
         match value {
             Some(v) => {
                 if let Err(e) = app.run("sketch.relation3d_value", serde_json::json!({"index": index, "value": v})) {
                     app.set_status(e, true);
                 }
             }
-            None => app.set_status(crate::i18n::tr_label("Type a length in mm").to_string(), true),
+            None => app.set_status(crate::i18n::tr_label("Type a number").to_string(), true),
         }
         SIZE.with(|s| *s.borrow_mut() = None);
     } else if cancel || app.session.active_sketch.is_none() {
         SIZE.with(|s| *s.borrow_mut() = None);
     } else {
-        SIZE.with(|s| *s.borrow_mut() = Some((index, text, focus)));
+        SIZE.with(|s| *s.borrow_mut() = Some((index, text, focus, label)));
     }
 }
 

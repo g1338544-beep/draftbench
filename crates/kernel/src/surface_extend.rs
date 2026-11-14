@@ -312,6 +312,10 @@ struct Extension<'a> {
     rec: Rebuild,
 }
 
+/// How far an imported face's boundary may lie off its surface (mm): other systems' modelling
+/// tolerance.
+pub(crate) const IMPORT_ACCEPT: f64 = 0.03;
+
 impl<'a> Extension<'a> {
     fn new(body: &'a Body, opts: &'a ExtendOptions<'a>, side: Option<ToolSide>) -> Extension<'a> {
         let size = body.size().max(1e-6);
@@ -361,7 +365,18 @@ impl<'a> Extension<'a> {
         let mut added = Vec::new();
         for (fi, ids) in &picks {
             let face = faces.get(*fi).ok_or_else(|| KernelError::Failed("extend: a face".into()))?;
-            let frame = Frame::new(face, ids, self.accept)?;
+            // Imported faces (STEP from other CAD) have their boundaries on the surface only to
+            // that system's tolerance (often 0.01 to 0.025 mm): the strict check refused them
+            // (owner: "the face's boundary does not lie on its surface"). Then the import
+            // tolerance stands for this extension.
+            let frame = match Frame::new(face, ids, self.accept) {
+                Ok(f) => f,
+                Err(KernelError::Failed(m)) if m.contains("does not lie on its surface") && self.accept < IMPORT_ACCEPT => {
+                    self.accept = IMPORT_ACCEPT;
+                    Frame::new(face, ids, self.accept)?
+                }
+                Err(e) => return Err(e),
+            };
             match self.opts.mode {
                 ExtendMode::Natural => {
                     let extended = self.natural(&frame)?;
@@ -1393,6 +1408,34 @@ mod tests {
             mt::Edge::new(&v[3], &v[0], mt::Curve::Line(mt::Line(v[3].point(), v[0].point()))),
         ];
         surface_body(vec![mt::Face::new(vec![edges.into()], mt::Surface::BSplineSurface(s))])
+    }
+
+    /// Owner (an imported formed part): "the face's boundary does not lie on its surface". A
+    /// face whose far edge lies 0.01 mm off its surface (another system's tolerance) still
+    /// extends, by the import tolerance.
+    #[test]
+    fn a_face_with_its_boundary_off_its_surface_by_an_import_tolerance_extends() {
+        let pt = mt::Point3::new;
+        let off = 0.01;
+        let net = vec![
+            vec![pt(0.0, 0.0, 0.0), pt(0.0, 10.0, 0.0)],
+            vec![pt(5.0, 0.0, 0.0), pt(5.0, 10.0, 0.0)],
+            vec![pt(10.0, 0.0, 5.0), pt(10.0, 10.0, 5.0)],
+        ];
+        let surface = mt::BSplineSurface::new((mt::KnotVec::bezier_knot(2), mt::KnotVec::bezier_knot(1)), net);
+        let v = [pt(0.0, 0.0, 0.0), pt(10.0, 0.0, 5.0 + off), pt(10.0, 10.0, 5.0 + off), pt(0.0, 10.0, 0.0)].map(mt::Vertex::new);
+        let bez =
+            |a: mt::Point3, m: mt::Point3, b: mt::Point3| mt::Curve::BSplineCurve(mt::BSplineCurve::new(mt::KnotVec::bezier_knot(2), vec![a, m, b]));
+        let edges = vec![
+            mt::Edge::new(&v[0], &v[1], bez(pt(0.0, 0.0, 0.0), pt(5.0, 0.0, 0.0), pt(10.0, 0.0, 5.0 + off))),
+            mt::Edge::new(&v[1], &v[2], mt::Curve::Line(mt::Line(v[1].point(), v[2].point()))),
+            mt::Edge::new(&v[2], &v[3], bez(pt(10.0, 10.0, 5.0 + off), pt(5.0, 10.0, 0.0), pt(0.0, 10.0, 0.0))),
+            mt::Edge::new(&v[3], &v[0], mt::Curve::Line(mt::Line(v[3].point(), v[0].point()))),
+        ];
+        let sheet = surface_body(vec![mt::Face::new(vec![edges.into()], mt::Surface::BSplineSurface(surface))]);
+        let before = area(&sheet);
+        let out = extend_surface(&sheet, &[Vec3::new(10.0, 5.0, 5.0 + off)], &natural(3.0)).unwrap();
+        assert!(area(&out) > before + 20.0, "{} after {before}", area(&out));
     }
 
     /// The default (natural, by a distance, neighbours lengthened) on a plane's straight edges

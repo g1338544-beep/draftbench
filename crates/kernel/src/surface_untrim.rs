@@ -60,8 +60,17 @@ pub fn untrim(body: &Body, face: usize, holes: UntrimHoles, outer: bool, in_plac
 /// The face untrimmed (see [`untrim`]).
 fn untrimmed_face(face: &mt::Face, holes: UntrimHoles, outer: bool, size: f64) -> Result<mt::Face> {
     let surface = face.surface();
-    let accept = (size * 1e-5).max(1e-6);
-    let FaceLoops { eval, dom, wires, loops, outer: outer_index } = FaceLoops::of(face, accept, "untrimming")?;
+    let mut accept = (size * 1e-5).max(1e-6);
+    // An imported face's boundary lies on its surface only to the other system's tolerance
+    // (as for Extend): then that tolerance stands.
+    let found = match FaceLoops::of(face, accept, "untrimming") {
+        Err(KernelError::Failed(m)) if m.contains("does not lie on its surface") && accept < crate::surface_extend::IMPORT_ACCEPT => {
+            accept = crate::surface_extend::IMPORT_ACCEPT;
+            FaceLoops::of(face, accept, "untrimming")
+        }
+        other => other,
+    };
+    let FaceLoops { eval, dom, wires, loops, outer: outer_index } = found?;
     let inner: Vec<usize> = (0..wires.len()).filter(|i| *i != outer_index).collect();
     let removed: Vec<usize> = match holes {
         UntrimHoles::All => inner.clone(),
