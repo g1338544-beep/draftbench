@@ -4,7 +4,7 @@
 use solidcraft_engine::CommandSpec;
 use solidcraft_engine::doc::FeatureKind;
 
-pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "MANAGE", "VIEW"];
+pub const TABS: &[&str] = &["MODEL", "SURFACE", "CF", "ASSEMBLE", "MANAGE", "VIEW"];
 
 /// Reading order of the compact, three-column constraint gallery. Icons come from each spec.
 pub const CONSTRAINT_GALLERY: &[&str] = &[
@@ -253,6 +253,8 @@ pub const SECTIONS: &[Section] = &[
         promoted: 2,
         ids: &["view.apply", "view.save", "view.rename", "view.delete", "view.list", "view.navigate"],
     },
+    // Checking fixtures: the block under a part in one step, and the surface tools it is made of.
+    Section { tab: "CF", panel: "FIXTURE", promoted: 1, ids: &["cf.block"] },
     Section { tab: "VIEW", panel: "SELECT", promoted: 0, ids: &[] },
     Section {
         tab: "SKETCH",
@@ -466,6 +468,7 @@ pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("SOLID", "CONFIGURE", "MANAGE", "CONFIGURATIONS"),
     ("SOLID", "INSPECT", "MODEL", "CHECK"),
     ("SOLID", "INSERT", "MODEL", "FILES"),
+    ("SOLID", "CF", "CF", "FIXTURE"),
     ("SURFACE", "CREATE", "SURFACE", "CREATE"),
     ("SURFACE", "MODIFY", "SURFACE", "EDIT"),
     ("SURFACE", "INSPECT", "MODEL", "SURFACE QUALITY"),

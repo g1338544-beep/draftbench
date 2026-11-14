@@ -2072,5 +2072,13 @@
   "update.up_to_date": "SolidCraft is up to date.",
   "update.update_now": "Update now",
   "update.you_have": "You have {version}.",
-  "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ choose · Enter / Tab complete · Esc dismiss"
+  "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ choose · Enter / Tab complete · Esc dismiss",
+  "cmd.cf_block": "CF Block",
+  "CF BLOCK": "CF BLOCK",
+  "Gap (block to part)": "Gap (block to part)",
+  "Margin past the faces": "Margin past the faces",
+  "Base height Z (optional)": "Base height Z (optional)",
+  "20 mm under the faces": "20 mm under the faces",
+  "Other side of the faces": "Other side of the faces",
+  "Part faces the block supports": "Part faces the block supports"
 }

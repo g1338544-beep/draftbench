@@ -22,6 +22,7 @@ macro_rules! planned {
 
 mod bom;
 mod browser;
+mod cf;
 pub mod drawing_symbols;
 mod layers;
 pub(crate) mod clearance;
@@ -272,6 +273,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_ends::COMMANDS.iter());
     v.extend(sketch_canvas::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
+    v.extend(cf::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());
     v.extend(surface::COMMANDS.iter());

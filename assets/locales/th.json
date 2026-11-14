@@ -1064,5 +1064,13 @@
   "ui.y_up": "Y ขึ้น",
   "ui.z_up": "Z ขึ้น",
   "ui.zoom": "ซูม",
-  "ui.zoom_to_the_cursor": "ซูมไปที่เคอร์เซอร์"
+  "ui.zoom_to_the_cursor": "ซูมไปที่เคอร์เซอร์",
+  "cmd.cf_block": "CF Block (ก้อนรองชิ้นงาน)",
+  "CF BLOCK": "CF BLOCK (ก้อนรองชิ้นงาน)",
+  "Gap (block to part)": "ระยะห่าง (ก้อนถึงชิ้นงาน)",
+  "Margin past the faces": "เผื่อขอบเลยผิว",
+  "Base height Z (optional)": "ความสูงฐาน Z (ไม่ใส่ก็ได้)",
+  "20 mm under the faces": "ต่ำกว่าผิว 20 มม.",
+  "Other side of the faces": "อีกด้านของผิว",
+  "Part faces the block supports": "ผิวชิ้นงานที่ก้อนรองรับ"
 }
