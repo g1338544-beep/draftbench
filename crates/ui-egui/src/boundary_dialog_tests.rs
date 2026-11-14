@@ -125,3 +125,29 @@ fn curves_that_meet_are_one_chain() {
     h.app.run("surface.boundary", p.clone()).unwrap();
     assert_eq!(h.app.session.world_state().bodies.len(), 1);
 }
+
+/// Owner (checking fixtures): extend a sheet's whole rim in one click. A face picked in
+/// Extend takes all its open edges: a 20 × 10 sheet grown 5 all round is 30 × 20.
+#[test]
+fn extend_takes_a_picked_faces_whole_rim() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Edge"})).unwrap();
+    let r = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]]})).unwrap();
+    let line = r["created"]["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch":"Edge","curves":[line],"distance":10})).unwrap();
+    h.app.start("surface.extend");
+    let mut d = h.app.dialog.clone().unwrap();
+    let face = crate::dialogs::face_sel(&h.app.session, solidcraft_engine::geom::Vec3::new(10.0, 0.0, 5.0)).unwrap();
+    d.pick(&h.app.session, face);
+    if let Kind::Surface(crate::dialogs_surface::Surf::Extend { distance, .. }) = &mut d.kind {
+        *distance = "5 mm".into();
+    }
+    let cmds = crate::dialogs::apply_commands(&h.app, &d).unwrap();
+    assert_eq!(cmds[0].1["edges"].as_array().map(Vec::len), Some(4), "{:?}", cmds[0].1);
+    for (id, p) in cmds {
+        h.app.run(&id, p).unwrap();
+    }
+    h.step(&json!({"expect": {"area": 600}})).unwrap();
+}

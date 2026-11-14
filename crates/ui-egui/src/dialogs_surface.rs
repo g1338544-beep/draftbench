@@ -36,7 +36,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             symmetric: bool = false => *symmetric,
             operation: usize = 0 => op_index(operation),
         } => json!({"thickness": thickness, "symmetric": symmetric, "operation": OPS.get(*operation).copied().unwrap_or("new")});
-        Extend("surface.extend", "EXTEND", [("Edges", EDGES, true), ("Up to (point, face or plane)", VERTICES | FACES | PLANES | ORIGIN, false)],
+        Extend("surface.extend", "EXTEND", [("Edges", EDGES | FACES, true), ("Up to (point, face or plane)", VERTICES | FACES | PLANES | ORIGIN, false)],
             FeatureKind::SurfaceExtend { distance, mode, up_to, .. }) {
             distance: String = "10 mm".into() => distance.to_string(),
             mode: usize = 0 => match mode {
@@ -753,9 +753,35 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
         }
         Surf::Extend { end, .. } => {
             need(0, "the edges to extend")?;
-            let body =
-                items(inputs, 0).iter().find_map(|x| if let Sel::Edge { body, .. } = x { Some(body.clone()) } else { None }).unwrap_or_default();
-            let edges: Vec<Value> = items(inputs, 0).edge_points().into_iter().map(pt).collect();
+            let body = items(inputs, 0)
+                .iter()
+                .find_map(|x| match x {
+                    Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let mut points = items(inputs, 0).edge_points();
+            // A face picked: all its open edges at once (owner: extend a part's whole rim in one
+            // click, for checking fixtures).
+            let st = app.session.world_state();
+            for x in items(inputs, 0) {
+                if let Sel::Face { body: b, index, .. } = x
+                    && let Some(found) = st.body(b)
+                {
+                    let m = found.mesh();
+                    for e in m.face_edges(*index as u32) {
+                        let open = m.edge_faces.get(e).is_some_and(|fs| fs.len() == 1);
+                        if let Some(line) = m.edges.get(e).filter(|l| open && m.edge_pickable(e) && l.len() >= 2) {
+                            points.push(crate::selection::polyline_mid(line));
+                        }
+                    }
+                }
+            }
+            drop(st);
+            if points.is_empty() {
+                return Err("the face has no open edge to extend (an edge between two faces can't be extended)".into());
+            }
+            let edges: Vec<Value> = points.into_iter().map(pt).collect();
             let mut p = json!({"body": body, "edges": edges});
             match *end {
                 1 => {

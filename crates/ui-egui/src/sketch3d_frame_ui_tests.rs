@@ -231,6 +231,7 @@ fn three_d_sketch_command_draws_a_visible_line_between_model_corners() {
 fn picked_3d_lines_offer_their_relations_and_a_size_box() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [50, 0, 0]})).unwrap();
     h.app.run("sketch.create3d", json!({})).unwrap();
     h.app.tool = None;
     let made = h.app.run("sketch.line3d", json!({"points": [[0, 0, 0], [1, 2, 30], [12, 2, 31]]})).unwrap();
@@ -257,7 +258,6 @@ fn picked_3d_lines_offer_their_relations_and_a_size_box() {
     h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a.clone() }];
     assert!(labels(&h).contains(&"Remove relations".to_string()), "a curve with relations can lose them");
     // A line and a model face; a line and a straight model edge (owner: relations to the part).
-    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [50, 0, 0]})).unwrap();
     let face = crate::dialogs::face_sel(&h.app.session, Vec3::new(60.0, 10.0, 10.0)).unwrap();
     h.app.session.selection = vec![solidcraft_engine::Sel::SketchCurve { id: a.clone() }, face];
     assert_eq!(labels(&h), ["On face", "On face (whole line)", "Parallel to face", "Normal to face", "Distance to face"]);
