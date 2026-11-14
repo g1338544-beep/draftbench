@@ -13,6 +13,7 @@
   "BOUNDARY SURFACE": "พื้นผิวตามขอบเขต",
   "BROWSER": "เบราว์เซอร์",
   "Base height Z (optional)": "ความสูงฐาน Z (ไม่ใส่ก็ได้)",
+  "Block thickness past the gap": "ความหนาก้อน (ถัดจากระยะห่าง)",
   "Bodies": "ชิ้นงาน",
   "Body": "ชิ้นงาน",
   "Boundary": "ขอบเขต",

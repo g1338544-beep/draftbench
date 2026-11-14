@@ -112,12 +112,12 @@ crate::dialog_descriptor::dialog_descriptors! {
                 in_place: bool,
             },
             SplitFace,
-            /// CF Block: the block under the picked faces, `gap` off them (`base`: its bottom's
-            /// Z, empty for 20 mm under the faces).
+            /// CF Block: the block on the picked faces' outer side, `gap` off them, `depth` past
+            /// that, square to their mean normal.
             CfBlock {
                 gap: String,
                 margin: String,
-                base: String,
+                depth: String,
                 flip: bool,
             },
         }
@@ -244,7 +244,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.trim" => Surf::Trim { extend: false, stitch: false, direction: None, remove: false, mutual: false },
         "surface.untrim" => Surf::Untrim { holes: 0, outer: false, in_place: false },
         "solid.split_face" | "solid.split_line" => Surf::SplitFace,
-        "cf.block" => Surf::CfBlock { gap: "3 mm".into(), margin: "5 mm".into(), base: String::new(), flip: false },
+        "cf.block" => Surf::CfBlock { gap: "3 mm".into(), margin: "5 mm".into(), depth: "20 mm".into(), flip: false },
         _ => Surf::simple_start(id)?.0,
     };
     let i = inputs(&k);
@@ -307,10 +307,10 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
                 ui_kit::segmented(ui, direction, &EXTRUDE_SIDES.map(|(label, _)| label), Default::default());
             });
         }
-        Surf::CfBlock { gap, margin, base, flip } => {
+        Surf::CfBlock { gap, margin, depth, flip } => {
             enter |= expr_row(ui, "Gap (block to part)", gap);
             enter |= expr_row(ui, "Margin past the faces", margin);
-            enter |= hint_row(ui, "Base height Z (optional)", base, "20 mm under the faces");
+            enter |= expr_row(ui, "Block thickness past the gap", depth);
             ui_kit::options(ui, "cf_block_options", &mut [("Other side of the faces", flip)]);
         }
         Surf::Untrim { holes, outer, in_place } => {
@@ -911,11 +911,11 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
             ("surface.untrim", p)
         }
-        Surf::CfBlock { gap, margin, base, flip } => {
+        Surf::CfBlock { gap, margin, depth, flip } => {
             need(0, "the part's faces")?;
             let (body, faces) = body_and_faces(items(inputs, 0))?;
             let mut p = json!({"body": body, "faces": faces, "flip": flip});
-            for (key, v) in [("gap", gap), ("margin", margin), ("base", base)] {
+            for (key, v) in [("gap", gap), ("margin", margin), ("depth", depth)] {
                 if !v.trim().is_empty() {
                     p[key] = json!(v);
                 }
