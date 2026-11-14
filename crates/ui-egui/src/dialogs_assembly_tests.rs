@@ -1017,3 +1017,27 @@ fn a_slots_face_gives_its_centre_line() {
     let arc = crate::dialogs_assembly::slot_centre_line(&mesh(ring), 0).unwrap();
     assert!(arc.iter().all(|q| ((q.x * q.x + q.y * q.y).sqrt() - 50.0).abs() < 1.0), "on the radius-50 arc: {arc:?}");
 }
+
+/// Owner's ribbon plan: Joint and As-Built Joint are one dialog, its Placement switching
+/// between them with the parts kept; Motion Link's type opens the gear, rack, screw and cam
+/// links; with too few joints it says what to do and offers to make one.
+#[test]
+fn joint_placement_and_motion_link_type_switch_dialogs() {
+    let mut h = crate::scenario::Harness::new();
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30)], |id, p| {
+        h.app.run(id, p).unwrap();
+    });
+    h.settle();
+    h.app.session.selection = ["Body1", "Body2"].iter().map(|b| Sel::Body { name: b.to_string() }).collect();
+    h.app.start("joint.create");
+    crate::dialogs_assembly::SWITCH.with(|c| c.set(Some("joint.as_built")));
+    h.frames(2);
+    let d = h.app.dialog.as_ref().expect("a joint dialog");
+    assert!(matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built), "now As-Built");
+    h.app.start("joint.motion_link");
+    h.frames(2);
+    assert!(h.widget("Make a joint").is_some(), "offers to make the joints first");
+    crate::dialogs_assembly::SWITCH.with(|c| c.set(Some("joint.gear")));
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| crate::dialogs_dense::command(&d.kind) == Some("joint.gear")), "the gear link");
+}

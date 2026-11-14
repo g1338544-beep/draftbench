@@ -147,21 +147,25 @@ pub const SECTIONS: &[Section] = &[
         ],
     },
     Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert"] },
+    // The Assemble tab, simplified (owner's plan, approved): few buttons on the ribbon, the
+    // rest one click away in each panel's list. Joint and As-Built Joint are one dialog (its
+    // Placement), and Motion Link lists the gear, rack, screw and cam links.
     Section {
         tab: "ASSEMBLE",
         panel: "COMPONENTS",
-        promoted: 4,
-        ids: &["component.create", "component.from_bodies", "component.insert_design", "parts.library"],
+        promoted: 2,
+        ids: &["component.create", "component.insert_design", "component.from_bodies", "parts.library"],
     },
     Section {
         tab: "ASSEMBLE",
         panel: "JOINTS",
-        promoted: 4,
+        promoted: 3,
         ids: &[
             "joint.create",
+            "joint.motion_link",
+            "joint.rigid_group",
             "joint.as_built",
             "joint.origin",
-            "joint.rigid_group",
             "joint.limits",
             "joint.gear",
             "joint.rack_pinion",
@@ -173,20 +177,15 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "ASSEMBLE",
         panel: "POSITION",
-        promoted: 3,
+        promoted: 2,
         ids: &["occurrence.ground", "component.capture_position", "component.revert_position"],
     },
-    Section {
-        tab: "ASSEMBLE",
-        panel: "MOTION",
-        promoted: 4,
-        ids: &["joint.drive", "joint.motion_link", "motion.study", "motion.trace", "explode.create"],
-    },
+    Section { tab: "ASSEMBLE", panel: "MOTION", promoted: 3, ids: &["joint.drive", "motion.study", "explode.create", "motion.trace"] },
     Section {
         tab: "ASSEMBLE",
         panel: "CONTACT",
-        promoted: 2,
-        ids: &["contact.enable_sets", "contact.check", "contact.enable_all", "contact.disable_all", "contact.create", "contact.edit", "contact.list"],
+        promoted: 1,
+        ids: &["contact.check", "contact.enable_sets", "contact.enable_all", "contact.disable_all", "contact.create", "contact.edit", "contact.list"],
     },
     Section {
         tab: "MODEL",

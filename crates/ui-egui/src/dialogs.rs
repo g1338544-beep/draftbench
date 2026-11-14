@@ -2898,6 +2898,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(id) = then_start {
         app.start(id);
     }
+    // Joint ⇄ As-Built Joint: the other one, with the parts picked so far.
+    if let Some(id) = crate::dialogs_assembly::SWITCH.with(std::cell::Cell::take) {
+        let parts: Vec<Sel> = app
+            .dialog
+            .take()
+            .map(|d| d.inputs.iter().take(2).flat_map(|i| i.items.iter()).filter_map(|x| crate::dialogs_assembly::body_of(x).map(|b| Sel::Body { name: b.to_string() })).collect())
+            .unwrap_or_default();
+        let mut seen = std::collections::HashSet::new();
+        app.session.selection = parts.into_iter().filter(|x| seen.insert(format!("{x:?}"))).collect();
+        app.start(id);
+    }
 }
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.

@@ -103,6 +103,12 @@ pub fn sync_inputs(d: &mut crate::dialogs::Dialog) {
         _ => {}
     }
 }
+thread_local! {
+    /// The joint command the Joint dialog's Placement switched to: started on the dialog's next
+    /// close, with the parts picked so far selected.
+    pub(crate) static SWITCH: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
 /// What a joint origin input accepts (snaps on faces, edges and vertices).
 pub const SNAPS: u16 = FACES | EDGES | VERTICES;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
@@ -619,6 +625,15 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             crate::ui_kit::options(ui, "component_options", &mut [("Activate", activate)]);
         }
         Asm::Joint(f) => {
+            // Joint and As-Built Joint are one button (owner's ribbon plan): how the parts are
+            // placed switches between them, keeping the parts picked.
+            if f.editing.is_none() {
+                let mut how = usize::from(f.as_built);
+                choice_row(ui, "Placement", "jt_placement", &mut how, &["Match two points", "As they are now"]);
+                if how != usize::from(f.as_built) {
+                    SWITCH.with(|c| c.set(Some(if how == 1 { "joint.as_built" } else { "joint.create" })));
+                }
+            }
             // As-built: both parts picked (pre-selected), the position comes next.
             if f.as_built && *active == 0 && (0..2).all(|i| !sel_items(inputs, i).is_empty()) {
                 *active = 2;
@@ -888,12 +903,29 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             }
         }
         Asm::MotionLink { a, b, ia, ib, ratio, offset } => {
+            // One Motion Link button for every kind of link (owner's ribbon plan): the gear, rack,
+            // screw and cam links are its other types.
+            let mut link = 0usize;
+            choice_row(ui, "Link type", "ml_type", &mut link, &["Ratio (two joints)", "Gear", "Rack and Pinion", "Screw", "Cam"]);
+            if link != 0 {
+                SWITCH.with(|c| c.set(["joint.motion_link", "joint.gear", "joint.rack_pinion", "joint.screw", "joint.cam"].get(link).copied()));
+            }
             let s = &app.session;
             let joints = &s.doc.assembly.joints;
             if joints.len() < 2 {
-                form_row(ui, "", |ui| {
-                    ui.label(RichText::new(crate::i18n::tr_label("needs two joints")).color(t.text_dim));
-                });
+                // Owner: "needs two joints" said nothing about what to do.
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(crate::i18n::tr_label(
+                            "A motion link makes one joint move another (turn this, that slides). Make the two joints first, e.g. a Revolute for the wheel and a Slider for the rack, then come back here.",
+                        ))
+                        .color(t.text_dim),
+                    )
+                    .wrap(),
+                );
+                if crate::ui_kit::button(ui, crate::i18n::tr_label("Make a joint"), crate::ui_kit::Button::Normal).clicked() {
+                    SWITCH.with(|c| c.set(Some("joint.create")));
+                }
                 return false;
             }
             let labels: Vec<&str> = joints.iter().map(|j| j.name.as_str()).collect();
