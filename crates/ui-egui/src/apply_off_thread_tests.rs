@@ -139,3 +139,38 @@ fn inputs_changed_while_ok_computes_are_computed_off_the_thread_too() {
     assert_eq!(h.app.session.doc.features.len(), features + 1);
     h.step(&json!({"expect": {"bodies": 1, "volume": 13000}})).unwrap();
 }
+
+/// Owner: on the Surface tab, another command did not take over from the one still computing
+/// after OK. Starting another command drops the result still computing (as Cancel does): the
+/// new command's dialog opens and stays, and nothing of the old one lands in it.
+#[test]
+fn another_command_takes_over_from_one_still_computing() {
+    let mut h = square_on_a_block();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    let (finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let features = h.app.session.doc.features.len();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.applying.is_some());
+    h.app.start("surface.offset");
+    assert!(h.app.applying.is_none(), "the old result is dropped");
+    finish.send(()).unwrap();
+    h.frames(5);
+    let shown = h.app.dialog.as_ref().map(|d| format!("{:?}", d.kind));
+    assert!(shown.as_deref().is_some_and(|k| k.contains("Offset")), "the new command's dialog stays: {shown:?}");
+    assert_eq!(h.app.session.doc.features.len(), features, "nothing of the old one was applied");
+}
+
+/// Editing a feature rolls the model back to it; starting another command then puts the
+/// timeline marker back, instead of leaving the model rolled back under the new command.
+#[test]
+fn another_command_ends_an_edit_and_puts_the_marker_back() {
+    let mut h = square_on_a_block();
+    crate::dialogs::cancel(&mut h.app);
+    let extrude = h.app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Extrude { .. })).map(|f| f.id).unwrap();
+    let before = h.app.session.doc.marker;
+    h.app.edit_feature(extrude);
+    assert_ne!(h.app.session.doc.marker, before, "the edit rolled the model back");
+    h.app.start("surface.offset");
+    assert_eq!(h.app.session.doc.marker, before, "the marker is back where it was");
+}

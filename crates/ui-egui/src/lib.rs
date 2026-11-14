@@ -928,6 +928,16 @@ impl SolveApp {
 
     /// Start a command the way a toolbar click does: interactive tools and dialogs for commands
     /// that have them, otherwise run it with defaults.
+    /// Another command takes over: the open dialog is closed the way Cancel closes it (owner:
+    /// on the Surface tab another command did not take over). A result still computing after
+    /// OK is dropped, so it cannot land in the next dialog, and an edit puts the timeline marker
+    /// back instead of leaving the model rolled back.
+    fn leave_dialog(&mut self) {
+        if self.dialog.is_some() || self.applying.is_some() {
+            dialogs::cancel(self);
+        }
+    }
+
     pub fn start(&mut self, id: &str) {
         if id == "ui.palette" {
             shortcut_box::open(self, None);
@@ -1149,6 +1159,7 @@ impl SolveApp {
         if id == "sketch.project_to_surface"
             && let Some(d) = dialogs::Dialog::for_command(self, id)
         {
+            self.leave_dialog();
             self.dialog = Some(d);
             self.set_status("Project Curve: pick the curves, then the face to project onto; choose the direction and press OK", false);
             return;
@@ -1204,6 +1215,7 @@ impl SolveApp {
                     .collect();
                 let _ = self.session.execute("select.clear", &json!({}));
             }
+            self.leave_dialog();
             self.tool = Some(t);
             self.set_status(tools::hint(id), false);
             return;
@@ -1213,6 +1225,7 @@ impl SolveApp {
             if d.wants_picks() && !self.session.selection.is_empty() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
+            self.leave_dialog();
             self.dialog = Some(d);
             // The prompt line says what to click, the way a mate asks for its two faces.
             let prompt = match id {
