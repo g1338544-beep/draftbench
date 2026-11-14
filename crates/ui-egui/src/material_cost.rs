@@ -72,7 +72,7 @@ fn baht(v: f64) -> String {
     let digits: Vec<char> = int.chars().collect();
     let mut out = String::new();
     for (i, c) in digits.iter().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 && *c != '-' {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) && *c != '-' {
             out.push(',');
         }
         out.push(*c);
@@ -191,6 +191,6 @@ mod tests {
         assert_eq!(p["size"], json!([100.0, 200.0, 20.0]));
         assert_eq!(p["price_per_kg"], json!(50.0));
         let r = app.session.execute("cf.material_cost", &p).unwrap();
-        assert!((r["price"].as_f64().unwrap() - 3.14 * 50.0).abs() < 1e-6, "{r}");
+        assert!((r["price"].as_f64().unwrap() - 0.4 * 7.85 * 50.0).abs() < 1e-6, "{r}");
     }
 }

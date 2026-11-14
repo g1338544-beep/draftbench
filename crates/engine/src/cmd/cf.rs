@@ -206,7 +206,7 @@ fn build(s: &mut Session, p: &Value) -> Result<Value> {
             && let Some([a, b, c]) = tri(t)
         {
             let n = (b - a).cross(c - a);
-            sum = sum + n;
+            sum += n;
             area += n.len();
             if let Some(u) = n.normalized() {
                 normals.push(u);
@@ -460,7 +460,7 @@ fn trimline_steps(s: &mut Session, p: &Value) -> Result<Value> {
                 // Small steps follow a curved face.
                 let steps = ((g / 0.5).ceil() as usize).clamp(1, 40);
                 for _ in 0..steps {
-                    q = q + dir * (g / steps as f64);
+                    q += dir * (g / steps as f64);
                     if let Some((on, _)) = nearest(q) {
                         q = on;
                     }
@@ -519,18 +519,6 @@ fn trim_number(v: f64) -> String {
     t.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// The point `at` along a polyline.
-fn at_length(pts: &[Vec3], at: f64) -> Option<Vec3> {
-    let mut left = at;
-    for w in pts.windows(2) {
-        let l = w[0].dist(w[1]);
-        if left <= l && l > 0.0 {
-            return Some(w[0] + (w[1] - w[0]) * (left / l));
-        }
-        left -= l;
-    }
-    pts.last().copied()
-}
 
 /// Close a surface's small holes (owner: "close the small gaps, holes and notches automatically
 /// for CF work"): each face's closed inner loops no larger than `up_to` across, untrimmed in
@@ -621,8 +609,7 @@ fn closed_loops(mut parts: Vec<Vec<Vec3>>) -> Vec<Vec<Vec3>> {
     let mut out = Vec::new();
     while !parts.is_empty() {
         let mut line = parts.remove(0);
-        loop {
-            let (Some(head), Some(tail)) = (line.first().copied(), line.last().copied()) else { break };
+        while let (Some(head), Some(tail)) = (line.first().copied(), line.last().copied()) {
             if head.dist(tail) < tol && line.len() > 2 {
                 out.push(line);
                 break;
@@ -730,10 +717,11 @@ mod tests {
     fn material_cost_from_a_size_or_a_body() {
         let mut s = Session::default();
         let r = s.execute("cf.material_cost", &json!({"material": "ss400", "size": [100, 200, 20]})).unwrap();
-        assert!((r["mass_kg"].as_f64().unwrap() - 3.14).abs() < 1e-9, "{r}");
+        let kg = 0.4 * 7.85;
+        assert!((r["mass_kg"].as_f64().unwrap() - kg).abs() < 1e-9, "{r}");
         assert!((r["price"].as_f64().unwrap() - 109.9).abs() < 1e-6, "{r}");
         let r = s.execute("cf.material_cost", &json!({"material": "ss400", "size": [100, 200, 20], "quantity": 2, "price_per_kg": 40})).unwrap();
-        assert!((r["price"].as_f64().unwrap() - 3.14 * 2.0 * 40.0).abs() < 1e-6, "{r}");
+        assert!((r["price"].as_f64().unwrap() - kg * 2.0 * 40.0).abs() < 1e-6, "{r}");
         s.execute("solid.box", &json!({"length": 50, "width": 30, "height": 10})).unwrap();
         let r = s.execute("cf.material_cost", &json!({"material": "al6061", "bodies": ["Body1"], "margin": 2})).unwrap();
         // Stock 34 × 54 × 14 of aluminium (2.7 g/cm³).

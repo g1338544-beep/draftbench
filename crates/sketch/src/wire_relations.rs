@@ -464,13 +464,13 @@ impl Sketch {
             // (JᵀJ + (λ + ε) I) δ = -Jᵀr, held coordinates kept (δ = 0).
             let mut a = Mat::zeros(n, n);
             let mut g = vec![0.0; n];
-            for row in 0..m {
-                for i in 0..n {
+            for (row, rr) in r.iter().enumerate().take(m) {
+                for (i, gi) in g.iter_mut().enumerate() {
                     let ji = jac.get(row, i);
                     if ji == 0.0 {
                         continue;
                     }
-                    g[i] += ji * r[row];
+                    *gi += ji * rr;
                     for j in 0..n {
                         let jj = jac.get(row, j);
                         if jj != 0.0 {

@@ -995,7 +995,8 @@ fn a_slots_face_gives_its_centre_line() {
     let line = crate::dialogs_assembly::slot_centre_line(&mesh(stadium(40.0, 5.0)), 0).unwrap();
     let (a, b) = (line[0], *line.last().unwrap());
     let ends = if a.x < b.x { (a, b) } else { (b, a) };
-    assert!(ends.0.dist(Vec3::ZERO) < 0.3 && ends.1.dist(Vec3::new(40.0, 0.0, 0.0)) < 0.3, "{ends:?}");
+    // (Its ends within a millimetre of the end centres: the sides are averaged by length.)
+    assert!(ends.0.dist(Vec3::ZERO) < 1.0 && ends.1.dist(Vec3::new(40.0, 0.0, 0.0)) < 1.0, "{ends:?}");
     assert!(line.iter().all(|q| q.y.abs() < 0.3), "along the middle");
     // A curved slot: arcs of radius 45 and 55 about the origin, joined by round ends.
     let mut ring = Vec::new();

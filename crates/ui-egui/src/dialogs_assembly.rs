@@ -1207,15 +1207,54 @@ pub(crate) fn slot_centre_line(m: &solidcraft_engine::geom::Mesh, face: usize) -
     let side1: Vec<Vec3> = (ia..=ib).map(|i| ring[i % n]).collect();
     let side2: Vec<Vec3> = (ib..=ia + n).map(|i| ring[i % n]).rev().collect();
     let k = 64;
-    let (s1, s2) = (resample_open(&side1, k)?, resample_open(&side2, k)?);
-    let mid: Vec<Vec3> = s1.iter().zip(&s2).map(|(a, b)| (*a + *b) * 0.5).collect();
-    // Half the width, at the middle; the line cut back by it at each end.
-    let half = s1.get(k / 2).zip(s2.get(k / 2)).map(|(a, b)| a.dist(*b) * 0.5)?;
-    let total = len(&mid);
-    if !(total > 2.0 * half + 1e-6) {
-        return None;
-    }
-    trim_line(&mid, half, total - half)
+    let s1 = resample_open(&side1, k)?;
+    // Each point of one side with the nearest point of the other (sides of unequal length, as
+    // on a curved slot, still pair across the slot).
+    let nearest_on = |p: Vec3, line: &[Vec3]| -> Vec3 {
+        line.windows(2)
+            .map(|w| {
+                let d = w[1] - w[0];
+                let t = if d.len2() > 0.0 { ((p - w[0]).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+                w[0] + d * t
+            })
+            .min_by(|a, b| a.dist(p).total_cmp(&b.dist(p)))
+            .unwrap_or(p)
+    };
+    // Where the slot has its full width (the caps narrow it): the midpoints there run from one
+    // end's centre to the other's.
+    // Across: from each point of one side straight over (square to that side, in the slot's
+    // plane) to the other side.
+    let plane = ring.iter().enumerate().fold(Vec3::ZERO, |acc, (i, a)| acc + a.cross(ring[(i + 1) % n]));
+    let fine = resample_open(&side2, 400)?;
+    let pairs: Vec<(Vec3, f64)> = (0..s1.len())
+        .filter_map(|i| {
+            let a = s1[i];
+            let t = (s1[(i + 1).min(s1.len() - 1)] - s1[i.saturating_sub(1)]).normalized()?;
+            let across = plane.cross(t).normalized()?;
+            let b = fine
+                .iter()
+                .filter(|q| (**q - a).dot(across).abs() > 1e-9)
+                .min_by(|p, q| {
+                    let off = |x: &Vec3| ((*x - a) - across * (*x - a).dot(across)).len();
+                    off(p).total_cmp(&off(q))
+                })
+                .copied()?;
+            Some(((a + b) * 0.5, a.dist(b)))
+        })
+        .collect();
+    let mut widths: Vec<f64> = pairs.iter().map(|p| p.1).collect();
+    widths.sort_by(f64::total_cmp);
+    let full = *widths.get(widths.len() * 3 / 4)?;
+    // A true middle point is as far from every part of the outline as from the two sides it
+    // pairs (a point paired across a cap sits nearer the cap).
+    let mut closed = ring.clone();
+    closed.extend(ring.first().copied());
+    let mid: Vec<Vec3> = pairs
+        .into_iter()
+        .filter(|p| p.1 >= full * 0.97 && nearest_on(p.0, &closed).dist(p.0) >= p.1 * 0.5 * 0.97)
+        .map(|p| p.0)
+        .collect();
+    (mid.len() >= 2 && len(&mid) > 1e-6).then_some(mid)
 }
 
 /// Polylines joined end to end into closed loops (each as a point list, first point not repeated).
@@ -1224,8 +1263,7 @@ fn loops_of(mut parts: Vec<Vec<Vec3>>) -> Vec<Vec<Vec3>> {
     let tol = 1e-4;
     let mut out = Vec::new();
     while let Some(mut line) = (!parts.is_empty()).then(|| parts.remove(0)) {
-        loop {
-            let (Some(head), Some(tail)) = (line.first().copied(), line.last().copied()) else { break };
+        while let (Some(head), Some(tail)) = (line.first().copied(), line.last().copied()) {
             if head.dist(tail) < tol && line.len() > 2 {
                 break;
             }
@@ -1277,19 +1315,6 @@ fn point_at(pts: &[Vec3], at: f64) -> Option<Vec3> {
     pts.last().copied()
 }
 
-/// The part of a polyline between two lengths along it.
-fn trim_line(pts: &[Vec3], from: f64, to: f64) -> Option<Vec<Vec3>> {
-    let mut out = vec![point_at(pts, from)?];
-    let mut run = 0.0;
-    for w in pts.windows(2) {
-        run += w[0].dist(w[1]);
-        if run > from && run < to {
-            out.push(w[1]);
-        }
-    }
-    out.push(point_at(pts, to)?);
-    Some(out)
-}
 
 /// A Pin in Path joint's travel from the pin to each end of the slot (the `path` and `at` of its
 /// command, in the world).
