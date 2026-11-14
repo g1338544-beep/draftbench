@@ -255,6 +255,22 @@ pub const SECTIONS: &[Section] = &[
     },
     // Checking fixtures: the block under a part in one step, and the surface tools it is made of.
     Section { tab: "CF", panel: "FIXTURE", promoted: 1, ids: &["cf.block"] },
+    // The part's surface made ready: offset, extended, holes and notches closed, joined.
+    Section {
+        tab: "CF",
+        panel: "PREPARE",
+        promoted: 3,
+        ids: &["surface.extend", "surface.untrim", "surface.patch", "surface.offset", "surface.stitch", "surface.trim", "construct.plane.offset"],
+    },
+    // The block shaped by hand: cut by the surface, split, made solid from a sheet.
+    Section {
+        tab: "CF",
+        panel: "BLOCK",
+        promoted: 2,
+        ids: &["solid.trim_body", "surface.thicken", "solid.bounding_solid", "solid.trim_by_surface", "solid.split_by_surface", "solid.split_body"],
+    },
+    // The fixture against the part: gaps, sections, the part's changes.
+    Section { tab: "CF", panel: "CHECK", promoted: 3, ids: &["inspect.clearance", "inspect.section", "inspect.measure", "inspect.compare", "inspect.continuity"] },
     Section { tab: "VIEW", panel: "SELECT", promoted: 0, ids: &[] },
     Section {
         tab: "SKETCH",
