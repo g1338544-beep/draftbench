@@ -198,8 +198,8 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         Surf::Sweep(_) => {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
             vec![
-                SelInput::new("Profiles or curves", PROFILES | CURVES, true),
-                SelInput::new("Path", CURVES, true),
+                SelInput::new("Section (profile or curves)", PROFILES | CURVES, true),
+                SelInput::new("Path (sketch curves or model edges)", CURVES | EDGES, true),
                 crate::dialogs_sweep::direction_input(),
                 rail,
                 rail2,
@@ -207,7 +207,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         }
         Surf::Loft { .. } => {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
-            vec![SelInput::new("Sections (one sketch each)", PROFILES | CURVES, true), rail, rail2]
+            vec![SelInput::new("Cross-sections (a sketch each, or model edges)", PROFILES | CURVES | EDGES, true), rail, rail2]
         }
         Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
         Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
@@ -606,9 +606,22 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             need(1, "the path")?;
             let mut p = sheet_picks(app, items(inputs, 0))?;
             let path: Vec<String> = items(inputs, 1).curve_ids();
-            p["path_sketch"] =
-                json!(crate::dialogs::curves_sketch(app, &path, p["sketch"].as_u64()).ok_or("the path curves must be in one other sketch")?);
-            p["path"] = json!(path);
+            let edges: Vec<(String, Vec3)> = items(inputs, 1)
+                .iter()
+                .filter_map(|x| if let Sel::Edge { body, point, .. } = x { Some((body.clone(), *point)) } else { None })
+                .collect();
+            if !edges.is_empty() {
+                // Model edges: the sweep takes them into a 3D sketch of its own.
+                if !path.is_empty() {
+                    return Err("pick the path as sketch curves or as model edges, not both".into());
+                }
+                p["path_edges"] = json!(edges.iter().map(|(_, q)| pt(*q)).collect::<Vec<_>>());
+                p["path_body"] = json!(edges[0].0);
+            } else {
+                p["path_sketch"] =
+                    json!(crate::dialogs::curves_sketch(app, &path, p["sketch"].as_u64()).ok_or("the path curves must be in one other sketch")?);
+                p["path"] = json!(path);
+            }
             crate::dialogs_sweep::params(app, opts, items(inputs, 2).first(), [items(inputs, 3), items(inputs, 4)], &mut p)?;
             ("surface.sweep", p)
         }
@@ -621,21 +634,44 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                 Sel::SketchCurve { id } => st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some()).map(|ss| ss.feature),
                 _ => None,
             };
-            let mut order: Vec<u64> = Vec::new();
+            // Sections in the order first picked: a sketch's picks are one section; model edges
+            // that meet end to end are one section (owner: "loft from the part's edges too").
+            enum Sec {
+                Sketch(u64),
+                Edges(String, Vec<(Vec3, Vec3, Vec3)>),
+            }
+            let mut order: Vec<Sec> = Vec::new();
             for x in items(inputs, 0) {
+                if let Sel::Edge { body, index, point } = x {
+                    let ends = st.body(body).and_then(|b| b.mesh().edges.get(*index).and_then(|e| Some((*e.first()?, *e.last()?))));
+                    let Some((a, b)) = ends else { continue };
+                    let near = |p: Vec3, q: Vec3| p.dist(q) < 1e-4;
+                    let joined = order.iter_mut().find_map(|sec| match sec {
+                        Sec::Edges(bn, list) if bn == body && list.iter().any(|(_, s, e)| near(*s, a) || near(*s, b) || near(*e, a) || near(*e, b)) => Some(list),
+                        _ => None,
+                    });
+                    match joined {
+                        Some(list) => list.push((*point, a, b)),
+                        None => order.push(Sec::Edges(body.clone(), vec![(*point, a, b)])),
+                    }
+                    continue;
+                }
                 let sk = sketch_of(x).ok_or("a picked curve is no longer in a sketch")?;
-                if !order.contains(&sk) {
-                    order.push(sk);
+                if !order.iter().any(|sec| matches!(sec, Sec::Sketch(k) if *k == sk)) {
+                    order.push(Sec::Sketch(sk));
                 }
             }
             if order.len() < 2 {
-                return Err("pick sections in two or more sketches".into());
+                return Err("pick two or more cross-sections (a sketch each, or a chain of model edges each)".into());
             }
             let sections: Vec<Value> = order
                 .iter()
-                .map(|sk| {
-                    let picks: Vec<Sel> = items(inputs, 0).iter().filter(|x| sketch_of(x) == Some(*sk)).cloned().collect();
-                    sheet_picks(app, &picks)
+                .map(|sec| match sec {
+                    Sec::Sketch(sk) => {
+                        let picks: Vec<Sel> = items(inputs, 0).iter().filter(|x| sketch_of(x) == Some(*sk)).cloned().collect();
+                        sheet_picks(app, &picks)
+                    }
+                    Sec::Edges(body, list) => Ok(json!({"body": body, "edges": list.iter().map(|(q, ..)| pt(*q)).collect::<Vec<_>>()})),
                 })
                 .collect::<Result<_, String>>()?;
             let mut p = json!({ "sections": sections });

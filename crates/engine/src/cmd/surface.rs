@@ -1,7 +1,7 @@
 //! Surface commands: Patch, Stitch, Thicken and Trim (surface bodies and turning them into
 //! solids), and the planned surface toolset (`planned!`: registered, not built yet).
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use solidcraft_doc::{
     BlendSide, EdgeContinuity, Expr, ExtendMode, ExtendTo, FaceAt, FeatureKind, PatchContinuity, PlaneRef, ProfileSel, RuledCorners, RuledMode,
     TrimCurves, expr::Kind,
@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.sweep", "Surface Sweep", surface_sweep)
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners) | path_edges: [[x,y,z]] and path_body? (model edges, taken into a 3D sketch first); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
     CommandSpec::new("surface.loft", "Surface Loft", surface_loft)
         .at("SURFACE", "CREATE")
         .icon("surface_loft")
@@ -132,7 +132,7 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
         add_feature(s, p, kind)?
     };
     if let Some(o) = v.as_object_mut() {
-        o.insert("crown".into(), serde_json::json!(crown));
+        o.insert("crown".into(), json!(crown));
         o.insert("continuity".into(), serde_json::to_value(&continuity).unwrap_or(Value::Null));
     }
     Ok(v)
@@ -350,6 +350,44 @@ fn surface_revolve(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "surface.sweep";
+    // A path of model edges (owner: "sweep along the part's edges, no sketch needed"): taken
+    // into a 3D sketch of its own first (Convert Entities), which the sweep then follows; one
+    // undo step.
+    if let Some(edges) = p.get("path_edges").and_then(Value::as_array) {
+        if edges.is_empty() || edges.len() > 1000 {
+            return Err(bad(cmd, "`path_edges` must list 1…1000 points on model edges"));
+        }
+        let sketch = feature_sketch(s, p, cmd)?;
+        let body = p.get("path_body").cloned().unwrap_or(Value::Null);
+        let refs: Vec<Value> = edges
+            .iter()
+            .map(|e| {
+                let mut r = json!({"edge": e});
+                if !body.is_null() {
+                    r["body"] = body.clone();
+                }
+                r
+            })
+            .collect();
+        let depth = s.undo.len();
+        let made = (|| -> Result<Value> {
+            s.execute("sketch.create3d", &json!({}))?;
+            let path_sketch = s.active_sketch.ok_or_else(|| bad(cmd, "the path's 3D sketch"))?;
+            let r = s.execute("sketch.convert_entities", &json!({"refs": refs}))?;
+            s.execute("sketch.finish", &json!({}))?;
+            let mut q = p.clone();
+            if let Some(o) = q.as_object_mut() {
+                o.remove("path_edges");
+                o.remove("path_body");
+                o.insert("sketch".into(), json!(sketch));
+                o.insert("path_sketch".into(), json!(path_sketch));
+                o.insert("path".into(), r["curves"].clone());
+            }
+            s.execute(cmd, &q)
+        })();
+        s.undo.truncate(depth);
+        return made;
+    }
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
     let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
@@ -780,6 +818,23 @@ mod tests {
 
     fn area(s: &Session, name: &str) -> f64 {
         solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().area
+    }
+
+    /// Owner: sweep along the part's own edges, no sketch for the path. A circle (radius 2) on
+    /// the YZ plane swept along a 40 × 20 × 10 box's edge on the X axis: a tube's wall 40 long
+    /// (area 2π·2·40), the path taken into a 3D sketch of its own; one undo step.
+    #[test]
+    fn a_surface_sweep_follows_picked_model_edges() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "body_name": "Box"}));
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Ring"}));
+        let c = run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 2}))["created"]["curves"][0].as_str().unwrap().to_string();
+        run(&mut s, "sketch.finish", json!({}));
+        let undo = s.undo.len();
+        let r = run(&mut s, "surface.sweep", json!({"sketch": "Ring", "curves": [c], "path_edges": [[20, 0, 0]], "path_body": "Box", "body_name": "Tube"}));
+        assert_eq!(s.undo.len(), undo + 1, "one undo step: {r}");
+        let want = 2.0 * std::f64::consts::PI * 2.0 * 40.0;
+        assert!((area(&s, "Tube") - want).abs() < want * 1e-2, "{} vs {want}", area(&s, "Tube"));
     }
 
     /// Surface Extrude of open curves: a line and an arc joined end to end (listed in either

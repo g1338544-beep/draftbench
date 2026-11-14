@@ -2207,6 +2207,11 @@ fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, range: std::
             (Kind::Loft { .. }, "Profiles") => "Profiles (in order)",
             (Kind::Loft { .. } | Kind::Sweep { .. }, "Rail") => "Guide Curves (optional)",
             (Kind::Loft { .. } | Kind::Sweep { .. }, "Second Rail") => "Second Guide (optional)",
+            // Surface Loft and Sweep in plain words (owner: "rename the fields, I don't
+            // understand them"); optional inputs say so.
+            (Kind::Surface(_), "Rail") => "Guide curve 1 (optional)",
+            (Kind::Surface(_), "Second Rail") => "Guide curve 2 (optional)",
+            (Kind::Surface(_), "Direction") => "Keep direction (optional)",
             (_, other) => other,
         };
         let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
