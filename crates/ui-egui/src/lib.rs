@@ -81,6 +81,7 @@ pub mod install;
 pub mod issue_report;
 pub mod joint_drag;
 pub mod keymap;
+pub mod layer_filters;
 pub mod layer_window;
 mod linked_source;
 #[cfg(test)]

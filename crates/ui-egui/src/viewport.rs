@@ -2698,7 +2698,7 @@ fn body_color(doc: &solidcraft_engine::doc::Document, b: &solidcraft_engine::doc
 }
 
 /// A body's display colour (else the theme's) as RGB.
-fn body_rgb(app: &SolveApp, name: &str) -> (u8, u8, u8) {
+pub(crate) fn body_rgb(app: &SolveApp, name: &str) -> (u8, u8, u8) {
     let st = crate::open_meshing::shown_world(app);
     let c = st.body(name).and_then(|b| body_color(&app.session.doc, b)).unwrap_or(Tokens::get().body);
     (c.r(), c.g(), c.b())

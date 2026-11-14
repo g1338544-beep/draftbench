@@ -34,6 +34,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let layers: Vec<(String, usize, bool)> = app.session.visibility.layers.iter().map(|l| (l.name.clone(), l.items.len(), l.visible)).collect();
     let selected = crate::context_menu::selected_names(app);
     let mut todo: Vec<(&str, serde_json::Value)> = Vec::new();
+    let mut filter: Option<&str> = None;
+    let mut by_colour = false;
     let (closed, _) = ui_kit::Window::new(egui::Id::new("sc_layer_window"), "settings", crate::i18n::tr_label("Layer Settings"))
         .actions("", "Close", None)
         .show(ctx, true, |ui| {
@@ -54,6 +56,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                 });
             }
+            // Select by (owner): keep the selected bodies' like, then make a layer of them.
+            ui_kit::text(ui, crate::i18n::tr_label("Select by (from the selection; Solids/Surfaces only from all when none)"), ui_kit::Text::Hint("layers"));
+            ui.horizontal_wrapped(|ui| {
+                for (key, label) in crate::layer_filters::FILTERS {
+                    if ui_kit::button(ui, crate::i18n::tr_label(label), ui_kit::Button::Small).clicked() {
+                        filter = Some(key);
+                    }
+                }
+                if ui_kit::button(ui, crate::i18n::tr_label("A layer per colour"), ui_kit::Button::Small).clicked() {
+                    by_colour = true;
+                }
+            });
             ui_kit::row(ui, crate::i18n::tr_label("Name"), |ui| ui_kit::text_field(ui, &mut w.name, ""));
             if ui_kit::button(ui, "New Layer", ui_kit::Button::Enabled(!w.name.trim().is_empty())).clicked() {
                 todo.push(("layer.create", json!({"name": w.name.trim(), "items": selected})));
@@ -63,6 +77,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     w.error = None;
+    if let Some(key) = filter {
+        let n = crate::layer_filters::apply(app, key);
+        app.set_status(format!("{n} {}", crate::i18n::tr_label("bodies selected")), false);
+    }
+    if by_colour {
+        for (name, items) in crate::layer_filters::layers_by_colour(app) {
+            todo.push(("layer.create", json!({"name": name, "items": items})));
+        }
+    }
     for (id, params) in todo {
         if let Err(e) = app.run(id, params) {
             w.error = Some(e);
