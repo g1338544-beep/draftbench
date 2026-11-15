@@ -2,6 +2,10 @@
 //! bearings) by family, size and length, with the size's table values and a picture of the part.
 //! Picking a hole (its wall or rim) seats the part in it with a rigid joint; without one the part
 //! goes at the origin. The live preview shows it placed.
+//!
+//! My Parts (the user's own STEP/STL files, such as models downloaded from a model library) are
+//! listed after the standard families, one entry per category folder, with the way the part goes
+//! into the hole and the point that sits on the face.
 
 use crate::ui_kit::{choice_row, text_row};
 use egui::vec2;
@@ -61,27 +65,66 @@ pub struct Pt {
     pub picture: Option<(usize, usize, Option<usize>)>,
     /// The library, read once.
     pub lib: Option<Vec<Family>>,
+    /// My Parts: the way into the hole (index into [`AXES`]) and the seat (index into [`SEATS`]).
+    pub axis: usize,
+    pub seat: usize,
+}
+
+/// A My Parts family's id starts with this; the rest is its category.
+pub const MY: &str = "my:";
+/// The way a My Parts file goes into the hole, in its own axes.
+pub const AXES: [&str; 6] = ["-z", "+z", "-x", "+x", "-y", "+y"];
+const AXIS_LABELS: [&str; 6] = ["−Z (down)", "+Z", "−X", "+X", "−Y", "+Y"];
+/// Where a My Parts file sits on the face.
+pub const SEATS: [&str; 2] = ["end", "origin"];
+const SEAT_LABELS: [&str; 2] = ["Stands on the face", "File origin on the face"];
+
+/// My Parts as families: one per category folder, each file a "size".
+pub fn my_families(v: &Value) -> Vec<Family> {
+    let mut out: Vec<Family> = Vec::new();
+    for p in v.get("parts").and_then(Value::as_array).into_iter().flatten() {
+        let (Some(name), Some(path)) = (p.get("name").and_then(Value::as_str), p.get("path").and_then(Value::as_str)) else { continue };
+        let cat = p.get("category").and_then(Value::as_str).unwrap_or("");
+        let id = format!("{MY}{cat}");
+        let row = json!({"size": name, "file": path});
+        match out.iter_mut().find(|f| f.id == id) {
+            Some(f) => f.sizes.push((name.to_string(), row)),
+            None => out.push(Family {
+                name: if cat.is_empty() { "My Parts".into() } else { format!("My Parts / {cat}") },
+                standard: String::new(),
+                sizes: vec![(name.to_string(), row)],
+                lengths: None,
+                id,
+            }),
+        }
+    }
+    out
 }
 
 /// The dialog for Insert Part.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     matches!(id, "parts.fastener" | "parts.insert").then(|| {
         (
-            Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None }),
+            Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None, axis: 0, seat: 0 }),
             vec![SelInput::new("Hole (optional)", FACES | EDGES, false)],
         )
     })
 }
 
 fn library(app: &mut SolveApp) -> Vec<Family> {
-    app.session.execute("parts.library", &json!({})).map(|v| families(&v)).unwrap_or_default()
+    let mut lib = app.session.execute("parts.library", &json!({})).map(|v| families(&v)).unwrap_or_default();
+    lib.extend(app.session.execute("parts.my_list", &json!({})).map(|v| my_families(&v)).unwrap_or_default());
+    lib
 }
 
 /// The insert command's parameters for the picks.
 pub fn insert_params(lib: &[Family], k: &Pt, hole: Option<&Sel>) -> Result<Value, String> {
     let f = lib.get(k.family).ok_or("the parts library is empty")?;
-    let (size, _) = f.sizes.get(k.size).ok_or("pick a size")?;
-    let mut p = json!({"family": f.id, "size": size});
+    let (size, row) = f.sizes.get(k.size).ok_or("pick a size")?;
+    let mut p = match row.get("file").and_then(Value::as_str).filter(|_| f.id.starts_with(MY)) {
+        Some(file) => json!({"file": file, "axis": AXES.get(k.axis).unwrap_or(&"-z"), "seat": SEATS.get(k.seat).unwrap_or(&"end")}),
+        None => json!({"family": f.id, "size": size}),
+    };
     if let Some(l) = k.length.and_then(|i| f.lengths.as_ref().and_then(|ls| ls.get(i))) {
         p["length"] = json!(l);
     }
@@ -138,8 +181,34 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
         k.length = None;
     }
     let Some(f) = lib.get(k.family) else { return false };
+    let mine = f.id.starts_with(MY);
     let sizes: Vec<&str> = f.sizes.iter().map(|s| s.0.as_str()).collect();
-    choice_row(ui, "Size", "pt_size", &mut k.size, &sizes);
+    choice_row(ui, if mine { "Part" } else { "Size" }, "pt_size", &mut k.size, &sizes);
+    if mine {
+        choice_row(ui, "Into the hole", "pt_axis", &mut k.axis, &AXIS_LABELS);
+        choice_row(ui, "Seat", "pt_seat", &mut k.seat, &SEAT_LABELS);
+    }
+    // Files for My Parts: a STEP or STL from the computer (a model library's download) is copied
+    // into the folder and listed from then on.
+    if crate::ui_kit::button(ui, crate::i18n::tr_label("Add a file to My Parts…"), crate::ui_kit::Button::Normal)
+        .on_hover_text(crate::i18n::tr_label("Copy a STEP, IGES, STL, 3MF, OBJ or glTF file (for example a model downloaded from a model library) into My Parts, so it is listed here from now on"))
+        .clicked()
+    {
+        app.pick_open_for(&["step", "stp", "igs", "iges", "stl", "3mf", "obj", "glb", "gltf"], |app, path| {
+            let Some(path) = path else { return };
+            match app.run("parts.my_add", json!({"path": path})) {
+                Ok(r) => {
+                    let name = r["name"].as_str().unwrap_or("").to_string();
+                    if let Some(crate::dialogs::Dialog { kind: Kind::Part(k), .. }) = app.dialog.as_mut() {
+                        k.lib = None;
+                        k.picture = None;
+                    }
+                    app.set_status(format!("added to My Parts: {name}"), false);
+                }
+                Err(e) => app.set_status(e.to_string(), true),
+            }
+        });
+    }
     if let Some(ls) = &f.lengths {
         let mut labels = vec!["Default".to_string()];
         labels.extend(ls.iter().map(|l| crate::prefs::show_mm(app, *l, 1)));
@@ -152,7 +221,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     }
     text_row(ui, "Name", &mut k.name, "automatic");
     // The part, and its table values.
-    let key = (k.family, k.size, k.length);
+    let key = (k.family, k.size, k.length.or(mine.then_some(k.axis * 2 + k.seat)));
     let tex_id = egui::Id::new("sc_part_picture");
     if k.picture != Some(key) {
         let tex = insert_params(&lib, k, None)
@@ -238,15 +307,31 @@ mod tests {
     #[test]
     fn insert_params_for_picks() {
         let l = lib();
-        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None };
+        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, axis: 0, seat: 0 };
         let hole = Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(5.0, 0.0, 10.0) };
         let p = insert_params(&l, &k, Some(&hole)).unwrap();
         assert_eq!(p, json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20.0, "at": [5.0, 0.0, 10.0]}));
-        let k = Pt { family: 1, size: 0, length: None, name: "Front bearing".into(), picture: None, lib: None };
+        let k = Pt { family: 1, size: 0, length: None, name: "Front bearing".into(), picture: None, lib: None, axis: 0, seat: 0 };
         let p = insert_params(&l, &k, None).unwrap();
         assert_eq!(p["point"], json!([0.0, 0.0, 0.0]));
         assert_eq!(p["name"], "Front bearing");
         assert!(p.get("length").is_none());
         assert!(insert_params(&[], &k, None).is_err());
+    }
+
+    /// My Parts: a family per category, a file inserts by path with its axis and seat.
+    #[test]
+    fn my_parts_insert_by_file() {
+        let mine = my_families(&json!({"parts": [
+            {"name": "toggle clamp", "path": "/p/Clamps/toggle clamp.step", "category": "Clamps"},
+            {"name": "bush", "path": "/p/bush.stl", "category": ""},
+            {"name": "swing clamp", "path": "/p/Clamps/swing clamp.step", "category": "Clamps"},
+        ]}));
+        assert_eq!(mine.len(), 2);
+        assert_eq!((mine[0].name.as_str(), mine[0].sizes.len()), ("My Parts / Clamps", 2));
+        let k = Pt { family: 0, size: 1, length: None, name: String::new(), picture: None, lib: None, axis: 1, seat: 1 };
+        let hole = Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(5.0, 0.0, 10.0) };
+        let p = insert_params(&mine, &k, Some(&hole)).unwrap();
+        assert_eq!(p, json!({"file": "/p/Clamps/swing clamp.step", "axis": "+z", "seat": "origin", "at": [5.0, 0.0, 10.0]}));
     }
 }

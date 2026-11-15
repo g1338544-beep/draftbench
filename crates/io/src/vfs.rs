@@ -55,6 +55,41 @@ mod imp {
         check(path)?;
         std::fs::create_dir_all(path)
     }
+    /// The regular files whose path starts with `prefix` (a folder ending in `/`, or a folder and
+    /// the start of a file name), with their sizes, looking at most four folders deep and
+    /// returning at most 5000, sorted by path.
+    pub fn list(prefix: &str) -> Vec<(String, u64)> {
+        let (dir, start) = match prefix.rfind(['/', '\\']) {
+            Some(i) => (prefix.get(..=i).unwrap_or(""), prefix.get(i + 1..).unwrap_or("")),
+            None => ("./", prefix),
+        };
+        if check(dir).is_err() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        walk(std::path::Path::new(dir), start, 0, &mut out);
+        out.sort();
+        out
+    }
+    fn walk(dir: &std::path::Path, start: &str, depth: usize, out: &mut Vec<(String, u64)>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten().take(10_000) {
+            if out.len() >= 5000 {
+                return;
+            }
+            let name = e.file_name().to_string_lossy().to_string();
+            if depth == 0 && !name.starts_with(start) {
+                continue;
+            }
+            let Ok(meta) = e.metadata() else { continue };
+            let path = e.path();
+            if meta.is_dir() && depth < 4 && !name.starts_with('.') {
+                walk(&path, "", depth + 1, out);
+            } else if meta.is_file() {
+                out.push((path.to_string_lossy().to_string(), meta.len()));
+            }
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
