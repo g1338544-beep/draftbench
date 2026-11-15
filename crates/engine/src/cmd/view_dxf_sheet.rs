@@ -1075,19 +1075,25 @@ fn shows_beside(lines: &[(Vec2, Vec2, bool)], q0: Vec2, q1: Vec2, rs: &[f64], da
     }
     let u = Vec2::new(d.x / len, d.y / len);
     let tol = rs.iter().cloned().fold(0.0_f64, f64::max).mul_add(0.03, 0.05);
-    let side = |r: f64| lines.iter().any(|(a, b, hidden)| {
-        if *hidden && !dashed {
-            return false;
-        }
-        let e = Vec2::new(b.x - a.x, b.y - a.y);
-        let el = (e.x * e.x + e.y * e.y).sqrt();
-        if el < 1e-6 || (e.x * u.y - e.y * u.x).abs() > 0.02 * el {
-            return false;
-        }
-        let off = (a.x - q0.x) * u.y - (a.y - q0.y) * u.x;
-        let (t0, t1) = ((a.x - q0.x) * u.x + (a.y - q0.y) * u.y, (b.x - q0.x) * u.x + (b.y - q0.y) * u.y);
-        (off - r).abs() <= tol && t0.max(t1) > 0.0 && t0.min(t1) < len
-    });
+    // The outline must run along a good part of the axis (30 %): the short pieces of other parts'
+    // round edges that happen to lie in line with it do not count.
+    let side = |r: f64| {
+        let covered: f64 = lines
+            .iter()
+            .filter(|(_, _, hidden)| dashed || !*hidden)
+            .filter_map(|(a, b, _)| {
+                let e = Vec2::new(b.x - a.x, b.y - a.y);
+                let el = (e.x * e.x + e.y * e.y).sqrt();
+                if el < 1e-6 || (e.x * u.y - e.y * u.x).abs() > 0.02 * el {
+                    return None;
+                }
+                let off = (a.x - q0.x) * u.y - (a.y - q0.y) * u.x;
+                let (t0, t1) = ((a.x - q0.x) * u.x + (a.y - q0.y) * u.y, (b.x - q0.x) * u.x + (b.y - q0.y) * u.y);
+                ((off - r).abs() <= tol).then(|| (t0.max(t1).min(len) - t0.min(t1).max(0.0)).max(0.0))
+            })
+            .sum();
+        covered >= 0.3 * len
+    };
     // Both outline lines of one cylinder: a stray line in line with one side is not the part.
     rs.iter().any(|r| side(*r) && side(-*r))
 }

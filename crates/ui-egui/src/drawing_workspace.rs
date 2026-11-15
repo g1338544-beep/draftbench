@@ -9148,16 +9148,16 @@ mod example_sheet_tests {
             ("Pillar R".into(), [0.0, 0.0, 62.0]),
             ("Pillar L".into(), [0.0, 0.0, 62.0]),
             ("Guide Bush".into(), [0.0, 0.0, 40.0]),
-            ("Fork Plate F".into(), [0.0, -60.0, -20.0]),
-            ("Fork Plate B".into(), [0.0, 60.0, -20.0]),
+            ("Fork Plate F".into(), [0.0, -70.0, 0.0]),
+            ("Fork Plate B".into(), [0.0, 70.0, 0.0]),
             ("Spring Post R".into(), [30.0, 0.0, -30.0]),
             ("Spring Post L".into(), [-30.0, 0.0, -30.0]),
             ("Plunger".into(), [0.0, 0.0, -110.0]),
             ("Floating Coupler".into(), [0.0, 0.0, 25.0]),
-            ("Right Finger".into(), [62.0, 0.0, -70.0]),
-            ("Left Finger".into(), [-62.0, 0.0, -70.0]),
-            ("Pivot Pin R".into(), [0.0, -75.0, -20.0]),
-            ("Pivot Pin L".into(), [0.0, -75.0, -20.0]),
+            ("Right Finger".into(), [62.0, 0.0, -105.0]),
+            ("Left Finger".into(), [-62.0, 0.0, -105.0]),
+            ("Pivot Pin R".into(), [0.0, -130.0, -10.0]),
+            ("Pivot Pin L".into(), [0.0, -130.0, -10.0]),
             ("Roller R".into(), [0.0, -30.0, 0.0]),
             ("Roller L".into(), [0.0, -30.0, 0.0]),
             ("Roller Axle R".into(), [0.0, -55.0, 0.0]),
@@ -9230,11 +9230,11 @@ mod example_sheet_tests {
         front.cap = (0.0, -12.0);
         front.section = Some((1, "0".into()));
         front.dims = true;
-        let mut side = view(2, geo("SIDE_X", 52.0), fy, &fs);
-        side.dims = true;
+        // Each size once (owner: complete, not repeated): the height and width on the front, the
+        // depth on the top view; the right view shows the shape.
+        let side = view(2, geo("SIDE_X", 52.0), fy, &fs);
         let mut top = view(1, fx, geo("TOP_Y", 80.0), &fs);
-        top.cap = (0.0, -14.0);
-        top.dims = true;
+        top.cap = (0.0, -20.0);
         let mut iso = view(6, geo("ISO_X", 340.0), geo("ISO_Y", 222.0), &sc("ISO_S", "0.25"));
         iso.exploded = true;
         iso.label = Some(String::new());
@@ -9276,11 +9276,13 @@ mod example_sheet_tests {
         add.push(note(to_sheet(&app, 0, Vec3::new(0.0, 0.0, 200.0)), to_sheet(&app, 0, Vec3::new(-48.0, 0.0, 236.0)), "Air cyl. D32 st.15"));
         // Top: the mounting holes (how it is bolted on).
         let tlow = to_sheet(&app, 2, Vec3::new(0.0, -25.0, 0.0)).y;
-        add.push(dim(0, to_sheet(&app, 2, Vec3::new(-20.0, -18.0, 160.0)), to_sheet(&app, 2, Vec3::new(20.0, -18.0, 160.0)), tlow - 18.0));
+        add.push(dim(0, to_sheet(&app, 2, Vec3::new(-20.0, -18.0, 160.0)), to_sheet(&app, 2, Vec3::new(20.0, -18.0, 160.0)), tlow - 10.0));
         let tright = to_sheet(&app, 2, Vec3::new(48.0, 0.0, 0.0)).x;
+        let tleft = to_sheet(&app, 2, Vec3::new(-48.0, 0.0, 0.0)).x;
+        add.push(dim(1, to_sheet(&app, 2, Vec3::new(-45.0, -25.0, 160.0)), to_sheet(&app, 2, Vec3::new(-45.0, 25.0, 160.0)), tleft - 10.0));
         add.push(dim(1, to_sheet(&app, 2, Vec3::new(20.0, -18.0, 160.0)), to_sheet(&app, 2, Vec3::new(20.0, 18.0, 160.0)), tright + 14.0));
         add.push(dim(1, to_sheet(&app, 2, Vec3::new(37.5, -12.0, 160.0)), to_sheet(&app, 2, Vec3::new(37.5, 12.0, 160.0)), tright + 22.0));
-        add.push(dim(0, to_sheet(&app, 2, Vec3::new(-37.5, 12.0, 160.0)), to_sheet(&app, 2, Vec3::new(37.5, 12.0, 160.0)), tlow - 25.0));
+        add.push(dim(0, to_sheet(&app, 2, Vec3::new(-37.5, 12.0, 160.0)), to_sheet(&app, 2, Vec3::new(37.5, 12.0, 160.0)), tlow - 17.0));
         add.push(note(to_sheet(&app, 2, Vec3::new(-20.0, 18.0, 160.0)), to_sheet(&app, 2, Vec3::new(-62.0, 34.0, 160.0)), "4x M6 depth 10 (mount)"));
         app.drawing.dims.extend(add);
         refresh(&mut app);
