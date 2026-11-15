@@ -167,7 +167,28 @@ pub enum Asm {
     },
     /// Motion Trace: a picked point's path, previewed; OK keeps it as a 3D sketch spline.
     Trace(Box<TraceForm>),
+    /// Air Cylinder: a barrel, a rod and the slider between them (`axis`: X, Y, Z, -X, -Y, -Z).
+    AirCylinder {
+        bore: String,
+        stroke: String,
+        axis: usize,
+    },
+    /// Motion Sequence: moves one after another, each (joint, to, seconds); a joint index of
+    /// `usize::MAX` is a wait.
+    Sequence {
+        name: String,
+        moves: Vec<(usize, String, String)>,
+    },
+    /// Pick and Place: the lift, travel and (optional) grip joints and their values.
+    PickPlace {
+        lift: usize,
+        travel: usize,
+        grip: usize,
+        values: [String; 7],
+    },
 }
+
+const CYLINDER_AXES: [&str; 6] = ["X", "Y", "Z", "-X", "-Y", "-Z"];
 
 /// The snap under the cursor, remembered for the selection it was found for.
 pub type Hover = Option<(Sel, Option<SnapPt>)>;
@@ -245,6 +266,9 @@ impl Asm {
             Asm::RigidGroup => "RIGID GROUP",
             Asm::Drive { .. } => "DRIVE JOINTS",
             Asm::MotionLink { .. } => "MOTION LINK",
+            Asm::AirCylinder { .. } => "AIR CYLINDER",
+            Asm::Sequence { .. } => "MOTION SEQUENCE",
+            Asm::PickPlace { .. } => "PICK AND PLACE",
             Asm::Coupling(f) => match f.command {
                 "joint.gear" => "GEAR",
                 "joint.rack_pinion" => "RACK AND PINION",
@@ -286,6 +310,19 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "joint.motion_link" => {
             let b = usize::from(movable(s).len() > 1);
             (Asm::MotionLink { a: 0, b, ia: 0, ib: 0, ratio: "1".into(), offset: "0".into() }, vec![])
+        }
+        "parts.air_cylinder" => (
+            Asm::AirCylinder { bore: "20 mm".into(), stroke: "50 mm".into(), axis: 2 },
+            vec![SelInput::new("Back end (point, optional)", SNAPS, false)],
+        ),
+        "motion.sequence" => {
+            let first = movable(s).first().copied().unwrap_or(0);
+            (Asm::Sequence { name: "Sequence".into(), moves: vec![(first, String::new(), "1".into())] }, vec![])
+        }
+        "motion.pick_place" => {
+            let m = movable(s);
+            let (lift, travel) = (m.first().copied().unwrap_or(0), m.get(1).copied().unwrap_or(0));
+            (Asm::PickPlace { lift, travel, grip: usize::MAX, values: Default::default() }, vec![])
         }
         "joint.gear" | "joint.rack_pinion" | "joint.screw" => crate::dialogs_coupling::start(app, id)?,
         "joint.cam" => crate::dialogs_coupling::cam::start(app),
@@ -930,6 +967,70 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 });
             }
         }
+        Asm::AirCylinder { bore, stroke, axis } => {
+            enter |= expr_row(ui, "Bore", bore);
+            enter |= expr_row(ui, "Stroke", stroke);
+            choice_row(ui, "Rod comes out along", "ac_axis", axis, &CYLINDER_AXES);
+            crate::ui_kit::caption(ui, "Bore", crate::i18n::tr_label("The barrel and the rod become components; the rod slides its stroke (drive it, or use it in a Motion Sequence)."));
+        }
+        Asm::Sequence { name, moves } => {
+            let s = &app.session;
+            let joints: Vec<(usize, String)> = movable(s).into_iter().filter_map(|i| s.doc.assembly.joints.get(i).map(|j| (i, j.name.clone()))).collect();
+            if joints.is_empty() {
+                ui.label(RichText::new(crate::i18n::tr_label("Make the joints first (Joint, or Air Cylinder), then list their moves here.")).color(t.text_dim));
+                return false;
+            }
+            crate::ui_kit::row(ui, crate::i18n::tr_label("Name"), |ui| crate::ui_kit::text_field(ui, name, ""));
+            let mut names: Vec<&str> = joints.iter().map(|j| j.1.as_str()).collect();
+            names.push("(wait)");
+            let mut remove = None;
+            for (k, (joint, to, time)) in moves.iter_mut().enumerate() {
+                let mut pick = joints.iter().position(|j| j.0 == *joint).unwrap_or(joints.len());
+                choice_row(ui, &format!("{} {}", crate::i18n::tr_label("Move"), k + 1), &format!("seq_joint_{k}"), &mut pick, &names);
+                *joint = joints.get(pick).map_or(usize::MAX, |j| j.0);
+                ui.horizontal(|ui| {
+                    if *joint != usize::MAX {
+                        ui.label(crate::i18n::tr_label("to"));
+                        crate::ui_kit::text_field(ui, to, "0");
+                    }
+                    ui.label(crate::i18n::tr_label("seconds"));
+                    crate::ui_kit::text_field(ui, time, "1");
+                    if crate::ui_kit::button(ui, "✕", crate::ui_kit::Button::Small).clicked() {
+                        remove = Some(k);
+                    }
+                });
+            }
+            if let Some(k) = remove.filter(|_| moves.len() > 1) {
+                moves.remove(k);
+            }
+            if crate::ui_kit::button(ui, crate::i18n::tr_label("Add a move"), crate::ui_kit::Button::Normal).clicked() && moves.len() < 100 {
+                let last = moves.last().map_or(joints[0].0, |m| m.0);
+                moves.push((if last == usize::MAX { joints[0].0 } else { last }, String::new(), "1".into()));
+            }
+        }
+        Asm::PickPlace { lift, travel, grip, values } => {
+            let s = &app.session;
+            let joints: Vec<(usize, String)> = movable(s).into_iter().filter_map(|i| s.doc.assembly.joints.get(i).map(|j| (i, j.name.clone()))).collect();
+            if joints.len() < 2 {
+                ui.label(RichText::new(crate::i18n::tr_label("Needs a joint that lifts and one that travels (e.g. two Air Cylinders).")).color(t.text_dim));
+                return false;
+            }
+            let names: Vec<&str> = joints.iter().map(|j| j.1.as_str()).collect();
+            let mut with_none = names.clone();
+            with_none.push("(none)");
+            for (label, id, slot, list) in [("Lift (up and down)", "pp_lift", &mut *lift, &names), ("Travel (across)", "pp_travel", &mut *travel, &names), ("Grip (optional)", "pp_grip", &mut *grip, &with_none)] {
+                let mut pick = joints.iter().position(|j| j.0 == *slot).unwrap_or(joints.len());
+                choice_row(ui, label, id, &mut pick, list);
+                *slot = joints.get(pick).map_or(usize::MAX, |j| j.0);
+            }
+            let labels = ["Lift down to", "Lift up to", "Travel to the drop", "Travel back to", "Grip closes to", "Grip opens to", "Seconds per move"];
+            for (k, (label, v)) in labels.iter().zip(values.iter_mut()).enumerate() {
+                if k >= 4 && k < 6 && *grip == usize::MAX {
+                    continue;
+                }
+                enter |= expr_row(ui, label, v);
+            }
+        }
         Asm::MotionLink { a, b, ia, ib, ratio, offset } => {
             // One Motion Link button for every kind of link (owner's ribbon plan): the gear, rack,
             // screw and cam links are its other types.
@@ -1566,6 +1667,48 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         // The check runs from its Compute button; OK only closes.
         Asm::Interference { .. } => Vec::new(),
         Asm::Trace(f) => cmd("motion.trace.keep", trace::params(s, f, inputs)?),
+        Asm::AirCylinder { bore, stroke, axis } => {
+            let mut p = json!({"bore": eval(bore, ValueKind::Length)?, "stroke": eval(stroke, ValueKind::Length)?, "axis": CYLINDER_AXES.get(*axis).copied().unwrap_or("Z")});
+            if let Some(at) = crate::dialogs_move::sel_point(app, sel_items(inputs, 0).first()) {
+                p["at"] = json!([at.x, at.y, at.z]);
+            }
+            cmd("parts.air_cylinder", p)
+        }
+        Asm::Sequence { name, moves } => {
+            let js = &s.doc.assembly.joints;
+            let list: Vec<Value> = moves
+                .iter()
+                .map(|(j, to, time)| {
+                    let secs: f64 = time.trim().parse().map_err(|_| format!("`{time}` is not seconds"))?;
+                    Ok(match js.get(*j) {
+                        Some(joint) => json!({"joint": joint.id, "to": to.trim(), "time": secs}),
+                        None => json!({"wait": secs}),
+                    })
+                })
+                .collect::<Result<_, String>>()?;
+            cmd("motion.sequence", json!({"name": name.trim(), "moves": list}))
+        }
+        Asm::PickPlace { lift, travel, grip, values } => {
+            let js = &s.doc.assembly.joints;
+            let id = |i: usize| js.get(i).map(|j| j.id);
+            let (Some(l), Some(tr)) = (id(*lift), id(*travel)) else { return Err("pick the lift and the travel joints".into()) };
+            let v = |k: usize| values[k].trim().to_string();
+            let mut p = json!({"lift": l, "travel": tr, "down": v(0), "there": v(2)});
+            for (k, key) in [(1, "up"), (3, "back")] {
+                if !v(k).is_empty() {
+                    p[key] = json!(v(k));
+                }
+            }
+            if let Some(g) = id(*grip) {
+                p["grip"] = json!(g);
+                p["close"] = json!(v(4));
+                p["open"] = json!(v(5));
+            }
+            if let Ok(secs) = v(6).parse::<f64>() {
+                p["time"] = json!(secs);
+            }
+            cmd("motion.pick_place", p)
+        }
     })
 }
 

@@ -180,7 +180,12 @@ pub const SECTIONS: &[Section] = &[
         promoted: 2,
         ids: &["occurrence.ground", "component.capture_position", "component.revert_position"],
     },
-    Section { tab: "ASSEMBLE", panel: "MOTION", promoted: 3, ids: &["joint.drive", "motion.study", "explode.create", "motion.trace"] },
+    Section {
+        tab: "ASSEMBLE",
+        panel: "MOTION",
+        promoted: 3,
+        ids: &["joint.drive", "motion.study", "explode.create", "motion.sequence", "motion.pick_place", "parts.air_cylinder", "motion.trace"],
+    },
     Section {
         tab: "ASSEMBLE",
         panel: "CONTACT",
