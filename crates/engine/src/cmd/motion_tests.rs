@@ -526,58 +526,57 @@ fn make_centering_gripper_example() {
     // ===== FRAME (fixed): top plate (mounts on the robot or a slide), two pillars, the lower body
     // with the plunger's guide bush, two fork plates holding the finger pivots, two spring posts.
     part(&mut s, "Frame");
-    let top = mk(&mut s, "solid.box", bx((-45.0, 45.0), (-25.0, 25.0), (177.0, 192.0)));
-    hole(&mut s, &top, [0.0, 0.0, 176.0], [0.0, 0.0, 1.0], 7.5, 17.0);
+    // Sizes read off the clip (roller Ø12 as the scale): cone Ø27 to a Ø11 neck over 26 mm
+    // (17° a side), rollers ±13.5 open and ±17 closed, pivots ±17.5 26 mm under the rollers.
+    let top = mk(&mut s, "solid.box", bx((-45.0, 45.0), (-25.0, 25.0), (145.0, 160.0)));
+    hole(&mut s, &top, [0.0, 0.0, 144.0], [0.0, 0.0, 1.0], 7.5, 17.0);
     for (x, y) in [(20.0, 18.0), (-20.0, 18.0), (20.0, -18.0), (-20.0, -18.0)] {
         // M6 tapped holes from the top: how the gripper is bolted to the robot / slide.
-        hole(&mut s, &top, [x, y, 192.01], [0.0, 0.0, -1.0], 2.5, 10.0);
+        hole(&mut s, &top, [x, y, 160.01], [0.0, 0.0, -1.0], 2.5, 10.0);
     }
     colours.push((top.clone(), frame_c, 0.85));
     let mut pillars = Vec::new();
     for sx in [-1.0f64, 1.0] {
         let (a, b) = if sx > 0.0 { (30.0, 45.0) } else { (-45.0, -30.0) };
-        let p = mk(&mut s, "solid.box", bx((a, b), (-25.0, 25.0), (116.0, 177.0)));
+        let p = mk(&mut s, "solid.box", bx((a, b), (-25.0, 25.0), (102.0, 145.0)));
         colours.push((p.clone(), frame_c, 0.85));
         pillars.push(p);
     }
-    let body = mk(&mut s, "solid.box", bx((-58.0, 58.0), (-25.0, 25.0), (96.0, 116.0)));
-    hole(&mut s, &body, [0.0, 0.0, 95.0], [0.0, 0.0, 1.0], 13.0, 22.0);
-    colours.push((body.clone(), frame_c, 0.85));
-    // Pillars: two M6 from the top plate, two from under the lower body, each end.
+    let body = mk(&mut s, "solid.box", bx((-48.0, 48.0), (-25.0, 25.0), (82.0, 102.0)));
+    hole(&mut s, &body, [0.0, 0.0, 81.0], [0.0, 0.0, 1.0], 18.0, 22.0);
+    colours.push((body.clone(), "#f2f4f8", 0.45));
     for (i, sx) in [-1.0f64, 1.0].iter().enumerate() {
         for y in [-12.0, 12.0] {
             let x = 37.5 * sx;
-            cbore(&mut s, &top, [x, y, 192.0], [0.0, 0.0, -1.0], 6.0, 15.0);
-            hole(&mut s, &pillars[i], [x, y, 177.01], [0.0, 0.0, -1.0], 3.0, 14.0);
-            let a = screw(&mut s, [x, y, 192.0], [0.0, 0.0, -1.0], 6.0, 22.0, 0.5);
+            cbore(&mut s, &top, [x, y, 160.0], [0.0, 0.0, -1.0], 6.0, 15.0);
+            hole(&mut s, &pillars[i], [x, y, 145.01], [0.0, 0.0, -1.0], 3.0, 14.0);
+            let a = screw(&mut s, [x, y, 160.0], [0.0, 0.0, -1.0], 6.0, 22.0, 0.5);
             colours.push((a, black, 1.0));
-            cbore(&mut s, &body, [x, y, 96.0], [0.0, 0.0, 1.0], 6.0, 20.0);
-            hole(&mut s, &pillars[i], [x, y, 115.99], [0.0, 0.0, 1.0], 3.0, 14.0);
-            let b = screw(&mut s, [x, y, 96.0], [0.0, 0.0, 1.0], 6.0, 26.0, 0.5);
+            cbore(&mut s, &body, [x, y, 82.0], [0.0, 0.0, 1.0], 6.0, 20.0);
+            hole(&mut s, &pillars[i], [x, y, 101.99], [0.0, 0.0, 1.0], 3.0, 14.0);
+            let b = screw(&mut s, [x, y, 82.0], [0.0, 0.0, 1.0], 6.0, 26.0, 0.5);
             colours.push((b, black, 1.0));
         }
     }
-    // Guide bush (bronze), flanged on top.
-    let bush = mk(&mut s, "solid.cylinder", json!({"radius": 13, "height": 20, "base": [0, 0, 96], "axis": [0, 0, 1], "operation": "new"}));
-    run(&mut s, "solid.cylinder", json!({"radius": 18, "height": 3, "base": [0, 0, 116], "axis": [0, 0, 1], "operation": "join", "targets": [bush]}));
-    hole(&mut s, &bush, [0.0, 0.0, 95.0], [0.0, 0.0, 1.0], 8.05, 26.0);
+    // Guide bush (bronze) for the plunger's Ø27 body, flanged on top.
+    let bush = mk(&mut s, "solid.cylinder", json!({"radius": 18, "height": 20, "base": [0, 0, 82], "axis": [0, 0, 1], "operation": "new"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 22, "height": 3, "base": [0, 0, 102], "axis": [0, 0, 1], "operation": "join", "targets": [bush]}));
+    hole(&mut s, &bush, [0.0, 0.0, 81.0], [0.0, 0.0, 1.0], 13.55, 26.0);
     colours.push((bush, "#f0a830", 1.0));
     // Fork plates, the finger pivots' pins through them.
-    let pivot = (18.0f64, 38.0f64);
-    let mut forks = Vec::new();
+    let pivot = (17.5f64, 34.0f64);
     for (y0, y1) in [(15.0, 25.0), (-25.0, -15.0)] {
-        let f = mk(&mut s, "solid.box", bx((-30.0, 30.0), (y0, y1), (30.0, 96.0)));
+        let f = mk(&mut s, "solid.box", bx((-28.0, 28.0), (y0, y1), (24.0, 82.0)));
         for sx in [-1.0f64, 1.0] {
             hole(&mut s, &f, [pivot.0 * sx, y0 - 1.0, pivot.1], [0.0, 1.0, 0.0], 3.05, 12.0);
         }
-        for x in [-20.0, 20.0] {
-            cbore(&mut s, &body, [x, (y0 + y1) / 2.0, 116.0], [0.0, 0.0, -1.0], 5.0, 20.0);
-            hole(&mut s, &f, [x, (y0 + y1) / 2.0, 96.01], [0.0, 0.0, -1.0], 2.5, 12.0);
-            let sc = screw(&mut s, [x, (y0 + y1) / 2.0, 116.0], [0.0, 0.0, -1.0], 5.0, 26.0, 0.5);
+        for x in [-22.0, 22.0] {
+            cbore(&mut s, &body, [x, (y0 + y1) / 2.0, 102.0], [0.0, 0.0, -1.0], 5.0, 20.0);
+            hole(&mut s, &f, [x, (y0 + y1) / 2.0, 82.01], [0.0, 0.0, -1.0], 2.5, 12.0);
+            let sc = screw(&mut s, [x, (y0 + y1) / 2.0, 102.0], [0.0, 0.0, -1.0], 5.0, 26.0, 0.5);
             colours.push((sc, black, 1.0));
         }
-        colours.push((f.clone(), frame_c, 0.55));
-        forks.push(f);
+        colours.push((f.clone(), "#f2f4f8", 0.4));
     }
     for sx in [-1.0f64, 1.0] {
         let pin = mk(&mut s, "solid.cylinder", json!({"radius": 3, "height": 50, "base": [pivot.0 * sx, -25, pivot.1], "axis": [0, 1, 0], "operation": "new"}));
@@ -585,20 +584,20 @@ fn make_centering_gripper_example() {
             run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 2, "base": [pivot.0 * sx, y, pivot.1], "axis": [0, 1, 0], "operation": "join", "targets": [pin]}));
         }
         colours.push((pin, "#f5dd1e", 1.0));
-        // Spring post, one M5 down from the lower body.
-        let (a, b) = if sx > 0.0 { (52.0, 58.0) } else { (-58.0, -52.0) };
-        let post = mk(&mut s, "solid.box", bx((a, b), (-5.0, 5.0), (0.0, 96.0)));
-        cbore(&mut s, &body, [55.0 * sx, 0.0, 116.0], [0.0, 0.0, -1.0], 5.0, 20.0);
-        hole(&mut s, &post, [55.0 * sx, 0.0, 96.01], [0.0, 0.0, -1.0], 2.5, 12.0);
-        let sc = screw(&mut s, [55.0 * sx, 0.0, 116.0], [0.0, 0.0, -1.0], 5.0, 26.0, 0.5);
+        // Spring post, one M5 down from the guide block.
+        let (a, b) = if sx > 0.0 { (40.0, 46.0) } else { (-46.0, -40.0) };
+        let post = mk(&mut s, "solid.box", bx((a, b), (-5.0, 5.0), (0.0, 82.0)));
+        cbore(&mut s, &body, [43.0 * sx, 0.0, 102.0], [0.0, 0.0, -1.0], 5.0, 20.0);
+        hole(&mut s, &post, [43.0 * sx, 0.0, 82.01], [0.0, 0.0, -1.0], 2.5, 12.0);
+        let sc = screw(&mut s, [43.0 * sx, 0.0, 102.0], [0.0, 0.0, -1.0], 5.0, 26.0, 0.5);
         colours.push((sc, black, 1.0));
         colours.push((post, frame_c, 0.85));
     }
 
-    // ===== PLUNGER: the cone (narrow at the rollers when open), the centring pin at its tip,
-    // the floating coupler at its top.
+    // ===== PLUNGER: Ø27 body in the bush, a 17° cone down to a Ø11 neck at the rollers, a stop
+    // collar, the centring pin; the floating coupler on top.
     part(&mut s, "Plunger");
-    let prof = [(0.0, -6.0), (4.0, 0.0), (4.0, 20.0), (8.0, 20.0), (8.0, 68.0), (14.0, 80.0), (14.0, 92.0), (8.0, 92.0), (8.0, 150.0), (0.0, 150.0)];
+    let prof = [(0.0, 10.0), (2.0, 14.0), (2.0, 40.0), (7.5, 40.0), (7.5, 46.0), (5.5, 46.0), (5.5, 54.4), (13.5, 80.4), (13.5, 120.0), (0.0, 120.0)];
     run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Plunger profile"}));
     let p: Vec<[f64; 2]> = prof.iter().map(|q| [q.0, q.1]).collect();
     run(&mut s, "sketch.line", json!({"points": p, "closed": true}));
@@ -607,33 +606,33 @@ fn make_centering_gripper_example() {
     run(&mut s, "solid.revolve", json!({"sketch": "Plunger profile", "axis": "Z", "operation": "new"}));
     let plunger = names(&s).into_iter().find(|n| !before.contains(n)).unwrap_or_default();
     colours.push((plunger.clone(), "#2a7fe0", 1.0));
-    let coupler = mk(&mut s, "solid.cylinder", json!({"radius": 12, "height": 10, "base": [0, 0, 150], "axis": [0, 0, 1], "operation": "new"}));
+    let coupler = mk(&mut s, "solid.cylinder", json!({"radius": 9, "height": 8, "base": [0, 0, 120], "axis": [0, 0, 1], "operation": "new"}));
     colours.push((coupler, "#a8e8f0", 1.0));
 
     // ===== FINGERS: drawn closed (pads upright on the part), turned open about the pivot.
-    // The roller runs from x 14 (on the neck, r 8) to x 20 (on the cone, r 14).
-    let arm = ((14.0f64 - pivot.0).powi(2) + (60.0f64 - pivot.1).powi(2)).sqrt();
-    let closed_z = pivot.1 + (arm * arm - (20.0 - pivot.0).powi(2)).sqrt();
-    let theta = (20.0f64 - pivot.0).atan2(closed_z - pivot.1) - (14.0f64 - pivot.0).atan2(60.0 - pivot.1);
+    // The roller centre runs from x 13.5 (open) to x 17 (closed).
+    let (open_x, closed_x, roller_z) = (13.5f64, 17.0f64, 60.0f64);
+    let arm = ((closed_x - pivot.0).powi(2) + (roller_z - pivot.1).powi(2)).sqrt();
+    let open_z = pivot.1 + (arm * arm - (open_x - pivot.0).powi(2)).sqrt();
+    let theta = (closed_x - pivot.0).atan2(roller_z - pivot.1) - (open_x - pivot.0).atan2(open_z - pivot.1);
     let open = |x: f64, z: f64| -> (f64, f64) {
-        // Turn by -theta about the pivot (tops in, tips out).
         let (dx, dz) = (x - pivot.0, z - pivot.1);
         let (sn, cs) = (-theta).sin_cos();
         (pivot.0 + dx * cs + dz * sn, pivot.1 - dx * sn + dz * cs)
     };
     let mut spring_on = Vec::new();
+    let mut pads = Vec::new();
     for (i, sx) in [1.0f64, -1.0].iter().enumerate() {
         let side = if *sx > 0.0 { "Right" } else { "Left" };
         part(&mut s, &format!("{side} Finger"));
-        let closed = [(20.0, 68.0), (30.0, 68.0), (30.0, 44.0), (27.0, 30.0), (42.0, -40.0), (17.05, -40.0), (17.05, -12.0), (24.0, -6.0), (11.5, 30.0), (14.5, 46.0)];
+        let closed = [(14.5, 66.0), (24.0, 66.0), (24.0, 40.0), (23.5, 28.0), (24.0, -8.0), (18.05, -8.0), (18.05, 8.0), (12.5, 28.0), (12.5, 40.0), (14.5, 52.0)];
         let pts: Vec<(f64, f64)> = closed.iter().map(|q| {
             let o = open(q.0, q.1);
             (o.0 * sx, o.1)
         }).collect();
         let pts: Vec<(f64, f64)> = if *sx < 0.0 { pts.into_iter().rev().collect() } else { pts };
         let finger = plate_xz(&mut s, &format!("{side} finger outline"), &pts, -7.0, 7.0);
-        // The roller's slot and axle hole; the pivot hole.
-        let rc = open(20.0, closed_z);
+        let rc = open(closed_x, roller_z);
         let (rx, rz) = (rc.0 * sx, rc.1);
         run(&mut s, "solid.cylinder", json!({"radius": 6.6, "height": 11, "base": [rx, -5.5, rz], "axis": [0, 1, 0], "operation": "cut", "targets": [finger]}));
         hole(&mut s, &finger, [rx, -8.0, rz], [0.0, 1.0, 0.0], 2.05, 16.0);
@@ -644,48 +643,48 @@ fn make_centering_gripper_example() {
         colours.push((roller.clone(), "#f5dd1e", 1.0));
         let axle = mk(&mut s, "solid.cylinder", json!({"radius": 2, "height": 14, "base": [rx, -7, rz], "axis": [0, 1, 0], "operation": "new"}));
         colours.push((axle, steel, 1.0));
-        // The grip pad (urethane), upright on the part when closed.
-        let pad: Vec<(f64, f64)> = [(15.05, -36.0), (17.05, -36.0), (17.05, -16.0), (15.05, -16.0)].iter().map(|q| {
+        let pad: Vec<(f64, f64)> = [(16.05, -6.0), (18.05, -6.0), (18.05, 6.0), (16.05, 6.0)].iter().map(|q| {
             let o = open(q.0, q.1);
             (o.0 * sx, o.1)
         }).collect();
         let pad: Vec<(f64, f64)> = if *sx < 0.0 { pad.into_iter().rev().collect() } else { pad };
         let padb = plate_xz(&mut s, &format!("{side} pad outline"), &pad, -7.0, 7.0);
-        colours.push((padb, "#30343a", 1.0));
-        let at = open(30.0, 10.0);
+        colours.push((padb.clone(), "#30343a", 1.0));
+        pads.push(padb);
+        let at = open(21.5, 18.0);
         spring_on.push(([at.0 * sx, 0.0, at.1], format!("{side} Finger"), roller, i));
     }
 
-    // ===== THE WORK: a round part with a centre hole, on a rest.
+    // ===== THE WORK: a 32 mm block with a centre hole for the pin, on a rest.
     run(&mut s, "component.activate", json!({"component": "root"}));
-    let work = mk(&mut s, "solid.cylinder", json!({"radius": 15, "height": 38, "base": [0, 0, -50], "axis": [0, 0, 1], "operation": "new", "body_name": "Work"}));
-    hole(&mut s, &work, [0.0, 0.0, -11.99], [0.0, 0.0, -1.0], 4.6, 22.0);
+    let work = mk(&mut s, "solid.box", json!({"length": 32, "width": 32, "height": 38, "corner": [-16, -16, -30], "operation": "new", "body_name": "Work"}));
+    hole(&mut s, &work, [0.0, 0.0, 8.01], [0.0, 0.0, -1.0], 2.6, 16.0);
     colours.push((work, "#e03030", 1.0));
-    let rest = mk(&mut s, "solid.box", json!({"length": 80, "width": 60, "height": 12, "corner": [-40, -30, -62], "operation": "new", "body_name": "Rest"}));
+    let rest = mk(&mut s, "solid.box", json!({"length": 80, "width": 60, "height": 12, "corner": [-40, -30, -42], "operation": "new", "body_name": "Rest"}));
     colours.push((rest, "#9aa0aa", 1.0));
 
     // ===== JOINTS
     let frame = occ(&s, "Frame");
     run(&mut s, "occurrence.ground", json!({"occurrence": frame, "grounded": true}));
-    let cyl_j = run(&mut s, "parts.air_cylinder", json!({"bore": 32, "stroke": 25, "at": [0, 0, 265], "axis": "-Z", "name": "Cylinder"}));
+    let cyl_j = run(&mut s, "parts.air_cylinder", json!({"bore": 32, "stroke": 15, "at": [0, 0, 223], "axis": "-Z", "name": "Cylinder"}));
     let barrel = occ(&s, "Cylinder Barrel");
     let rod = occ(&s, "Cylinder Rod");
     // Barrel: four M4 up through the top plate into its back wall.
     for (x, y) in [(12.0, 12.0), (-12.0, 12.0), (12.0, -12.0), (-12.0, -12.0)] {
         run(&mut s, "component.activate", json!({"component": "Frame"}));
-        cbore(&mut s, &top, [x, y, 177.0], [0.0, 0.0, 1.0], 4.0, 15.0);
-        let sc = screw(&mut s, [x, y, 177.0], [0.0, 0.0, 1.0], 4.0, 18.0, 0.5);
+        cbore(&mut s, &top, [x, y, 145.0], [0.0, 0.0, 1.0], 4.0, 15.0);
+        let sc = screw(&mut s, [x, y, 145.0], [0.0, 0.0, 1.0], 4.0, 18.0, 0.5);
         colours.push((sc, black, 1.0));
         run(&mut s, "component.activate", json!({"component": "Cylinder Barrel"}));
         let bb: Vec<String> = s.world_state().bodies.iter().filter(|b| s.doc.model_body_component(b) == s.doc.find_component("Cylinder Barrel").unwrap_or(0)).map(|b| b.name.clone()).collect();
         if let Some(b) = bb.first() {
-            hole(&mut s, b, [x, y, 191.99], [0.0, 0.0, 1.0], 2.0, 8.0);
+            hole(&mut s, b, [x, y, 159.99], [0.0, 0.0, 1.0], 2.0, 8.0);
         }
     }
     run(&mut s, "component.activate", json!({"component": "root"}));
     let plunger_o = occ(&s, "Plunger");
-    run(&mut s, "joint.as_built", json!({"type": "rigid", "a": frame, "b": barrel, "at": {"frame": {"origin": [0, 0, 192], "z": [0, 0, 1]}}, "name": "Cylinder Mount"}));
-    run(&mut s, "joint.as_built", json!({"type": "rigid", "a": rod, "b": plunger_o, "at": {"frame": {"origin": [0, 0, 160], "z": [0, 0, 1]}}, "name": "Floating Joint"}));
+    run(&mut s, "joint.as_built", json!({"type": "rigid", "a": frame, "b": barrel, "at": {"frame": {"origin": [0, 0, 160], "z": [0, 0, 1]}}, "name": "Cylinder Mount"}));
+    run(&mut s, "joint.as_built", json!({"type": "rigid", "a": rod, "b": plunger_o, "at": {"frame": {"origin": [0, 0, 128], "z": [0, 0, 1]}}, "name": "Floating Joint"}));
     for (b, c, o) in &colours {
         let _ = s.execute("appearance.assign", &json!({"bodies": [b], "color": c, "opacity": o}));
     }
@@ -701,7 +700,7 @@ fn make_centering_gripper_example() {
         run(&mut s, "joint.as_built", json!({"type": "revolute", "a": frame, "b": f, "at": {"frame": {"origin": [pivot.0 * sx, 0, pivot.1], "z": [0, 1, 0]}}, "name": format!("{} Pivot", if *i == 0 { "Right" } else { "Left" })}));
         let w = run(&mut s, "joint.wedge", json!({"a": cyl_j["joint"], "b": format!("{} Pivot", if *i == 0 { "Right" } else { "Left" }), "wedge": plunger, "roller": roller}));
         eprintln!("wedge {comp}: lift {} touching {}", w["lift"], w["touching"]);
-        let sp = run(&mut s, "motion.spring", json!({"from": at, "to": [52.0 * sx, 0, at[2]], "from_body": roller, "radius": 4, "wire": 0.9, "turns": 12, "name": format!("{} Spring", if *i == 0 { "Right" } else { "Left" })}));
+        let sp = run(&mut s, "motion.spring", json!({"from": at, "to": [40.0 * sx, 0, at[2]], "from_body": roller, "radius": 4, "wire": 0.9, "turns": 12, "name": format!("{} Spring", if *i == 0 { "Right" } else { "Left" })}));
         let _ = sp;
     }
     for (b, c, o) in &colours {
@@ -712,21 +711,33 @@ fn make_centering_gripper_example() {
     let _ = s.execute("appearance.assign", &json!({"components": ["Cylinder Barrel"], "color": "#a8e8f0", "opacity": 0.8}));
     let _ = s.execute("appearance.assign", &json!({"components": ["Cylinder Rod"], "color": "#d0d4dc"}));
     eprintln!("bodies: {}", s.world_state().bodies.len());
-    for v in [25.0, 12.0, 0.0] {
+    // Where the pads meet the work (the cylinder stalls there): the first stroke they reach it.
+    let pad_x = |s: &Session| -> f64 { pads.iter().filter_map(|n| s.world_state().body(n).map(|b| b.mesh().bounds().min.x.abs().min(b.mesh().bounds().max.x.abs()))).fold(f64::INFINITY, f64::min) };
+    let mut grip = 15.0;
+    let mut v = 0.0;
+    while v <= 15.0 {
         run(&mut s, "joint.drive", json!({"joint": cyl_j["joint"], "values": [format!("{v} mm")]}));
-        let pads: Vec<f64> = s.world_state().bodies.iter().filter(|b| b.mesh().bounds().size().x < 8.0 && b.mesh().bounds().size().z > 18.0 && b.mesh().bounds().size().z < 30.0 && b.mesh().bounds().max.z < 0.0).map(|b| {
-            let bb = b.mesh().bounds();
-            bb.min.x.abs().min(bb.max.x.abs())
-        }).collect();
+        if pad_x(&s) <= 16.06 {
+            grip = v;
+            break;
+        }
+        v += 0.1;
+    }
+    eprintln!("grip at {grip:.1} mm");
+    for v in [grip, grip * 0.5, 0.0] {
+        run(&mut s, "joint.drive", json!({"joint": cyl_j["joint"], "values": [format!("{v} mm")]}));
         let r = run(&mut s, "inspect.interference", json!({"budget_s": 900}));
         let list: Vec<String> = r["interferences"].as_array().map(|a| a.iter().map(|x| format!("{} × {} {:.3}", x["a"], x["b"], x["volume"].as_f64().unwrap_or(0.0))).collect()).unwrap_or_default();
-        eprintln!("at {v} mm: pads inner {pads:?}; {} touching/overlaps {:?} unchecked {}", list.len(), list, r["unchecked"]);
+        eprintln!("at {v:.1} mm: pads inner {:.2}; {} touching/overlaps {:?} unchecked {}", pad_x(&s), list.len(), list, r["unchecked"]);
     }
-    run(&mut s, "motion.sequence", json!({"name": "Clamp", "moves": [{"joint": cyl_j["joint"], "to": 25, "time": 1.2}, {"wait": 0.8}, {"joint": cyl_j["joint"], "to": 0, "time": 1.2}, {"wait": 0.5}]}));
+    let c = &cyl_j["joint"];
+    let cycle = [json!({"joint": c, "to": grip, "time": 1.6}), json!({"wait": 1.0}), json!({"joint": c, "to": 0, "time": 1.6}), json!({"wait": 0.8})];
+    let moves: Vec<Value> = cycle.iter().chain(cycle.iter()).cloned().collect();
+    run(&mut s, "motion.sequence", json!({"name": "Clamp", "moves": moves}));
     run(&mut s, "file.save", json!({"path": out.join("Centering-Gripper.draftnew").to_string_lossy()}));
     for (name, cam) in [
-        ("front", json!({"target": [0, 0, 75], "yaw": 0, "pitch": 0, "distance": 420})),
-        ("iso", json!({"target": [0, 0, 75], "yaw": -0.6, "pitch": 0.35, "distance": 460})),
+        ("front", json!({"target": [0, 0, 70], "yaw": 0, "pitch": 0, "distance": 330})),
+        ("iso", json!({"target": [0, 0, 70], "yaw": -0.6, "pitch": 0.35, "distance": 380})),
     ] {
         let p = json!({"study": "Clamp", "path": out.join(format!("{name}.gif")).to_string_lossy(), "width": 560, "height": 760, "fps": 20, "grid": false, "camera": cam});
         let r = super::animation::export_with(&s, &p, Some(&cpu));

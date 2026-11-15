@@ -564,6 +564,15 @@ fn build_scene(
             sc.lines.push(SceneLine { points: pts, color: col, width: if cons { 1.0 } else { 1.6 }, on_top: active });
         }
     }
+    // Springs, each a coil between its parts where they are now (owner: they were missing from
+    // exported animations).
+    for sp in s.doc.assembly.springs.iter().take(500) {
+        let (a, b) = crate::cmd::motion_kit::spring_ends(&s.doc, sp);
+        let pts = sp.coil(a, b, 16);
+        if pts.len() > 1 {
+            sc.lines.push(SceneLine { points: pts, color: Rgb(52, 62, 86), width: 2.2, on_top: false });
+        }
+    }
     sc
 }
 

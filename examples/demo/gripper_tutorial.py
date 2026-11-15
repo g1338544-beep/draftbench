@@ -22,11 +22,11 @@ from enclosure_ui_mcp import Demo  # noqa: E402
 
 # Where to click (world mm), seen from the front (looking along +Y).
 FRAME = [0, -25, 60]  # the front fork plate
-PLUNGER = [0, -8, 25]  # the plunger's neck under the fork plates
-FINGER = {"Right": [45.0, -7, -14.7], "Left": [-45.0, -7, -14.7]}  # each finger's lower arm
-PIVOT = {"Right": [18, -27, 38], "Left": [-18, -27, 38]}  # the pivot pins' heads
-SPRING_FINGER = {"Right": [37.0, -7, 14.2], "Left": [-37.0, -7, 14.2]}
-SPRING_POST = {"Right": [55, -5, 14.2], "Left": [-55, -5, 14.2]}
+PLUNGER = [0, -2, 18]  # the plunger's centring pin under the fork plates
+FINGER = {"Right": [25.5, -7, 0.8], "Left": [-25.5, -7, 0.8]}  # each finger's lower arm
+PIVOT = {"Right": [17.5, -27, 34], "Left": [-17.5, -27, 34]}  # the pivot pins' heads
+SPRING_FINGER = {"Right": [23.6, -7, 18.7], "Left": [-23.6, -7, 18.7]}
+SPRING_POST = {"Right": [43, -5, 18.7], "Left": [-43, -5, 18.7]}
 
 
 def open_tool(d, command):
@@ -92,7 +92,7 @@ def spring(d, step, side):
     ok(d)
 
 
-def play(d, study, seconds=3.7, rate=20):
+def play(d, study, seconds=5.0, rate=20):
     steps = int(seconds * rate)
     for k in range(steps + 1):
         d.ui("engine.execute", {"command": "motion.play", "params": {"study": study, "step": k}})
@@ -112,7 +112,7 @@ def run(d):
     wedge(d, 4, "Left")
     spring(d, 5, "Right")
     spring(d, 6, "Left")
-    d.caption("7. Motion Sequence: กระบอกลมยืด 25 มม. 1.2 วินาที → รอ → หด", "")
+    d.caption("7. Motion Sequence: กระบอกลมยืด 11.5 มม. (ปากแตะชิ้นงาน) 1.6 วินาที → รอ → หด", "")
     open_tool(d, "motion.sequence")
     d.wait(2.5)
     try:
@@ -121,7 +121,7 @@ def run(d):
         pass
     d.wait(0.5)
     cyl = "Cylinder"  # the air cylinder's slider, named after it
-    d.ui("engine.execute", {"command": "motion.sequence", "params": {"name": "Clamp", "moves": [{"joint": cyl, "to": 25, "time": 1.2}, {"wait": 0.8}, {"joint": cyl, "to": 0, "time": 1.2}, {"wait": 0.5}]}})
+    d.ui("engine.execute", {"command": "motion.sequence", "params": {"name": "Clamp", "moves": [{"joint": cyl, "to": 11.5, "time": 1.6}, {"wait": 1.0}, {"joint": cyl, "to": 0, "time": 1.6}, {"wait": 0.8}]}})
     d.caption("8. เล่น: กรวยลง → หมุดกลางเข้ารูชิ้นงาน (centering) → นิ้วหนีบ → กรวยขึ้น สปริงดึงนิ้วอ้า", "")
     for _ in range(2):
         play(d, "Clamp")

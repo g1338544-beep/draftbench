@@ -854,6 +854,9 @@ mod tests {
         let before = len(&s);
         s.execute("joint.drive", &json!({"joint": "Push", "value": 30})).unwrap();
         assert!((len(&s) - before - 30.0).abs() < 1e-6, "{} → {}", before, len(&s));
+        // Drawn in pictures and exported animations too, not only in the window.
+        let sc = crate::view::scene(&s, &crate::render::Camera::default());
+        assert!(sc.lines.iter().any(|l| l.points.len() > 100), "the coil is in the scene");
         let coil = s.doc.assembly.springs[0].coil(Vec3::ZERO, Vec3::new(0.0, 0.0, 40.0), 16);
         assert!(coil.iter().all(|q| ((q.x * q.x + q.y * q.y).sqrt() - 5.0).abs() < 1e-9), "radius 5 all along");
         s.execute("motion.spring_delete", &json!({"spring": r["name"]})).unwrap();
