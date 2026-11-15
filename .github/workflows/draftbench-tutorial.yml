@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tutorial:
-        description: "joint (air cylinder, with voice) or clamp (toggle clamp, captions only)"
+        description: "joint (air cylinder, with voice), clamp (toggle clamp) or gripper (centering gripper: wedge cam and springs), captions only but joint"
         default: clamp
 
 permissions:
@@ -58,10 +58,17 @@ jobs:
           mkdir -p out
           if [ "${{ inputs.tutorial }}" = clamp ]; then
             PARTS=toggle-clamp-parts; export TUTORIAL=clamp_tutorial.py NAME=clamp-tutorial
+          elif [ "${{ inputs.tutorial }}" = gripper ]; then
+            PARTS=gripper-parts; export TUTORIAL=gripper_tutorial.py NAME=gripper-tutorial
           else
             PARTS=cylinder-parts
           fi
-          target/release/solidcraft-cli run examples/motion/$PARTS.json --out out/$PARTS.draftnew
+          if [ "$PARTS" = gripper-parts ]; then
+            # Built by the engine's example builder (frame, cylinder and plunger joined, fingers loose).
+            GRIPPER_OUT=$PWD/out GRIPPER_PARTS_ONLY=1 cargo test --release -p solidcraft-engine --lib make_centering_gripper_example -- --ignored --nocapture
+          else
+            target/release/solidcraft-cli run examples/motion/$PARTS.json --out out/$PARTS.draftnew
+          fi
           Xvfb :99 -screen 0 1920x1080x24 &
           sleep 2
           DISPLAY=:99 target/release/solidcraft --control 7878 > out/app.log 2>&1 &

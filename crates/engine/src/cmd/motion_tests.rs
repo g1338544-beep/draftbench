@@ -475,7 +475,9 @@ fn an_exploded_view_plays_as_an_animation() {
 #[test]
 #[ignore]
 fn make_centering_gripper_example() {
-    let out = std::path::PathBuf::from("/tmp/claude-0/-home-claude/0d521626-d4c4-5579-8fb5-9dbf3bf16685/scratchpad/v3748");
+    // GRIPPER_OUT: where the files go; GRIPPER_PARTS_ONLY: stop after gripper-parts.draftnew (the
+    // tutorial's start: frame, cylinder and plunger joined, the fingers loose).
+    let out = std::path::PathBuf::from(std::env::var("GRIPPER_OUT").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string()));
     let mut s = Session::default();
     fn names(s: &Session) -> Vec<String> {
         s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
@@ -684,6 +686,15 @@ fn make_centering_gripper_example() {
     let plunger_o = occ(&s, "Plunger");
     run(&mut s, "joint.as_built", json!({"type": "rigid", "a": frame, "b": barrel, "at": {"frame": {"origin": [0, 0, 192], "z": [0, 0, 1]}}, "name": "Cylinder Mount"}));
     run(&mut s, "joint.as_built", json!({"type": "rigid", "a": rod, "b": plunger_o, "at": {"frame": {"origin": [0, 0, 160], "z": [0, 0, 1]}}, "name": "Floating Joint"}));
+    for (b, c, o) in &colours {
+        let _ = s.execute("appearance.assign", &json!({"bodies": [b], "color": c, "opacity": o}));
+    }
+    let _ = s.execute("appearance.assign", &json!({"components": ["Cylinder Barrel"], "color": "#a8e8f0", "opacity": 0.8}));
+    let _ = s.execute("appearance.assign", &json!({"components": ["Cylinder Rod"], "color": "#d0d4dc"}));
+    run(&mut s, "file.save", json!({"path": out.join("gripper-parts.draftnew").to_string_lossy()}));
+    if std::env::var("GRIPPER_PARTS_ONLY").is_ok() {
+        return;
+    }
     for (at, comp, roller, i) in &spring_on {
         let f = occ(&s, comp);
         let sx = if *i == 0 { 1.0 } else { -1.0 };
@@ -701,9 +712,6 @@ fn make_centering_gripper_example() {
     let _ = s.execute("appearance.assign", &json!({"components": ["Cylinder Barrel"], "color": "#a8e8f0", "opacity": 0.8}));
     let _ = s.execute("appearance.assign", &json!({"components": ["Cylinder Rod"], "color": "#d0d4dc"}));
     eprintln!("bodies: {}", s.world_state().bodies.len());
-    if std::env::var("WEDGE_DEBUG").is_ok() {
-        return;
-    }
     for v in [25.0, 12.0, 0.0] {
         run(&mut s, "joint.drive", json!({"joint": cyl_j["joint"], "values": [format!("{v} mm")]}));
         let pads: Vec<f64> = s.world_state().bodies.iter().filter(|b| b.mesh().bounds().size().x < 8.0 && b.mesh().bounds().size().z > 18.0 && b.mesh().bounds().size().z < 30.0 && b.mesh().bounds().max.z < 0.0).map(|b| {

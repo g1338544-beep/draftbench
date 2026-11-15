@@ -615,11 +615,6 @@ fn wedge(s: &mut Session, p: &Value) -> Result<Value> {
     // From the sample nearest where the wedge is now, out each way, each from the last.
     let near = xs.iter().enumerate().min_by(|p, q| (p.1 - a0).abs().total_cmp(&(q.1 - a0).abs())).map_or(0, |x| x.0);
     let rest = solve(a0, 0.0);
-    if std::env::var("WEDGE_DEBUG").is_ok() {
-        eprintln!("WEDGE p0 {p0:?} pivot {pivot:?} normal {normal:?} dv {dv:?} radius {radius} gap0 {} gap+ {} gap- {} inward {inward} rest {rest} segs {}", gap(a0, 0.0), gap(a0, 0.5), gap(a0, -0.5), segs.len());
-        let near: Vec<_> = segs.iter().filter(|sg| seg_dist((0.0, 0.0), **sg) < 12.0).take(10).collect();
-        eprintln!("WEDGE near segs {near:?}");
-    }
     let mut last = rest;
     for i in near..WEDGE_SAMPLES {
         last = solve(xs[i], last);
@@ -629,10 +624,6 @@ fn wedge(s: &mut Session, p: &Value) -> Result<Value> {
     for i in (0..near).rev() {
         last = solve(xs[i], last);
         moved[i] = last;
-    }
-    if std::env::var("WEDGE_DEBUG").is_ok() {
-        let show: Vec<String> = xs.iter().zip(&moved).step_by(6).map(|(x, m)| format!("{x:.1}:{m:.2}/{:.3}", gap(*x, *m))).collect();
-        eprintln!("WEDGE table {show:?}");
     }
     let table: Vec<f64> = moved.iter().map(|m| if turning { (b0 + m).to_radians() } else { b0 + m }).collect();
     if table.iter().any(|v| !v.is_finite()) {
@@ -1006,6 +997,34 @@ mod tests {
         // The cone's slanted faces: |x| + |z| = 10√2 about its centre.
         let gap = ((c.x - cone_c.x).abs() + (c.z - cone_c.z).abs() - 200f64.sqrt()) / 2f64.sqrt();
         assert!((gap - 4.0).abs() < 0.05, "on the face: {gap} {c:?}");
+    }
+
+    /// A revolved cone (its seam lies in the levers' plane) turns a lever on either side the same
+    /// way round: the right one came out turning the wrong way (its half of the section was lost).
+    #[test]
+    fn a_revolved_cone_turns_levers_on_both_sides_alike() {
+        let mut s = Session::default();
+        let r = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
+        r(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-5, 30, 100], "operation": "new", "body_name": "Frame"}));
+        r(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "P"}));
+        r(&mut s, "sketch.line", json!({"points": [[0, 20], [8, 20], [8, 68], [14, 80], [14, 92], [0, 92]], "closed": true}));
+        r(&mut s, "sketch.finish", json!({}));
+        r(&mut s, "solid.revolve", json!({"sketch": "P", "axis": "Z", "operation": "new", "body_name": "Cone"}));
+        let frame = occurrence_for(&mut s, "Frame", "t").unwrap();
+        r(&mut s, "occurrence.ground", json!({"occurrence": frame, "grounded": true}));
+        let cone = occurrence_for(&mut s, "Cone", "t").unwrap();
+        r(&mut s, "joint.as_built", json!({"type": "slider", "a": frame, "b": cone, "at": {"frame": {"origin": [0, 0, 0], "z": [0, 0, -1]}}, "name": "Push", "limits": [[0, 25]]}));
+        let mut lifts = Vec::new();
+        for (side, sx) in [("Right", 1.0f64), ("Left", -1.0)] {
+            r(&mut s, "solid.cylinder", json!({"radius": 6, "height": 10, "base": [14.0 * sx, -5, 60], "axis": [0, 1, 0], "operation": "new", "body_name": format!("{side} Roller")}));
+            let lever = occurrence_for(&mut s, &format!("{side} Roller"), "t").unwrap();
+            r(&mut s, "joint.as_built", json!({"type": "revolute", "a": frame, "b": lever, "at": {"frame": {"origin": [18.0 * sx, 0, 38], "z": [0, 1, 0]}}, "name": format!("{side} Pivot")}));
+            let out = r(&mut s, "joint.wedge", json!({"a": "Push", "b": format!("{side} Pivot"), "wedge": "Cone"}));
+            lifts.push((out["lift"]["min"].as_f64().unwrap(), out["lift"]["max"].as_f64().unwrap()));
+        }
+        let ((rmin, rmax), (lmin, lmax)) = (lifts[0], lifts[1]);
+        assert!(rmax > 15.0 && rmin > -0.1, "right turns out: {lifts:?}");
+        assert!((rmax + lmin).abs() < 0.05 && (rmin + lmax).abs() < 0.05, "mirror images: {lifts:?}");
     }
 
 }
