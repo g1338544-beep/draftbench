@@ -3412,11 +3412,62 @@ pub(crate) fn emboss_profile_plane(app: &SolveApp, sketch: u64) -> Result<Option
 fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let mut cmds = dialog_commands_world(app, d)?;
     if let Some(w) = app.session.wcs.filter(|w| *w != solidcraft_engine::cmd::wcs::Wcs::WORLD) {
-        for (id, p) in cmds.iter_mut() {
-            in_wcs(&w, id, p);
+        let mut out = Vec::new();
+        for (id, mut p) in cmds {
+            let turned = turned_primitive(&w, app, &id, &mut p);
+            in_wcs(&w, &id, &mut p);
+            out.push((id, p));
+            out.extend(turned);
         }
+        cmds = out;
     }
     Ok(cmds)
+}
+
+/// A primitive placed with nothing picked under a turned WCS: made at the world origin square
+/// to the world, then turned onto the WCS's axes and moved to its origin (owner: "the box follows
+/// the moved WCS"), so its sides run along XC, YC, ZC. The move that does it, when one is needed.
+pub(crate) fn turned_primitive(w: &solidcraft_engine::cmd::wcs::Wcs, app: &SolveApp, id: &str, p: &mut Value) -> Option<(String, Value)> {
+    let o = p.as_object_mut()?;
+    let key = match id {
+        "solid.box" => "corner",
+        "solid.cylinder" | "solid.coil" => "base",
+        _ => return None,
+    };
+    if o.contains_key(key) || o.contains_key("center") || o.get("operation").and_then(Value::as_str).is_some_and(|op| op != "new") {
+        return None;
+    }
+    let (x, y, z) = (w.x, w.y, w.z());
+    // The turn taking the world's axes onto the WCS's (axis and angle of the matrix [x y z]).
+    let trace = x.x + y.y + z.z;
+    let angle = ((trace - 1.0) * 0.5).clamp(-1.0, 1.0).acos();
+    if angle.abs() < 1e-9 {
+        return None;
+    }
+    let axis = Vec3::new(y.z - z.y, z.x - x.z, x.y - y.x);
+    let axis = match axis.normalized() {
+        Some(a) => a,
+        // A half turn: R = 2aaᵀ − I, so a column plus its own axis runs along the turn's axis
+        // (the column with the largest diagonal, for accuracy).
+        None => {
+            let cols = [(x.x, x, Vec3::X), (y.y, y, Vec3::Y), (z.z, z, Vec3::Z)];
+            let (_, c, e) = cols.into_iter().max_by(|a, b| a.0.total_cmp(&b.0))?;
+            (c + e).normalized()?
+        }
+    };
+    let name = o.get("body_name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| {
+        let st = app.session.world_state();
+        (1..).map(|i| format!("Body{i}")).find(|n| st.body(n).is_none()).unwrap_or_else(|| "Body".into())
+    });
+    o.insert("body_name".into(), json!(name));
+    o.insert(key.into(), json!([0.0, 0.0, 0.0]));
+    if id != "solid.box" {
+        o.insert("axis".into(), json!([0.0, 0.0, 1.0]));
+    }
+    Some((
+        "solid.move".into(),
+        json!({"bodies": [name], "axis": pt(axis), "angle": format!("{} deg", angle.to_degrees()), "translate": pt(w.origin)}),
+    ))
 }
 
 /// Owner: "once the origin is moved, every command counts from it" (cut, mirror, patterns,

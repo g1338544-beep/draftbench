@@ -222,3 +222,19 @@ fn origin_axes_planes_and_primitives_follow_the_moved_wcs() {
     crate::dialogs::in_wcs(&w, "sketch.create", &mut p);
     assert_eq!(p["plane"], json!("XY"), "a sketch's plane is the sketch dialog's business");
 }
+
+/// Owner: a box made under a turned WCS runs along its axes. The WCS at (100, 50, 0), its XC the
+/// world's Y: a 10 × 20 × 5 box from its origin goes 10 along Y and 20 along −X.
+#[test]
+fn a_box_under_a_turned_wcs_runs_along_its_axes() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let w = solidcraft_engine::cmd::wcs::Wcs { origin: Vec3::new(100.0, 50.0, 0.0), x: Vec3::Y, y: -Vec3::X };
+    let mut p = json!({"length": 10, "width": 20, "height": 5});
+    let turn = crate::dialogs::turned_primitive(&w, &app, "solid.box", &mut p).expect("a turn");
+    crate::dialogs::in_wcs(&w, "solid.box", &mut p);
+    app.run("solid.box", p).unwrap();
+    app.run(&turn.0, turn.1).unwrap();
+    let bb = app.session.world_state().bodies[0].mesh().bounds();
+    let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-6;
+    assert!(near(bb.min, Vec3::new(80.0, 50.0, 0.0)) && near(bb.max, Vec3::new(100.0, 60.0, 5.0)), "{bb:?}");
+}
