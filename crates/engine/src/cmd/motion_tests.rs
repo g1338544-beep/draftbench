@@ -519,6 +519,10 @@ fn make_centering_gripper_example() {
         names(s).into_iter().find(|n| !before.contains(n)).unwrap_or_default()
     }
     let mut colours: Vec<(String, &str, f64)> = Vec::new();
+    // Each part as a component of its own (owner: a real assembly, every part in the exploded
+    // view and the parts list): (body, the component it is made in, part name, part number,
+    // description, material).
+    let mut parts: Vec<(String, &str, String, &str, &str, &str)> = Vec::new();
     let (steel, black, frame_c) = ("#c8ccd4", "#3a3d44", "#f4b8b8");
     let ys = |y: f64| [0.0, y, 0.0];
     let _ = ys;
@@ -535,34 +539,40 @@ fn make_centering_gripper_example() {
         hole(&mut s, &top, [x, y, 160.01], [0.0, 0.0, -1.0], 2.5, 10.0);
     }
     colours.push((top.clone(), frame_c, 0.85));
+    parts.push((top.clone(), "Frame", "Top Plate".into(), "GR-01", "Top plate 90x50x15", "A6061-T6"));
     let mut pillars = Vec::new();
     for sx in [-1.0f64, 1.0] {
         let (a, b) = if sx > 0.0 { (30.0, 45.0) } else { (-45.0, -30.0) };
         let p = mk(&mut s, "solid.box", bx((a, b), (-25.0, 25.0), (102.0, 145.0)));
         colours.push((p.clone(), frame_c, 0.85));
+        parts.push((p.clone(), "Frame", format!("Pillar {}", if sx > 0.0 { "R" } else { "L" }), "GR-02", "Pillar 15x50x43", "A6061-T6"));
         pillars.push(p);
     }
     let body = mk(&mut s, "solid.box", bx((-48.0, 48.0), (-25.0, 25.0), (82.0, 102.0)));
     hole(&mut s, &body, [0.0, 0.0, 81.0], [0.0, 0.0, 1.0], 18.0, 22.0);
     colours.push((body.clone(), "#f2f4f8", 0.45));
+    parts.push((body.clone(), "Frame", "Guide Block".into(), "GR-03", "Guide block 96x50x20", "A6061-T6"));
     for (i, sx) in [-1.0f64, 1.0].iter().enumerate() {
         for y in [-12.0, 12.0] {
             let x = 37.5 * sx;
             cbore(&mut s, &top, [x, y, 160.0], [0.0, 0.0, -1.0], 6.0, 15.0);
             hole(&mut s, &pillars[i], [x, y, 145.01], [0.0, 0.0, -1.0], 3.0, 14.0);
             let a = screw(&mut s, [x, y, 160.0], [0.0, 0.0, -1.0], 6.0, 22.0, 0.5);
-            colours.push((a, black, 1.0));
+            colours.push((a.clone(), black, 1.0));
+            parts.push((a, "Frame", String::new(), "ISO4762-M6x22", "SHCS M6x22 ISO 4762", "Steel 12.9"));
             cbore(&mut s, &body, [x, y, 82.0], [0.0, 0.0, 1.0], 6.0, 20.0);
             hole(&mut s, &pillars[i], [x, y, 101.99], [0.0, 0.0, 1.0], 3.0, 14.0);
             let b = screw(&mut s, [x, y, 82.0], [0.0, 0.0, 1.0], 6.0, 26.0, 0.5);
-            colours.push((b, black, 1.0));
+            colours.push((b.clone(), black, 1.0));
+            parts.push((b, "Frame", String::new(), "ISO4762-M6x26", "SHCS M6x26 ISO 4762", "Steel 12.9"));
         }
     }
     // Guide bush (bronze) for the plunger's Ø27 body, flanged on top.
     let bush = mk(&mut s, "solid.cylinder", json!({"radius": 18, "height": 20, "base": [0, 0, 82], "axis": [0, 0, 1], "operation": "new"}));
     run(&mut s, "solid.cylinder", json!({"radius": 22, "height": 3, "base": [0, 0, 102], "axis": [0, 0, 1], "operation": "join", "targets": [bush]}));
     hole(&mut s, &bush, [0.0, 0.0, 81.0], [0.0, 0.0, 1.0], 13.55, 26.0);
-    colours.push((bush, "#f0a830", 1.0));
+    colours.push((bush.clone(), "#f0a830", 1.0));
+    parts.push((bush, "Frame", "Guide Bush".into(), "GR-04", "Guide bush flanged D36/D27", "Bronze CAC406"));
     // Fork plates, the finger pivots' pins through them.
     let pivot = (17.5f64, 34.0f64);
     for (y0, y1) in [(15.0, 25.0), (-25.0, -15.0)] {
@@ -574,24 +584,29 @@ fn make_centering_gripper_example() {
             cbore(&mut s, &body, [x, (y0 + y1) / 2.0, 102.0], [0.0, 0.0, -1.0], 5.0, 20.0);
             hole(&mut s, &f, [x, (y0 + y1) / 2.0, 82.01], [0.0, 0.0, -1.0], 2.5, 12.0);
             let sc = screw(&mut s, [x, (y0 + y1) / 2.0, 102.0], [0.0, 0.0, -1.0], 5.0, 26.0, 0.5);
-            colours.push((sc, black, 1.0));
+            colours.push((sc.clone(), black, 1.0));
+            parts.push((sc, "Frame", String::new(), "ISO4762-M5x26", "SHCS M5x26 ISO 4762", "Steel 12.9"));
         }
         colours.push((f.clone(), "#f2f4f8", 0.4));
+        parts.push((f.clone(), "Frame", format!("Fork Plate {}", if y0 > 0.0 { "B" } else { "F" }), "GR-05", "Fork plate 56x10x58", "A6061-T6"));
     }
     for sx in [-1.0f64, 1.0] {
         let pin = mk(&mut s, "solid.cylinder", json!({"radius": 3, "height": 50, "base": [pivot.0 * sx, -25, pivot.1], "axis": [0, 1, 0], "operation": "new"}));
         for y in [-27.0, 25.0] {
             run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 2, "base": [pivot.0 * sx, y, pivot.1], "axis": [0, 1, 0], "operation": "join", "targets": [pin]}));
         }
-        colours.push((pin, "#f5dd1e", 1.0));
+        colours.push((pin.clone(), "#f5dd1e", 1.0));
+        parts.push((pin, "Frame", format!("Pivot Pin {}", if sx > 0.0 { "R" } else { "L" }), "GR-06", "Pivot pin D6x50", "S45C HRC45"));
         // Spring post, one M5 down from the guide block.
         let (a, b) = if sx > 0.0 { (40.0, 46.0) } else { (-46.0, -40.0) };
         let post = mk(&mut s, "solid.box", bx((a, b), (-5.0, 5.0), (0.0, 82.0)));
         cbore(&mut s, &body, [43.0 * sx, 0.0, 102.0], [0.0, 0.0, -1.0], 5.0, 20.0);
         hole(&mut s, &post, [43.0 * sx, 0.0, 82.01], [0.0, 0.0, -1.0], 2.5, 12.0);
         let sc = screw(&mut s, [43.0 * sx, 0.0, 102.0], [0.0, 0.0, -1.0], 5.0, 26.0, 0.5);
-        colours.push((sc, black, 1.0));
-        colours.push((post, frame_c, 0.85));
+        colours.push((sc.clone(), black, 1.0));
+        parts.push((sc, "Frame", String::new(), "ISO4762-M5x26", "SHCS M5x26 ISO 4762", "Steel 12.9"));
+        colours.push((post.clone(), frame_c, 0.85));
+        parts.push((post, "Frame", format!("Spring Post {}", if sx > 0.0 { "R" } else { "L" }), "GR-07", "Spring post 6x10x82", "A6061-T6"));
     }
 
     // ===== PLUNGER: Ø27 body in the bush, a 17° cone down to a Ø11 neck at the rollers, a stop
@@ -607,7 +622,8 @@ fn make_centering_gripper_example() {
     let plunger = names(&s).into_iter().find(|n| !before.contains(n)).unwrap_or_default();
     colours.push((plunger.clone(), "#2a7fe0", 1.0));
     let coupler = mk(&mut s, "solid.cylinder", json!({"radius": 9, "height": 8, "base": [0, 0, 120], "axis": [0, 0, 1], "operation": "new"}));
-    colours.push((coupler, "#a8e8f0", 1.0));
+    colours.push((coupler.clone(), "#a8e8f0", 1.0));
+    parts.push((coupler, "Plunger", "Floating Coupler".into(), "GR-09", "Floating coupler D18x8", "S45C"));
 
     // ===== FINGERS: drawn closed (pads upright on the part), turned open about the pivot.
     // The roller centre runs from x 13.5 (open) to x 17 (closed).
@@ -641,8 +657,11 @@ fn make_centering_gripper_example() {
         let roller = mk(&mut s, "solid.cylinder", json!({"radius": 6, "height": 10, "base": [rx, -5, rz], "axis": [0, 1, 0], "operation": "new"}));
         hole(&mut s, &roller, [rx, -6.0, rz], [0.0, 1.0, 0.0], 2.05, 12.0);
         colours.push((roller.clone(), "#f5dd1e", 1.0));
+        let fc: &str = if *sx > 0.0 { "Right Finger" } else { "Left Finger" };
+        parts.push((roller.clone(), fc, format!("Roller {}", &side[..1]), "GR-11", "Cam roller D12x10", "SUJ2 HRC60"));
         let axle = mk(&mut s, "solid.cylinder", json!({"radius": 2, "height": 14, "base": [rx, -7, rz], "axis": [0, 1, 0], "operation": "new"}));
-        colours.push((axle, steel, 1.0));
+        colours.push((axle.clone(), steel, 1.0));
+        parts.push((axle, fc, format!("Roller Axle {}", &side[..1]), "GR-12", "Roller axle D4x14", "SUS440C"));
         let pad: Vec<(f64, f64)> = [(16.05, -6.0), (18.05, -6.0), (18.05, 6.0), (16.05, 6.0)].iter().map(|q| {
             let o = open(q.0, q.1);
             (o.0 * sx, o.1)
@@ -650,6 +669,7 @@ fn make_centering_gripper_example() {
         let pad: Vec<(f64, f64)> = if *sx < 0.0 { pad.into_iter().rev().collect() } else { pad };
         let padb = plate_xz(&mut s, &format!("{side} pad outline"), &pad, -7.0, 7.0);
         colours.push((padb.clone(), "#30343a", 1.0));
+        parts.push((padb.clone(), fc, format!("Grip Pad {}", &side[..1]), "GR-13", "Grip pad 12x14x2", "Urethane 90A"));
         pads.push(padb);
         let at = open(21.5, 18.0);
         spring_on.push(([at.0 * sx, 0.0, at.1], format!("{side} Finger"), roller, i));
@@ -674,7 +694,8 @@ fn make_centering_gripper_example() {
         run(&mut s, "component.activate", json!({"component": "Frame"}));
         cbore(&mut s, &top, [x, y, 145.0], [0.0, 0.0, 1.0], 4.0, 15.0);
         let sc = screw(&mut s, [x, y, 145.0], [0.0, 0.0, 1.0], 4.0, 18.0, 0.5);
-        colours.push((sc, black, 1.0));
+        colours.push((sc.clone(), black, 1.0));
+        parts.push((sc, "Frame", String::new(), "ISO4762-M4x18", "SHCS M4x18 ISO 4762", "Steel 12.9"));
         run(&mut s, "component.activate", json!({"component": "Cylinder Barrel"}));
         let bb: Vec<String> = s.world_state().bodies.iter().filter(|b| s.doc.model_body_component(b) == s.doc.find_component("Cylinder Barrel").unwrap_or(0)).map(|b| b.name.clone()).collect();
         if let Some(b) = bb.first() {
@@ -702,6 +723,40 @@ fn make_centering_gripper_example() {
         eprintln!("wedge {comp}: lift {} touching {}", w["lift"], w["touching"]);
         let sp = run(&mut s, "motion.spring", json!({"from": at, "to": [40.0 * sx, 0, at[2]], "from_body": roller, "radius": 4, "wire": 0.9, "turns": 12, "name": format!("{} Spring", if *i == 0 { "Right" } else { "Left" })}));
         let _ = sp;
+    }
+    // Every part a component of its own, in the component it was made in, with its part number,
+    // description and material: the parts list counts the screws by part number.
+    let mut screws: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (body, parent, name, pn, desc, mat) in &parts {
+        run(&mut s, "component.activate", json!({"component": parent}));
+        let made = run(&mut s, "component.from_bodies", json!({"bodies": [body]}));
+        let c = made["components"][0]["component"].clone();
+        let name = if name.is_empty() {
+            let k = screws.entry(pn).or_insert(0);
+            *k += 1;
+            format!("{} ({k})", desc.split(" ISO").next().unwrap_or(desc))
+        } else {
+            name.clone()
+        };
+        run(&mut s, "component.rename", json!({"component": c, "name": name}));
+        run(&mut s, "component.metadata.set", json!({"component": c, "part_number": pn, "description": desc, "properties": {"material": mat}}));
+    }
+    for (comp, pn, desc, mat) in [
+        ("Frame", "", "", ""),
+        ("Plunger", "GR-08", "Plunger, cone 17 deg", "SCM440 HRC50"),
+        ("Right Finger", "GR-10R", "Finger, right", "S45C"),
+        ("Left Finger", "GR-10L", "Finger, left", "S45C"),
+        ("Cylinder Barrel", "GR-14", "Air cylinder D32 st15 (body)", "Bought"),
+        ("Cylinder Rod", "GR-15", "Piston rod D12", "S45C hard chrome"),
+    ] {
+        if !pn.is_empty() {
+            run(&mut s, "component.metadata.set", json!({"component": comp, "part_number": pn, "description": desc, "properties": {"material": mat}}));
+        }
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let bom = run(&mut s, "assembly.bom", json!({}));
+    for r in bom["rows"].as_array().into_iter().flatten() {
+        eprintln!("bom {} {} x{} {}", r["item"], r["description"], r["count"], r["properties"]["material"]);
     }
     for (b, c, o) in &colours {
         if let Err(e) = s.execute("appearance.assign", &json!({"bodies": [b], "color": c, "opacity": o})) {

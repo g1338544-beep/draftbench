@@ -831,7 +831,15 @@ fn manual_once(
             1 => Vec3::new(0.0, 1.0, 0.0),
             _ => Vec3::new(0.0, 0.0, 1.0),
         };
-        for (angles, x, y, c, scale, lo, hi) in &frames {
+        // A section's cutting line is drawn on one view (owner: not on every view it crosses): the
+        // plan (top or bottom) view when the plane shows edge-on there, else the first one it does.
+        let mut order: Vec<&_> = frames.iter().collect();
+        order.sort_by_key(|f| if (f.0.1.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-3 { 0 } else { 1 });
+        let mut drawn = false;
+        for (angles, x, y, c, scale, lo, hi) in order {
+            if drawn && sec_line.is_none() {
+                break;
+            }
             let cam = Camera { target: Vec3::ZERO, yaw: angles.0, pitch: angles.1, roll: 0.0, fov: 0.0, distance: 1.0e6, ..Camera::default() };
             let (right, up, _) = cam.basis();
             let (sx, sy) = (e.dot(right), e.dot(up));
@@ -862,6 +870,7 @@ fn manual_once(
             let (a, b) = (Vec2::new(a.x - dir.x * 2.5, a.y - dir.y * 2.5), Vec2::new(b.x + dir.x * 2.5, b.y + dir.y * 2.5));
             line("CENTER", a, b, &mut entities);
             centre_used = true;
+            drawn = true;
             // Heavy ends, as on a drawing sheet: the cutting line's ends are drawn thick.
             let stub = (((b.x - a.x).hypot(b.y - a.y)) * 0.25).clamp(3.0, 12.0);
             heavy(a, Vec2::new(a.x + dir.x * stub, a.y + dir.y * stub), &mut entities);
@@ -1903,7 +1912,9 @@ fn finish(
     // The parts list (BOM) over the title block: header at the bottom, items counted upward.
     if let Some(rows) = p.get("bom").and_then(Value::as_array).filter(|r| !r.is_empty()) {
         let edges = [0.0, 0.10, 0.56, 0.68, 1.0];
-        let rh = 7.0;
+        // Row height (mm): `bom_row` 4…12 (default 7); a compact list writes its text smaller to fit.
+        let rh = p.get("bom_row").and_then(Value::as_f64).filter(|h| (4.0..=12.0).contains(h)).unwrap_or(7.0);
+        let th = th.min(rh * 0.5);
         let n = rows.len().min(40);
         let y0 = by0 + if block_on { bh } else { 0.0 };
         let top = y0 + rh * (n as f64 + 1.0);

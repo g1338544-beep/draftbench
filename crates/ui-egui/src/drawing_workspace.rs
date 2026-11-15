@@ -359,6 +359,8 @@ pub struct State {
     dims: Vec<DimItem>,
     /// The parts list drawn over the title block: item, description, quantity, material.
     bom: Vec<[String; 4]>,
+    /// The parts list drawn compact: 5 mm rows, smaller text (owner: the list need not be big).
+    bom_compact: bool,
     /// Centre marks placed by hand (x, y, arm length in mm on the sheet), and the tool that places them.
     marks: Vec<[f32; 3]>,
     mark_tool: bool,
@@ -574,6 +576,7 @@ impl Default for State {
             placed: Vec::new(),
             dims: Vec::new(),
             bom: Vec::new(),
+            bom_compact: false,
             marks: Vec::new(),
             mark_tool: false,
             mark_mode: 0,
@@ -679,7 +682,7 @@ impl State {
         json!({
             "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "axis": v.axis.map(|(p, x, y)| json!([p, x, y])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "letter_off": v.letter_off, "flip": v.flip, "colour": v.colour, "exploded": v.exploded})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals, "style": d.style})).collect::<Vec<_>>(),
-            "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
+            "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom, "bom_compact": self.bom_compact,
             "marks": self.marks,
             "clines": self.clines,
             "vlines": self.vlines,
@@ -1112,6 +1115,7 @@ impl State {
                 }
             }
         }
+        self.bom_compact = d.get("bom_compact").and_then(serde_json::Value::as_bool).unwrap_or(false);
         if let Some(rows) = d.get("bom").and_then(serde_json::Value::as_array) {
             for row in rows.iter().take(40) {
                 let mut cells: [String; 4] = Default::default();
@@ -1646,6 +1650,9 @@ fn params(st: &State) -> Value {
         let num = |t: &str, d: f64| t.trim().parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(d);
         p["size"] = json!([num(&st.custom_w, 420.0), num(&st.custom_h, 297.0)]);
     }
+    if st.bom_compact {
+        p["bom_row"] = json!(5.0);
+    }
     p["frame_on"] = json!(st.frame_on);
     p["block_on"] = json!(st.block_on);
     p["block_template"] = json!(if st.block_free {
@@ -1755,6 +1762,55 @@ fn parse(v: &Value) -> Option<Sheet> {
     })
 }
 
+/// Balloons in two tidy columns beside the view (owner: like a production assembly drawing), each
+/// on the side of the view its part is on, in the order the parts stand from top to bottom, so no
+/// two leaders cross; 10 mm apart, kept on the sheet.
+fn balloon_columns(marks: &[(String, Pos2)], (cx, cy, w, h): (f32, f32, f32, f32), (sheet_w, sheet_h): (f32, f32)) -> Vec<DimItem> {
+    const GAP: f32 = 10.0;
+    let mut out = Vec::new();
+    for left in [true, false] {
+        let mut side: Vec<&(String, Pos2)> = marks.iter().filter(|m| (m.1.x < cx) == left).collect();
+        // Top first (the sheet's y runs up).
+        side.sort_by(|a, b| b.1.y.total_cmp(&a.1.y));
+        let x = if left { (cx - w * 0.5 - 12.0).max(16.0) } else { (cx + w * 0.5 + 12.0).min(sheet_w - 16.0) };
+        let (lo, hi) = ((cy - h * 0.5 - 6.0).max(16.0), (cy + h * 0.5 + 6.0).min(sheet_h - 16.0));
+        // Each balloon as level with its part as it can be, pushed down past the one above it…
+        let mut ys: Vec<f32> = Vec::with_capacity(side.len());
+        for m in &side {
+            let want = m.1.y.clamp(lo, hi);
+            let y = ys.last().map_or(want, |p: &f32| want.min(p - GAP));
+            ys.push(y);
+        }
+        // …and the column moved up as a whole when it runs off the bottom (spread evenly when it is too long).
+        if let Some(last) = ys.last().copied()
+            && last < lo
+        {
+            let room = hi - lo;
+            let need = GAP * (ys.len().saturating_sub(1)) as f32;
+            if need <= room {
+                let shift = lo - last;
+                for y in &mut ys {
+                    *y += shift;
+                }
+                let mut top = hi;
+                for y in &mut ys {
+                    *y = y.min(top);
+                    top = *y - GAP;
+                }
+            } else {
+                let step = room / (ys.len().saturating_sub(1)).max(1) as f32;
+                for (k, y) in ys.iter_mut().enumerate() {
+                    *y = hi - step * k as f32;
+                }
+            }
+        }
+        for (m, y) in side.iter().zip(ys) {
+            out.push(DimItem { kind: 5, a: m.1, b: pos2(x, y), at: 0.0, text: m.0.clone(), slide: 0.0, decimals: -1, style: 0 });
+        }
+    }
+    out
+}
+
 /// Auto balloons (owner): a balloon on each part of the assembly in the drawing's pictorial view
 /// (else its first plain view), numbered as the parts list (Bill of Materials) numbers its rows,
 /// leaders running out past the view's edge. Balloons placed before are replaced. The parts list
@@ -1775,6 +1831,7 @@ fn auto_balloons(app: &mut SolveApp) -> Result<usize, String> {
         .or_else(|| sheet.boxes.iter().find(|b| usable(b.0)))
         .copied()
         .ok_or("Place a plain view first (not a section or a detail), then add the balloons")?;
+    let paper = (sheet.width, sheet.height);
     let k = sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1).filter(|k| *k > 0.0 && k.is_finite()).ok_or("the view has no scale yet: Update the drawing")?;
     let (cx, cy) = sheet.centres.iter().find(|s| s.0 == bx.0).map(|s| (s.1, s.2)).ok_or("the view is not drawn yet: Update the drawing")?;
     let (yaw, pitch) = app.drawing.placed.get(bx.0).map(view_angles).unwrap_or((0.0, 0.0));
@@ -1795,13 +1852,21 @@ fn auto_balloons(app: &mut SolveApp) -> Result<usize, String> {
     for row in rows.iter().take(200) {
         let item = row.get("item").map(|i| i.to_string().trim_matches('"').to_string()).unwrap_or_default();
         let comps: Vec<u64> = row.get("components").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+        // The part's first placement, at any depth (a screw placed four times is ballooned once).
         let at = comps.iter().find_map(|c| {
-            let occ = s.doc.occurrences.iter().find(|o| o.component == *c && o.parent == 0)?;
+            let occ = s.doc.occurrences.iter().find(|o| o.component == *c)?;
             let names = s.occurrence_bodies(&[occ.id], true).ok()?;
-            // On an exploded view the part sits where the exploded view moves it.
-            let apart = exploded
-                .and_then(|e| e.moves.iter().find(|(o, _)| *o == occ.id))
-                .map_or(Vec3::ZERO, |(_, d)| Vec3::new(d.x, d.y, d.z));
+            // On an exploded view the part sits where the exploded view moves it (and its parents).
+            let mut apart = Vec3::ZERO;
+            let mut id = occ.id;
+            for _ in 0..64 {
+                if let Some((_, d)) = exploded.and_then(|e| e.moves.iter().find(|(o, _)| *o == id)) {
+                    apart += Vec3::new(d.x, d.y, d.z);
+                }
+                let Some(parent) = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.parent).filter(|p| *p != 0) else { break };
+                let Some(up) = s.doc.occurrence_of(parent).map(|o| o.id) else { break };
+                id = up;
+            }
             centre_of(&names).map(|w| w + apart)
         });
         if let Some(w) = at {
@@ -1811,26 +1876,7 @@ fn auto_balloons(app: &mut SolveApp) -> Result<usize, String> {
     if marks.is_empty() {
         return Err("None of the parts list's parts could be found in the view".into());
     }
-    // Leaders out from the view's middle, past its edge, spread round it.
-    let mid = pos2(bx.1, bx.2);
-    let reach = bx.3.max(bx.4) * 0.5 + 12.0;
-    let mut placed: Vec<Pos2> = Vec::new();
-    let mut out = Vec::new();
-    for (item, a) in marks {
-        let d = a - mid;
-        let mut ang = if d.length() > 1e-3 { d.y.atan2(d.x) } else { 0.8 };
-        let mut b = mid + egui::vec2(ang.cos(), ang.sin()) * reach;
-        // Keep balloons apart (12 mm).
-        for _ in 0..36 {
-            if placed.iter().all(|p| (*p - b).length() > 12.0) {
-                break;
-            }
-            ang += 0.17;
-            b = mid + egui::vec2(ang.cos(), ang.sin()) * reach;
-        }
-        placed.push(b);
-        out.push(DimItem { kind: 5, a, b, at: 0.0, text: item, slide: 0.0, decimals: -1, style: 0 });
-    }
+    let out = balloon_columns(&marks, (bx.1, bx.2, bx.3, bx.4), paper);
     let n = out.len();
     app.drawing.dims.retain(|d| d.kind != 5);
     app.drawing.dims.extend(out);
@@ -4468,6 +4514,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.separator();
                     ui.label("Parts list (BOM)");
                     ui.small("Drawn over the title block. Number the balloons to match the items.");
+                    dirty |= crate::ui_kit::checkbox(ui, "Compact list (low rows, small text)", &mut app.drawing.bom_compact).changed();
                     ui.horizontal(|ui| {
                         if crate::ui_kit::button(ui, "Fill from assembly", crate::ui_kit::Button::Small).clicked() {
                             match app.run("assembly.bom", json!({})) {
@@ -8922,6 +8969,33 @@ mod hand_drawn_tests {
         );
     }
 
+    /// Owner: balloons stand in tidy columns beside the view, on the side of their part, in the
+    /// order the parts stand, so no two leaders cross, and 10 mm or more apart.
+    #[test]
+    fn balloons_stand_in_columns_and_their_leaders_do_not_cross() {
+        let marks: Vec<(String, Pos2)> = [(-20.0, 150.0), (-5.0, 152.0), (-30.0, 100.0), (25.0, 120.0), (10.0, 121.0), (30.0, 60.0), (-1.0, 60.0)]
+            .iter()
+            .enumerate()
+            .map(|(i, (x, y))| ((i + 1).to_string(), pos2(200.0 + x, *y)))
+            .collect();
+        let out = balloon_columns(&marks, (200.0, 110.0, 80.0, 120.0), (420.0, 297.0));
+        assert_eq!(out.len(), marks.len());
+        for d in &out {
+            let m = marks.iter().find(|m| m.0 == d.text).unwrap();
+            assert_eq!(d.b.x < 200.0, m.1.x < 200.0, "balloon {} on its part's side", d.text);
+            assert!((d.b.x - 200.0).abs() >= 52.0, "beside the view: {:?}", d.b);
+        }
+        for (i, p) in out.iter().enumerate() {
+            for q in &out[i + 1..] {
+                if (p.b.x < 200.0) == (q.b.x < 200.0) {
+                    assert!((p.b.y - q.b.y).abs() >= 9.99, "{} and {} apart", p.text, q.text);
+                    // Same column: the higher part has the higher balloon (leaders do not cross).
+                    assert_eq!(p.a.y > q.a.y, p.b.y > q.b.y, "{} and {} in order", p.text, q.text);
+                }
+            }
+        }
+    }
+
     /// An angled section view is put on the line through its parent's centre across the cut, and slides on it.
     #[test]
     fn an_angled_section_view_keeps_to_its_axis() {
@@ -9020,12 +9094,51 @@ mod example_sheet_tests {
         crate::gpu::install_cpu_picture_renderer();
         let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
         app.session.doc_mut().name = "Centering Gripper".into();
-        // The exploded view: the cylinder up, the fingers out, the plunger down a little.
-        let occ = |app: &SolveApp, name: &str| app.session.doc.find_component(name).and_then(|c| app.session.doc.occurrence_of(c)).map(|o| o.id).unwrap();
-        let moves: Vec<Value> = [("Cylinder Barrel", [0.0, 0.0, 120.0]), ("Cylinder Rod", [0.0, 0.0, 75.0]), ("Plunger", [0.0, 0.0, -10.0]), ("Right Finger", [55.0, 0.0, -25.0]), ("Left Finger", [-55.0, 0.0, -25.0])]
-            .iter()
-            .map(|(n, t)| json!({"occurrence": occ(&app, n), "translate": t}))
-            .collect();
+        // The work and its rest are not part of the gripper: left off the drawing.
+        app.run("view.hide", json!({"items": ["Work", "Rest"]})).unwrap();
+        // The exploded view (owner: every part apart): each part moved out along the way it is
+        // put in, the screws out of their holes, the fingers' pins, rollers and axles out along
+        // their axes. A part not found is reported and skipped.
+        let occ = |app: &SolveApp, name: &str| app.session.doc.find_component(name).and_then(|c| app.session.doc.occurrence_of(c)).map(|o| o.id);
+        let mut plan: Vec<(String, [f64; 3])> = vec![
+            ("Cylinder Barrel".into(), [0.0, 0.0, 150.0]),
+            ("Cylinder Rod".into(), [0.0, 0.0, 105.0]),
+            ("Top Plate".into(), [0.0, 0.0, 60.0]),
+            ("Pillar R".into(), [0.0, 0.0, 30.0]),
+            ("Pillar L".into(), [0.0, 0.0, 30.0]),
+            ("Guide Bush".into(), [0.0, 0.0, 45.0]),
+            ("Fork Plate F".into(), [0.0, -45.0, 0.0]),
+            ("Fork Plate B".into(), [0.0, 45.0, 0.0]),
+            ("Spring Post R".into(), [12.0, 0.0, -20.0]),
+            ("Spring Post L".into(), [-12.0, 0.0, -20.0]),
+            ("Plunger".into(), [0.0, 0.0, -75.0]),
+            ("Floating Coupler".into(), [0.0, 0.0, 22.0]),
+            ("Right Finger".into(), [48.0, 0.0, -45.0]),
+            ("Left Finger".into(), [-48.0, 0.0, -45.0]),
+            ("Pivot Pin R".into(), [0.0, -60.0, 0.0]),
+            ("Pivot Pin L".into(), [0.0, -60.0, 0.0]),
+            ("Roller R".into(), [0.0, -28.0, 0.0]),
+            ("Roller L".into(), [0.0, -28.0, 0.0]),
+            ("Roller Axle R".into(), [0.0, -48.0, 0.0]),
+            ("Roller Axle L".into(), [0.0, -48.0, 0.0]),
+            ("Grip Pad R".into(), [-14.0, 0.0, 0.0]),
+            ("Grip Pad L".into(), [14.0, 0.0, 0.0]),
+        ];
+        for k in 1..=4 {
+            plan.push((format!("SHCS M6x22 ({k})"), [0.0, 0.0, 95.0]));
+            plan.push((format!("SHCS M6x26 ({k})"), [0.0, 0.0, -40.0]));
+            plan.push((format!("SHCS M4x18 ({k})"), [0.0, 0.0, 95.0]));
+        }
+        for k in 1..=6 {
+            plan.push((format!("SHCS M5x26 ({k})"), [0.0, 0.0, 30.0]));
+        }
+        let mut moves: Vec<Value> = Vec::new();
+        for (n, t) in &plan {
+            match occ(&app, n) {
+                Some(o) => moves.push(json!({"occurrence": o, "translate": t})),
+                None => eprintln!("not in the design: {n}"),
+            }
+        }
         app.run("explode.create", json!({"name": "Exploded", "moves": moves})).unwrap();
         let d = &mut app.drawing;
         d.paper = 3;
@@ -9033,6 +9146,7 @@ mod example_sheet_tests {
         // Only the centre lines of real holes and axes: no bolt circle through unrelated holes.
         d.bolt = false;
         d.landscape = true;
+        d.bom_compact = true;
         d.title = "CENTERING GRIPPER".into();
         d.number = "DN-0318-001".into();
         d.author = "DraftNew".into();
@@ -9040,7 +9154,7 @@ mod example_sheet_tests {
         d.company = "DraftNew".into();
         d.material = "See parts list".into();
         d.qty = "1".into();
-        d.notes = "Air 5 bar, cylinder Ø32 × 15. Grips Ø30 at 11.4 mm stroke.".into();
+        d.notes = "1. General tolerance ISO 2768-mK. Break sharp edges 0.3.|2. Air 5 bar: cylinder D32 x 15 stroke, grips D30 work at 11.4 stroke.|3. Item 16 tension springs (2x) hook finger to spring post.".into();
         let view = |view: usize, x: f64, y: f64, scale: &str| PlacedView {
             view,
             x,
@@ -9067,49 +9181,65 @@ mod example_sheet_tests {
         };
         let geo = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
         let sc = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
-        let mut iso = view(6, geo("ISO_X", 80.0), geo("ISO_Y", 160.0), &sc("ISO_S", "0.5"));
-        iso.exploded = true;
-        iso.label = Some(String::new());
-        let mut front = view(0, geo("FRONT_X", 155.0), geo("FRONT_Y", 100.0), &sc("FRONT_S", "0.4"));
+        // First-angle projection, one scale (owner: the views must belong together): the front
+        // (section A-A), the right view on its left, the top view under it; centres in line.
+        let (fx, fy, fs) = (geo("FRONT_X", 128.0), geo("FRONT_Y", 192.0), sc("FRONT_S", "0.5"));
+        let mut front = view(0, fx, fy, &fs);
         front.section = Some((1, "0".into()));
         front.dims = true;
-        let mut side = view(2, geo("SIDE_X", 200.0), geo("SIDE_Y", 100.0), &sc("FRONT_S", "0.4"));
+        let mut side = view(2, geo("SIDE_X", 52.0), fy, &fs);
         side.dims = true;
-        let mut top = view(1, geo("TOP_X", 270.0), geo("TOP_Y", 235.0), "0.5");
+        let mut top = view(1, fx, geo("TOP_Y", 82.0), &fs);
         top.dims = true;
-        d.placed = vec![iso, front, side, top];
+        let mut iso = view(6, geo("ISO_X", 300.0), geo("ISO_Y", 205.0), &sc("ISO_S", "0.333"));
+        iso.exploded = true;
+        iso.label = Some(String::new());
+        d.placed = vec![front, side, top, iso];
         d.shaded = vec![{
-            let mut v = ShadedView::new(geo("SHADE_X", 368.0) as f32, geo("SHADE_Y", 228.0) as f32, geo("SHADE_W", 85.0) as f32, -0.6, 0.35);
+            let mut v = ShadedView::new(geo("SHADE_X", 198.0) as f32, geo("SHADE_Y", 72.0) as f32, geo("SHADE_W", 58.0) as f32, -0.6, 0.35);
             v.bg = 1;
-            v.ratio = 1.1;
+            v.ratio = 1.6;
             v
         }];
         refresh(&mut app);
         assert!(app.drawing.sheet.is_some(), "{:?}", app.drawing.error);
         auto_balloons(&mut app).unwrap();
-        // The bought-in parts after the made ones.
         let n = app.drawing.bom.len();
-        for (k, (what, qty, mat)) in [
-            ("SHCS M6×22 (ISO 4762)", "4", "Steel 12.9"),
-            ("SHCS M6×26 (ISO 4762)", "4", "Steel 12.9"),
-            ("SHCS M5×26 (ISO 4762)", "6", "Steel 12.9"),
-            ("SHCS M4×18 (ISO 4762)", "4", "Steel 12.9"),
-            ("Pivot pin Ø6×50", "2", "S45C hardened"),
-            ("Roller Ø12×10 + axle Ø4", "2", "SUJ2"),
-            ("Grip pad 12×14×2", "2", "Urethane 90A"),
-            ("Tension spring Ø8 wire 0.9", "2", "SWP-B"),
-            ("Guide bush Ø36/Ø27 flanged", "1", "Bronze"),
-        ]
-        .iter()
-        .enumerate()
-        {
-            app.drawing.bom.push([(n + k + 1).to_string(), what.to_string(), qty.to_string(), mat.to_string()]);
+        app.drawing.bom.push([(n + 1).to_string(), "Tension spring D8 wire 0.9 L35".into(), "2".into(), "SWP-B".into()]);
+        // Dimensions a fitter needs (owner: complete): placed like the Dimension tool places them,
+        // from model points on each view.
+        let to_sheet = |app: &SolveApp, i: usize, w: Vec3| -> Pos2 {
+            let sheet = app.drawing.sheet.as_ref().unwrap();
+            let bx = sheet.boxes.iter().find(|b| b.0 == i).copied().unwrap();
+            let k = sheet.scales.iter().find(|s| s.0 == i).map(|s| s.1).unwrap();
+            let (cx, cy) = sheet.centres.iter().find(|s| s.0 == i).map(|s| (s.1, s.2)).unwrap();
+            let (yaw, pitch) = view_angles(&app.drawing.placed[i]);
+            let (right, up, _) = Camera { yaw, pitch, ..Default::default() }.basis();
+            pos2(bx.1 + (w.dot(right) as f32 - cx) * k, bx.2 + (w.dot(up) as f32 - cy) * k)
+        };
+        let dim = |kind: usize, a: Pos2, b: Pos2, at: f32| DimItem { kind, a, b, at, text: String::new(), slide: 0.0, decimals: -1, style: 0 };
+        let note = |a: Pos2, b: Pos2, t: &str| DimItem { kind: 6, a, b, at: 0.0, text: t.into(), slide: 0.0, decimals: -1, style: 0 };
+        let mut add = Vec::new();
+        // Front: heights from the finger tips, stacked on the right.
+        let tip = Vec3::new(24.0, 0.0, -8.0);
+        let rx = to_sheet(&app, 0, Vec3::new(48.0, 0.0, 0.0)).x;
+        for (k, z) in [34.0, 82.0, 102.0, 145.0, 160.0].iter().enumerate() {
+            add.push(dim(1, to_sheet(&app, 0, tip), to_sheet(&app, 0, Vec3::new(48.0, 0.0, *z)), rx + 8.0 + 7.0 * k as f32));
         }
-        for r in app.drawing.bom.iter_mut().take(n) {
-            if r[3].trim().is_empty() {
-                r[3] = "AL6061 / S45C".into();
-            }
-        }
+        // Front: pivot spacing and the jaws' grip (under the width).
+        let low = to_sheet(&app, 0, Vec3::new(0.0, 0.0, -8.0)).y;
+        add.push(dim(0, to_sheet(&app, 0, Vec3::new(-17.5, 0.0, 34.0)), to_sheet(&app, 0, Vec3::new(17.5, 0.0, 34.0)), low - 18.0));
+        add.push(note(to_sheet(&app, 0, Vec3::new(0.0, 0.0, 200.0)), to_sheet(&app, 0, Vec3::new(-48.0, 0.0, 236.0)), "Air cyl. D32 st.15"));
+        add.push(note(to_sheet(&app, 0, Vec3::new(17.5, 0.0, 34.0)), to_sheet(&app, 0, Vec3::new(56.0, 0.0, 20.0)), "Pivot D6 H7/g6"));
+        // Top: the mounting holes (how it is bolted on).
+        let tlow = to_sheet(&app, 2, Vec3::new(0.0, -25.0, 0.0)).y;
+        add.push(dim(0, to_sheet(&app, 2, Vec3::new(-20.0, -18.0, 160.0)), to_sheet(&app, 2, Vec3::new(20.0, -18.0, 160.0)), tlow - 18.0));
+        let tright = to_sheet(&app, 2, Vec3::new(48.0, 0.0, 0.0)).x;
+        add.push(dim(1, to_sheet(&app, 2, Vec3::new(20.0, -18.0, 160.0)), to_sheet(&app, 2, Vec3::new(20.0, 18.0, 160.0)), tright + 8.0));
+        add.push(dim(1, to_sheet(&app, 2, Vec3::new(37.5, -12.0, 160.0)), to_sheet(&app, 2, Vec3::new(37.5, 12.0, 160.0)), tright + 15.0));
+        add.push(dim(0, to_sheet(&app, 2, Vec3::new(-37.5, 12.0, 160.0)), to_sheet(&app, 2, Vec3::new(37.5, 12.0, 160.0)), tlow - 25.0));
+        add.push(note(to_sheet(&app, 2, Vec3::new(-20.0, 18.0, 160.0)), to_sheet(&app, 2, Vec3::new(-62.0, 34.0, 160.0)), "4x M6 depth 10 (mount)"));
+        app.drawing.dims.extend(add);
         refresh(&mut app);
         let images = pdf_images(&mut app);
         eprintln!("pictures: {}", images.len());

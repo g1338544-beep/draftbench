@@ -323,3 +323,37 @@ fn an_exploded_view_on_the_sheet_shows_the_parts_apart() {
     assert!((tall(&apart) - 60.0).abs() < 0.5, "apart: 60 tall ({})", tall(&apart));
     assert!(s.pending_moves.is_empty(), "the design is shown assembled still");
 }
+
+/// Owner: a section's cutting line shows on one view only (the top view when there is one), not
+/// on every view it crosses; a compact parts list has lower rows.
+#[test]
+fn a_cutting_line_shows_on_the_top_view_only_and_a_compact_parts_list_is_lower() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let letters = |sheet: &Value| -> Vec<(f64, f64)> {
+        sheet["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|it| it["text"] == "A")
+            .filter_map(|it| Some((it["at"][0].as_f64()?, it["at"][1].as_f64()?)))
+            .collect()
+    };
+    let views = json!([
+        {"view": "front", "x": 120, "y": 180, "scale": 1, "section": {"axis": "y", "at": 15}},
+        {"view": "right", "x": 60, "y": 180, "scale": 1},
+        {"view": "top", "x": 120, "y": 90, "scale": 1}
+    ]);
+    let sheet = run(&mut s, "drawing.sheet", json!({"placements": views}));
+    let at = letters(&sheet);
+    assert_eq!(at.len(), 2, "one letter at each end of one cutting line: {at:?}");
+    assert!(at.iter().all(|p| p.1 < 130.0), "on the top view (under the front): {at:?}");
+    let rows = json!([["1", "Plate", "1", "Steel"], ["2", "Pin", "2", "Steel"]]);
+    let height = |sheet: &Value| {
+        let ys: Vec<f64> = sheet["items"].as_array().unwrap().iter().filter(|it| it["text"] == "Pin").filter_map(|it| it["at"][1].as_f64()).collect();
+        ys.first().copied().unwrap_or(0.0)
+    };
+    let tall = run(&mut s, "drawing.sheet", json!({"placements": views, "bom": rows}));
+    let low = run(&mut s, "drawing.sheet", json!({"placements": views, "bom": rows, "bom_row": 5}));
+    assert!(height(&low) < height(&tall) - 1.0, "lower rows: {} vs {}", height(&low), height(&tall));
+}
