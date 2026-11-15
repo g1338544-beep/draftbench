@@ -415,7 +415,7 @@
   "Rod comes out along": "ロッドの出る向き",
   "Roll History Marker Here": "履歴マーカーをここに移動",
   "Roller (a wheel on the surface)": "ローラー（面上の車輪）",
-  "Roller (body on the lever)": "ローラー（レバー上のボディ）",
+  "Roller (optional: found on the lever)": "ローラー（省略可：レバー上で自動検出）",
   "Round": "丸め",
   "Rule": "ルール",
   "Rule name": "ルール名",
