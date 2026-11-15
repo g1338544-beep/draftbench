@@ -1942,8 +1942,13 @@ fn finish(
             }
         }
     }
-    for n in field("note").split('|').filter(|n| !n.trim().is_empty()).take(3).enumerate() {
-        text("TEXT", Vec2::new(bx0 - 2.0 - 40.0, by0 + 4.0 + 5.0 * n.0 as f64), th, n.1.trim().to_string(), &mut entities);
+    // The notes (up to three lines split by `|`, 80 characters each), ending 3 mm short of the
+    // title block, so a long line runs left into free paper and never into the block.
+    let notes: String = p.get("block").and_then(|b| b.get("note")).and_then(Value::as_str).unwrap_or("").chars().take(300).collect();
+    for (k, n) in notes.split('|').map(str::trim).filter(|n| !n.is_empty()).take(3).enumerate() {
+        let n: String = n.chars().take(80).collect();
+        let half = th * 0.3 * n.chars().count() as f64;
+        text("TEXT", Vec2::new(bx0 - 3.0 - half, by0 + 4.0 + 5.0 * k as f64), th, n, &mut entities);
     }
 
     // Layer colours: AutoCAD colour numbers 1…255 (1 red, 2 yellow, 3 green, 4 cyan, 5 blue,

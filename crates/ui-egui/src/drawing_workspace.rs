@@ -1854,19 +1854,14 @@ fn auto_balloons(app: &mut SolveApp) -> Result<usize, String> {
         let comps: Vec<u64> = row.get("components").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
         // The part's first placement, at any depth (a screw placed four times is ballooned once).
         let at = comps.iter().find_map(|c| {
-            let occ = s.doc.occurrences.iter().find(|o| o.component == *c)?;
-            let names = s.occurrence_bodies(&[occ.id], true).ok()?;
+            // Its whole path from the design down: a part inside a subassembly is found too.
+            let path = s.doc.first_path(*c);
+            let names = s.occurrence_bodies(&path, true).ok()?;
             // On an exploded view the part sits where the exploded view moves it (and its parents).
-            let mut apart = Vec3::ZERO;
-            let mut id = occ.id;
-            for _ in 0..64 {
-                if let Some((_, d)) = exploded.and_then(|e| e.moves.iter().find(|(o, _)| *o == id)) {
-                    apart += Vec3::new(d.x, d.y, d.z);
-                }
-                let Some(parent) = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.parent).filter(|p| *p != 0) else { break };
-                let Some(up) = s.doc.occurrence_of(parent).map(|o| o.id) else { break };
-                id = up;
-            }
+            let apart = path
+                .iter()
+                .filter_map(|id| exploded.and_then(|e| e.moves.iter().find(|(o, _)| o == id)))
+                .fold(Vec3::ZERO, |a, (_, d)| a + Vec3::new(d.x, d.y, d.z));
             centre_of(&names).map(|w| w + apart)
         });
         if let Some(w) = at {
@@ -9101,36 +9096,36 @@ mod example_sheet_tests {
         // their axes. A part not found is reported and skipped.
         let occ = |app: &SolveApp, name: &str| app.session.doc.find_component(name).and_then(|c| app.session.doc.occurrence_of(c)).map(|o| o.id);
         let mut plan: Vec<(String, [f64; 3])> = vec![
-            ("Cylinder Barrel".into(), [0.0, 0.0, 150.0]),
-            ("Cylinder Rod".into(), [0.0, 0.0, 105.0]),
-            ("Top Plate".into(), [0.0, 0.0, 60.0]),
-            ("Pillar R".into(), [0.0, 0.0, 30.0]),
-            ("Pillar L".into(), [0.0, 0.0, 30.0]),
-            ("Guide Bush".into(), [0.0, 0.0, 45.0]),
-            ("Fork Plate F".into(), [0.0, -45.0, 0.0]),
-            ("Fork Plate B".into(), [0.0, 45.0, 0.0]),
-            ("Spring Post R".into(), [12.0, 0.0, -20.0]),
-            ("Spring Post L".into(), [-12.0, 0.0, -20.0]),
-            ("Plunger".into(), [0.0, 0.0, -75.0]),
-            ("Floating Coupler".into(), [0.0, 0.0, 22.0]),
-            ("Right Finger".into(), [48.0, 0.0, -45.0]),
-            ("Left Finger".into(), [-48.0, 0.0, -45.0]),
-            ("Pivot Pin R".into(), [0.0, -60.0, 0.0]),
-            ("Pivot Pin L".into(), [0.0, -60.0, 0.0]),
-            ("Roller R".into(), [0.0, -28.0, 0.0]),
-            ("Roller L".into(), [0.0, -28.0, 0.0]),
-            ("Roller Axle R".into(), [0.0, -48.0, 0.0]),
-            ("Roller Axle L".into(), [0.0, -48.0, 0.0]),
-            ("Grip Pad R".into(), [-14.0, 0.0, 0.0]),
-            ("Grip Pad L".into(), [14.0, 0.0, 0.0]),
+            ("Cylinder Barrel".into(), [0.0, 0.0, 200.0]),
+            ("Cylinder Rod".into(), [0.0, 0.0, 150.0]),
+            ("Top Plate".into(), [0.0, 0.0, 110.0]),
+            ("Pillar R".into(), [0.0, 0.0, 62.0]),
+            ("Pillar L".into(), [0.0, 0.0, 62.0]),
+            ("Guide Bush".into(), [0.0, 0.0, 40.0]),
+            ("Fork Plate F".into(), [0.0, -60.0, -20.0]),
+            ("Fork Plate B".into(), [0.0, 60.0, -20.0]),
+            ("Spring Post R".into(), [30.0, 0.0, -30.0]),
+            ("Spring Post L".into(), [-30.0, 0.0, -30.0]),
+            ("Plunger".into(), [0.0, 0.0, -110.0]),
+            ("Floating Coupler".into(), [0.0, 0.0, 25.0]),
+            ("Right Finger".into(), [62.0, 0.0, -70.0]),
+            ("Left Finger".into(), [-62.0, 0.0, -70.0]),
+            ("Pivot Pin R".into(), [0.0, -75.0, -20.0]),
+            ("Pivot Pin L".into(), [0.0, -75.0, -20.0]),
+            ("Roller R".into(), [0.0, -30.0, 0.0]),
+            ("Roller L".into(), [0.0, -30.0, 0.0]),
+            ("Roller Axle R".into(), [0.0, -55.0, 0.0]),
+            ("Roller Axle L".into(), [0.0, -55.0, 0.0]),
+            ("Grip Pad R".into(), [-18.0, 0.0, 0.0]),
+            ("Grip Pad L".into(), [18.0, 0.0, 0.0]),
         ];
         for k in 1..=4 {
-            plan.push((format!("SHCS M6x22 ({k})"), [0.0, 0.0, 95.0]));
-            plan.push((format!("SHCS M6x26 ({k})"), [0.0, 0.0, -40.0]));
-            plan.push((format!("SHCS M4x18 ({k})"), [0.0, 0.0, 95.0]));
+            plan.push((format!("SHCS M6x22 ({k})"), [0.0, 0.0, 150.0]));
+            plan.push((format!("SHCS M6x26 ({k})"), [0.0, 0.0, -55.0]));
+            plan.push((format!("SHCS M4x18 ({k})"), [0.0, 0.0, 165.0]));
         }
         for k in 1..=6 {
-            plan.push((format!("SHCS M5x26 ({k})"), [0.0, 0.0, 30.0]));
+            plan.push((format!("SHCS M5x26 ({k})"), [0.0, 0.0, 22.0]));
         }
         let mut moves: Vec<Value> = Vec::new();
         for (n, t) in &plan {
@@ -9154,7 +9149,7 @@ mod example_sheet_tests {
         d.company = "DraftNew".into();
         d.material = "See parts list".into();
         d.qty = "1".into();
-        d.notes = "1. General tolerance ISO 2768-mK. Break sharp edges 0.3.|2. Air 5 bar: cylinder D32 x 15 stroke, grips D30 work at 11.4 stroke.|3. Item 16 tension springs (2x) hook finger to spring post.".into();
+        d.notes = "3. Pivot pins D6 H7/g6. Springs: item 21|2. Air 5 bar. Grips D30 at 11.4 of 15|1. Tolerance ISO 2768-mK. Edges 0.3".into();
         let view = |view: usize, x: f64, y: f64, scale: &str| PlacedView {
             view,
             x,
@@ -9185,18 +9180,21 @@ mod example_sheet_tests {
         // (section A-A), the right view on its left, the top view under it; centres in line.
         let (fx, fy, fs) = (geo("FRONT_X", 128.0), geo("FRONT_Y", 192.0), sc("FRONT_S", "0.5"));
         let mut front = view(0, fx, fy, &fs);
+        // Captions moved down past the extra dimensions under the views.
+        front.cap = (0.0, -12.0);
         front.section = Some((1, "0".into()));
         front.dims = true;
         let mut side = view(2, geo("SIDE_X", 52.0), fy, &fs);
         side.dims = true;
-        let mut top = view(1, fx, geo("TOP_Y", 82.0), &fs);
+        let mut top = view(1, fx, geo("TOP_Y", 84.0), &fs);
+        top.cap = (0.0, -16.0);
         top.dims = true;
-        let mut iso = view(6, geo("ISO_X", 300.0), geo("ISO_Y", 205.0), &sc("ISO_S", "0.333"));
+        let mut iso = view(6, geo("ISO_X", 305.0), geo("ISO_Y", 222.0), &sc("ISO_S", "0.2"));
         iso.exploded = true;
         iso.label = Some(String::new());
         d.placed = vec![front, side, top, iso];
         d.shaded = vec![{
-            let mut v = ShadedView::new(geo("SHADE_X", 198.0) as f32, geo("SHADE_Y", 72.0) as f32, geo("SHADE_W", 58.0) as f32, -0.6, 0.35);
+            let mut v = ShadedView::new(geo("SHADE_X", 188.0) as f32, geo("SHADE_Y", 92.0) as f32, geo("SHADE_W", 48.0) as f32, -0.6, 0.35);
             v.bg = 1;
             v.ratio = 1.6;
             v
@@ -9230,13 +9228,12 @@ mod example_sheet_tests {
         let low = to_sheet(&app, 0, Vec3::new(0.0, 0.0, -8.0)).y;
         add.push(dim(0, to_sheet(&app, 0, Vec3::new(-17.5, 0.0, 34.0)), to_sheet(&app, 0, Vec3::new(17.5, 0.0, 34.0)), low - 18.0));
         add.push(note(to_sheet(&app, 0, Vec3::new(0.0, 0.0, 200.0)), to_sheet(&app, 0, Vec3::new(-48.0, 0.0, 236.0)), "Air cyl. D32 st.15"));
-        add.push(note(to_sheet(&app, 0, Vec3::new(17.5, 0.0, 34.0)), to_sheet(&app, 0, Vec3::new(56.0, 0.0, 20.0)), "Pivot D6 H7/g6"));
         // Top: the mounting holes (how it is bolted on).
         let tlow = to_sheet(&app, 2, Vec3::new(0.0, -25.0, 0.0)).y;
         add.push(dim(0, to_sheet(&app, 2, Vec3::new(-20.0, -18.0, 160.0)), to_sheet(&app, 2, Vec3::new(20.0, -18.0, 160.0)), tlow - 18.0));
         let tright = to_sheet(&app, 2, Vec3::new(48.0, 0.0, 0.0)).x;
-        add.push(dim(1, to_sheet(&app, 2, Vec3::new(20.0, -18.0, 160.0)), to_sheet(&app, 2, Vec3::new(20.0, 18.0, 160.0)), tright + 8.0));
-        add.push(dim(1, to_sheet(&app, 2, Vec3::new(37.5, -12.0, 160.0)), to_sheet(&app, 2, Vec3::new(37.5, 12.0, 160.0)), tright + 15.0));
+        add.push(dim(1, to_sheet(&app, 2, Vec3::new(20.0, -18.0, 160.0)), to_sheet(&app, 2, Vec3::new(20.0, 18.0, 160.0)), tright + 14.0));
+        add.push(dim(1, to_sheet(&app, 2, Vec3::new(37.5, -12.0, 160.0)), to_sheet(&app, 2, Vec3::new(37.5, 12.0, 160.0)), tright + 22.0));
         add.push(dim(0, to_sheet(&app, 2, Vec3::new(-37.5, 12.0, 160.0)), to_sheet(&app, 2, Vec3::new(37.5, 12.0, 160.0)), tlow - 25.0));
         add.push(note(to_sheet(&app, 2, Vec3::new(-20.0, 18.0, 160.0)), to_sheet(&app, 2, Vec3::new(-62.0, 34.0, 160.0)), "4x M6 depth 10 (mount)"));
         app.drawing.dims.extend(add);
