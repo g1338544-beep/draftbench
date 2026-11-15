@@ -364,10 +364,18 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             let m = movable(s);
             let kind = |i: usize, k: JointKind| s.doc.assembly.joints.get(i).is_some_and(|j| j.kind == k);
             let a = m.iter().copied().find(|i| kind(*i, JointKind::Slider)).unwrap_or(0);
-            let b = m.iter().copied().find(|i| *i != a && kind(*i, JointKind::Revolute)).or_else(|| m.iter().copied().find(|i| *i != a)).unwrap_or(0);
+            // The next lever not yet driven by a link (one Wedge Cam per lever).
+            let driven = |i: usize| s.doc.assembly.joints.get(i).is_some_and(|j| s.doc.assembly.links.iter().any(|l| l.b == j.id));
+            let b = m
+                .iter()
+                .copied()
+                .find(|i| *i != a && kind(*i, JointKind::Revolute) && !driven(*i))
+                .or_else(|| m.iter().copied().find(|i| *i != a && kind(*i, JointKind::Revolute)))
+                .or_else(|| m.iter().copied().find(|i| *i != a))
+                .unwrap_or(0);
             (
                 Asm::Wedge { a, b },
-                vec![SelInput::new("Wedge or cone (body)", BODIES, false), SelInput::new("Roller (body on the lever)", BODIES, false)],
+                vec![SelInput::new("Wedge or cone (body)", BODIES, false), SelInput::new("Roller (optional: found on the lever)", BODIES, false)],
             )
         }
         "parts.feeder" => (
@@ -1820,8 +1828,11 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let js = &s.doc.assembly.joints;
             let (Some(ja), Some(jb)) = (js.get(*a).map(|j| j.id), js.get(*b).map(|j| j.id)) else { return Err("pick the wedge's joint and the lever's".into()) };
             let wedge = sel_items(inputs, 0).iter().find_map(body_of).ok_or("click the wedge or cone")?;
-            let roller = sel_items(inputs, 1).iter().find_map(body_of).ok_or("click the roller")?;
-            cmd("joint.wedge", json!({"a": ja, "b": jb, "wedge": wedge, "roller": roller}))
+            let mut p = json!({"a": ja, "b": jb, "wedge": wedge});
+            if let Some(roller) = sel_items(inputs, 1).iter().find_map(body_of) {
+                p["roller"] = json!(roller);
+            }
+            cmd("joint.wedge", p)
         }
         Asm::Feeder { count, gap, direction, time } => {
             let part = sel_items(inputs, 0).iter().find_map(body_of).ok_or("click the part to feed")?;

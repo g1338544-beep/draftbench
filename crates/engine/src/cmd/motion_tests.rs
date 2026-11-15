@@ -471,3 +471,257 @@ fn an_exploded_view_plays_as_an_animation() {
     assert_eq!(s.doc, before, "the design is not changed");
     assert!(super::animation::export_with(&s, &json!({"explode": "Nope", "path": gif.to_string_lossy()}), Some(&cpu)).is_err());
 }
+
+#[test]
+#[ignore]
+fn make_centering_gripper_example() {
+    let out = std::path::PathBuf::from("/tmp/claude-0/-home-claude/0d521626-d4c4-5579-8fb5-9dbf3bf16685/scratchpad/v3748");
+    let mut s = Session::default();
+    fn names(s: &Session) -> Vec<String> {
+        s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
+    }
+    fn mk(s: &mut Session, c: &str, p: Value) -> String {
+        let before = names(s);
+        run(s, c, p);
+        names(s).into_iter().find(|n| !before.contains(n)).unwrap_or_default()
+    }
+    fn part(s: &mut Session, name: &str) {
+        run(s, "component.activate", json!({"component": "root"}));
+        run(s, "component.create", json!({"name": name}));
+    }
+    fn bx(x: (f64, f64), y: (f64, f64), z: (f64, f64)) -> Value {
+        json!({"length": x.1 - x.0, "width": y.1 - y.0, "height": z.1 - z.0, "corner": [x.0, y.0, z.0], "operation": "new"})
+    }
+    fn hole(s: &mut Session, body: &str, at: [f64; 3], dir: [f64; 3], r: f64, depth: f64) {
+        run(s, "solid.cylinder", json!({"radius": r, "height": depth, "base": at, "axis": dir, "operation": "cut", "targets": [body]}));
+    }
+    fn screw(s: &mut Session, at: [f64; 3], dir: [f64; 3], d: f64, len: f64, sink: f64) -> String {
+        let p = |k: f64| [at[0] + dir[0] * k, at[1] + dir[1] * k, at[2] + dir[2] * k];
+        let head = mk(s, "solid.cylinder", json!({"radius": 0.75 * d, "height": d, "base": p(sink), "axis": dir, "operation": "new"}));
+        run(s, "solid.cylinder", json!({"radius": d * 0.5, "height": len, "base": p(sink + d), "axis": dir, "operation": "join", "targets": [head]}));
+        run(s, "solid.cylinder", json!({"radius": 0.3 * d, "height": 0.5 * d, "base": p(sink), "axis": dir, "operation": "cut", "targets": [head]}));
+        head
+    }
+    fn cbore(s: &mut Session, body: &str, at: [f64; 3], dir: [f64; 3], d: f64, through: f64) {
+        hole(s, body, at, dir, 0.75 * d + 0.4, d + 0.5);
+        hole(s, body, at, dir, d * 0.5 + 0.3, through + 0.01);
+    }
+    /// A closed outline in the XZ plane (x, z), `y0`…`y1` thick: a new body.
+    fn plate_xz(s: &mut Session, name: &str, pts: &[(f64, f64)], y0: f64, y1: f64) -> String {
+        run(s, "sketch.create", json!({"plane": {"origin": [0, y1, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": name}));
+        let p: Vec<[f64; 2]> = pts.iter().map(|q| [q.0, q.1]).collect();
+        run(s, "sketch.line", json!({"points": p, "closed": true}));
+        run(s, "sketch.finish", json!({}));
+        let before = names(s);
+        run(s, "solid.extrude", json!({"sketch": name, "distance": y1 - y0, "operation": "new"}));
+        names(s).into_iter().find(|n| !before.contains(n)).unwrap_or_default()
+    }
+    let mut colours: Vec<(String, &str, f64)> = Vec::new();
+    let (steel, black, frame_c) = ("#c8ccd4", "#3a3d44", "#f4b8b8");
+    let ys = |y: f64| [0.0, y, 0.0];
+    let _ = ys;
+
+    // ===== FRAME (fixed): top plate (mounts on the robot or a slide), two pillars, the lower body
+    // with the plunger's guide bush, two fork plates holding the finger pivots, two spring posts.
+    part(&mut s, "Frame");
+    let top = mk(&mut s, "solid.box", bx((-45.0, 45.0), (-25.0, 25.0), (177.0, 192.0)));
+    hole(&mut s, &top, [0.0, 0.0, 176.0], [0.0, 0.0, 1.0], 7.5, 17.0);
+    for (x, y) in [(20.0, 18.0), (-20.0, 18.0), (20.0, -18.0), (-20.0, -18.0)] {
+        // M6 tapped holes from the top: how the gripper is bolted to the robot / slide.
+        hole(&mut s, &top, [x, y, 192.01], [0.0, 0.0, -1.0], 2.5, 10.0);
+    }
+    colours.push((top.clone(), frame_c, 0.85));
+    let mut pillars = Vec::new();
+    for sx in [-1.0f64, 1.0] {
+        let (a, b) = if sx > 0.0 { (30.0, 45.0) } else { (-45.0, -30.0) };
+        let p = mk(&mut s, "solid.box", bx((a, b), (-25.0, 25.0), (116.0, 177.0)));
+        colours.push((p.clone(), frame_c, 0.85));
+        pillars.push(p);
+    }
+    let body = mk(&mut s, "solid.box", bx((-58.0, 58.0), (-25.0, 25.0), (96.0, 116.0)));
+    hole(&mut s, &body, [0.0, 0.0, 95.0], [0.0, 0.0, 1.0], 13.0, 22.0);
+    colours.push((body.clone(), frame_c, 0.85));
+    // Pillars: two M6 from the top plate, two from under the lower body, each end.
+    for (i, sx) in [-1.0f64, 1.0].iter().enumerate() {
+        for y in [-12.0, 12.0] {
+            let x = 37.5 * sx;
+            cbore(&mut s, &top, [x, y, 192.0], [0.0, 0.0, -1.0], 6.0, 15.0);
+            hole(&mut s, &pillars[i], [x, y, 177.01], [0.0, 0.0, -1.0], 3.0, 14.0);
+            let a = screw(&mut s, [x, y, 192.0], [0.0, 0.0, -1.0], 6.0, 22.0, 0.5);
+            colours.push((a, black, 1.0));
+            cbore(&mut s, &body, [x, y, 96.0], [0.0, 0.0, 1.0], 6.0, 20.0);
+            hole(&mut s, &pillars[i], [x, y, 115.99], [0.0, 0.0, 1.0], 3.0, 14.0);
+            let b = screw(&mut s, [x, y, 96.0], [0.0, 0.0, 1.0], 6.0, 26.0, 0.5);
+            colours.push((b, black, 1.0));
+        }
+    }
+    // Guide bush (bronze), flanged on top.
+    let bush = mk(&mut s, "solid.cylinder", json!({"radius": 13, "height": 20, "base": [0, 0, 96], "axis": [0, 0, 1], "operation": "new"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 18, "height": 3, "base": [0, 0, 116], "axis": [0, 0, 1], "operation": "join", "targets": [bush]}));
+    hole(&mut s, &bush, [0.0, 0.0, 95.0], [0.0, 0.0, 1.0], 8.05, 26.0);
+    colours.push((bush, "#f0a830", 1.0));
+    // Fork plates, the finger pivots' pins through them.
+    let pivot = (18.0f64, 38.0f64);
+    let mut forks = Vec::new();
+    for (y0, y1) in [(15.0, 25.0), (-25.0, -15.0)] {
+        let f = mk(&mut s, "solid.box", bx((-30.0, 30.0), (y0, y1), (30.0, 96.0)));
+        for sx in [-1.0f64, 1.0] {
+            hole(&mut s, &f, [pivot.0 * sx, y0 - 1.0, pivot.1], [0.0, 1.0, 0.0], 3.05, 12.0);
+        }
+        for x in [-20.0, 20.0] {
+            cbore(&mut s, &body, [x, (y0 + y1) / 2.0, 116.0], [0.0, 0.0, -1.0], 5.0, 20.0);
+            hole(&mut s, &f, [x, (y0 + y1) / 2.0, 96.01], [0.0, 0.0, -1.0], 2.5, 12.0);
+            let sc = screw(&mut s, [x, (y0 + y1) / 2.0, 116.0], [0.0, 0.0, -1.0], 5.0, 26.0, 0.5);
+            colours.push((sc, black, 1.0));
+        }
+        colours.push((f.clone(), frame_c, 0.55));
+        forks.push(f);
+    }
+    for sx in [-1.0f64, 1.0] {
+        let pin = mk(&mut s, "solid.cylinder", json!({"radius": 3, "height": 50, "base": [pivot.0 * sx, -25, pivot.1], "axis": [0, 1, 0], "operation": "new"}));
+        for y in [-27.0, 25.0] {
+            run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 2, "base": [pivot.0 * sx, y, pivot.1], "axis": [0, 1, 0], "operation": "join", "targets": [pin]}));
+        }
+        colours.push((pin, "#f5dd1e", 1.0));
+        // Spring post, one M5 down from the lower body.
+        let (a, b) = if sx > 0.0 { (52.0, 58.0) } else { (-58.0, -52.0) };
+        let post = mk(&mut s, "solid.box", bx((a, b), (-5.0, 5.0), (0.0, 96.0)));
+        cbore(&mut s, &body, [55.0 * sx, 0.0, 116.0], [0.0, 0.0, -1.0], 5.0, 20.0);
+        hole(&mut s, &post, [55.0 * sx, 0.0, 96.01], [0.0, 0.0, -1.0], 2.5, 12.0);
+        let sc = screw(&mut s, [55.0 * sx, 0.0, 116.0], [0.0, 0.0, -1.0], 5.0, 26.0, 0.5);
+        colours.push((sc, black, 1.0));
+        colours.push((post, frame_c, 0.85));
+    }
+
+    // ===== PLUNGER: the cone (narrow at the rollers when open), the centring pin at its tip,
+    // the floating coupler at its top.
+    part(&mut s, "Plunger");
+    let prof = [(0.0, -6.0), (4.0, 0.0), (4.0, 20.0), (8.0, 20.0), (8.0, 68.0), (14.0, 80.0), (14.0, 92.0), (8.0, 92.0), (8.0, 150.0), (0.0, 150.0)];
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Plunger profile"}));
+    let p: Vec<[f64; 2]> = prof.iter().map(|q| [q.0, q.1]).collect();
+    run(&mut s, "sketch.line", json!({"points": p, "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = names(&s);
+    run(&mut s, "solid.revolve", json!({"sketch": "Plunger profile", "axis": "Z", "operation": "new"}));
+    let plunger = names(&s).into_iter().find(|n| !before.contains(n)).unwrap_or_default();
+    colours.push((plunger.clone(), "#2a7fe0", 1.0));
+    let coupler = mk(&mut s, "solid.cylinder", json!({"radius": 12, "height": 10, "base": [0, 0, 150], "axis": [0, 0, 1], "operation": "new"}));
+    colours.push((coupler, "#a8e8f0", 1.0));
+
+    // ===== FINGERS: drawn closed (pads upright on the part), turned open about the pivot.
+    // The roller runs from x 14 (on the neck, r 8) to x 20 (on the cone, r 14).
+    let arm = ((14.0f64 - pivot.0).powi(2) + (60.0f64 - pivot.1).powi(2)).sqrt();
+    let closed_z = pivot.1 + (arm * arm - (20.0 - pivot.0).powi(2)).sqrt();
+    let theta = (20.0f64 - pivot.0).atan2(closed_z - pivot.1) - (14.0f64 - pivot.0).atan2(60.0 - pivot.1);
+    let open = |x: f64, z: f64| -> (f64, f64) {
+        // Turn by -theta about the pivot (tops in, tips out).
+        let (dx, dz) = (x - pivot.0, z - pivot.1);
+        let (sn, cs) = (-theta).sin_cos();
+        (pivot.0 + dx * cs + dz * sn, pivot.1 - dx * sn + dz * cs)
+    };
+    let mut spring_on = Vec::new();
+    for (i, sx) in [1.0f64, -1.0].iter().enumerate() {
+        let side = if *sx > 0.0 { "Right" } else { "Left" };
+        part(&mut s, &format!("{side} Finger"));
+        let closed = [(20.0, 68.0), (30.0, 68.0), (30.0, 44.0), (27.0, 30.0), (42.0, -40.0), (17.05, -40.0), (17.05, -12.0), (24.0, -6.0), (11.5, 30.0), (14.5, 46.0)];
+        let pts: Vec<(f64, f64)> = closed.iter().map(|q| {
+            let o = open(q.0, q.1);
+            (o.0 * sx, o.1)
+        }).collect();
+        let pts: Vec<(f64, f64)> = if *sx < 0.0 { pts.into_iter().rev().collect() } else { pts };
+        let finger = plate_xz(&mut s, &format!("{side} finger outline"), &pts, -7.0, 7.0);
+        // The roller's slot and axle hole; the pivot hole.
+        let rc = open(20.0, closed_z);
+        let (rx, rz) = (rc.0 * sx, rc.1);
+        run(&mut s, "solid.cylinder", json!({"radius": 6.6, "height": 11, "base": [rx, -5.5, rz], "axis": [0, 1, 0], "operation": "cut", "targets": [finger]}));
+        hole(&mut s, &finger, [rx, -8.0, rz], [0.0, 1.0, 0.0], 2.05, 16.0);
+        hole(&mut s, &finger, [pivot.0 * sx, -8.0, pivot.1], [0.0, 1.0, 0.0], 3.05, 16.0);
+        colours.push((finger.clone(), "#40e0d8", 1.0));
+        let roller = mk(&mut s, "solid.cylinder", json!({"radius": 6, "height": 10, "base": [rx, -5, rz], "axis": [0, 1, 0], "operation": "new"}));
+        hole(&mut s, &roller, [rx, -6.0, rz], [0.0, 1.0, 0.0], 2.05, 12.0);
+        colours.push((roller.clone(), "#f5dd1e", 1.0));
+        let axle = mk(&mut s, "solid.cylinder", json!({"radius": 2, "height": 14, "base": [rx, -7, rz], "axis": [0, 1, 0], "operation": "new"}));
+        colours.push((axle, steel, 1.0));
+        // The grip pad (urethane), upright on the part when closed.
+        let pad: Vec<(f64, f64)> = [(15.05, -36.0), (17.05, -36.0), (17.05, -16.0), (15.05, -16.0)].iter().map(|q| {
+            let o = open(q.0, q.1);
+            (o.0 * sx, o.1)
+        }).collect();
+        let pad: Vec<(f64, f64)> = if *sx < 0.0 { pad.into_iter().rev().collect() } else { pad };
+        let padb = plate_xz(&mut s, &format!("{side} pad outline"), &pad, -7.0, 7.0);
+        colours.push((padb, "#30343a", 1.0));
+        let at = open(30.0, 10.0);
+        spring_on.push(([at.0 * sx, 0.0, at.1], format!("{side} Finger"), roller, i));
+    }
+
+    // ===== THE WORK: a round part with a centre hole, on a rest.
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let work = mk(&mut s, "solid.cylinder", json!({"radius": 15, "height": 38, "base": [0, 0, -50], "axis": [0, 0, 1], "operation": "new", "body_name": "Work"}));
+    hole(&mut s, &work, [0.0, 0.0, -11.99], [0.0, 0.0, -1.0], 4.6, 22.0);
+    colours.push((work, "#e03030", 1.0));
+    let rest = mk(&mut s, "solid.box", json!({"length": 80, "width": 60, "height": 12, "corner": [-40, -30, -62], "operation": "new", "body_name": "Rest"}));
+    colours.push((rest, "#9aa0aa", 1.0));
+
+    // ===== JOINTS
+    let frame = occ(&s, "Frame");
+    run(&mut s, "occurrence.ground", json!({"occurrence": frame, "grounded": true}));
+    let cyl_j = run(&mut s, "parts.air_cylinder", json!({"bore": 32, "stroke": 25, "at": [0, 0, 265], "axis": "-Z", "name": "Cylinder"}));
+    let barrel = occ(&s, "Cylinder Barrel");
+    let rod = occ(&s, "Cylinder Rod");
+    // Barrel: four M4 up through the top plate into its back wall.
+    for (x, y) in [(12.0, 12.0), (-12.0, 12.0), (12.0, -12.0), (-12.0, -12.0)] {
+        run(&mut s, "component.activate", json!({"component": "Frame"}));
+        cbore(&mut s, &top, [x, y, 177.0], [0.0, 0.0, 1.0], 4.0, 15.0);
+        let sc = screw(&mut s, [x, y, 177.0], [0.0, 0.0, 1.0], 4.0, 18.0, 0.5);
+        colours.push((sc, black, 1.0));
+        run(&mut s, "component.activate", json!({"component": "Cylinder Barrel"}));
+        let bb: Vec<String> = s.world_state().bodies.iter().filter(|b| s.doc.model_body_component(b) == s.doc.find_component("Cylinder Barrel").unwrap_or(0)).map(|b| b.name.clone()).collect();
+        if let Some(b) = bb.first() {
+            hole(&mut s, b, [x, y, 191.99], [0.0, 0.0, 1.0], 2.0, 8.0);
+        }
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let plunger_o = occ(&s, "Plunger");
+    run(&mut s, "joint.as_built", json!({"type": "rigid", "a": frame, "b": barrel, "at": {"frame": {"origin": [0, 0, 192], "z": [0, 0, 1]}}, "name": "Cylinder Mount"}));
+    run(&mut s, "joint.as_built", json!({"type": "rigid", "a": rod, "b": plunger_o, "at": {"frame": {"origin": [0, 0, 160], "z": [0, 0, 1]}}, "name": "Floating Joint"}));
+    for (at, comp, roller, i) in &spring_on {
+        let f = occ(&s, comp);
+        let sx = if *i == 0 { 1.0 } else { -1.0 };
+        run(&mut s, "joint.as_built", json!({"type": "revolute", "a": frame, "b": f, "at": {"frame": {"origin": [pivot.0 * sx, 0, pivot.1], "z": [0, 1, 0]}}, "name": format!("{} Pivot", if *i == 0 { "Right" } else { "Left" })}));
+        let w = run(&mut s, "joint.wedge", json!({"a": cyl_j["joint"], "b": format!("{} Pivot", if *i == 0 { "Right" } else { "Left" }), "wedge": plunger, "roller": roller}));
+        eprintln!("wedge {comp}: lift {} touching {}", w["lift"], w["touching"]);
+        let sp = run(&mut s, "motion.spring", json!({"from": at, "to": [52.0 * sx, 0, at[2]], "from_body": roller, "radius": 4, "wire": 0.9, "turns": 12, "name": format!("{} Spring", if *i == 0 { "Right" } else { "Left" })}));
+        let _ = sp;
+    }
+    for (b, c, o) in &colours {
+        if let Err(e) = s.execute("appearance.assign", &json!({"bodies": [b], "color": c, "opacity": o})) {
+            eprintln!("colour {b}: {e}");
+        }
+    }
+    let _ = s.execute("appearance.assign", &json!({"components": ["Cylinder Barrel"], "color": "#a8e8f0", "opacity": 0.8}));
+    let _ = s.execute("appearance.assign", &json!({"components": ["Cylinder Rod"], "color": "#d0d4dc"}));
+    eprintln!("bodies: {}", s.world_state().bodies.len());
+    if std::env::var("WEDGE_DEBUG").is_ok() {
+        return;
+    }
+    for v in [25.0, 12.0, 0.0] {
+        run(&mut s, "joint.drive", json!({"joint": cyl_j["joint"], "values": [format!("{v} mm")]}));
+        let pads: Vec<f64> = s.world_state().bodies.iter().filter(|b| b.mesh().bounds().size().x < 8.0 && b.mesh().bounds().size().z > 18.0 && b.mesh().bounds().size().z < 30.0 && b.mesh().bounds().max.z < 0.0).map(|b| {
+            let bb = b.mesh().bounds();
+            bb.min.x.abs().min(bb.max.x.abs())
+        }).collect();
+        let r = run(&mut s, "inspect.interference", json!({"budget_s": 900}));
+        let list: Vec<String> = r["interferences"].as_array().map(|a| a.iter().map(|x| format!("{} × {} {:.3}", x["a"], x["b"], x["volume"].as_f64().unwrap_or(0.0))).collect()).unwrap_or_default();
+        eprintln!("at {v} mm: pads inner {pads:?}; {} touching/overlaps {:?} unchecked {}", list.len(), list, r["unchecked"]);
+    }
+    run(&mut s, "motion.sequence", json!({"name": "Clamp", "moves": [{"joint": cyl_j["joint"], "to": 25, "time": 1.2}, {"wait": 0.8}, {"joint": cyl_j["joint"], "to": 0, "time": 1.2}, {"wait": 0.5}]}));
+    run(&mut s, "file.save", json!({"path": out.join("Centering-Gripper.draftnew").to_string_lossy()}));
+    for (name, cam) in [
+        ("front", json!({"target": [0, 0, 75], "yaw": 0, "pitch": 0, "distance": 420})),
+        ("iso", json!({"target": [0, 0, 75], "yaw": -0.6, "pitch": 0.35, "distance": 460})),
+    ] {
+        let p = json!({"study": "Clamp", "path": out.join(format!("{name}.gif")).to_string_lossy(), "width": 560, "height": 760, "fps": 20, "grid": false, "camera": cam});
+        let r = super::animation::export_with(&s, &p, Some(&cpu));
+        eprintln!("{name}: {:?}", r.map(|v| v["frames"].clone()));
+    }
+}

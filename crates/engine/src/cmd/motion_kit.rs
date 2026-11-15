@@ -43,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("joint.wedge", "Wedge Cam", wedge).at("SOLID", "ASSEMBLE").icon("cam").params(
         "a: the wedge's or cone's joint (a slider, it drives); b: the follower's joint (a lever on a revolute joint, or a slider); \\
-         wedge: body (the wedge or cone); roller: body (the roller on b's part, resting on the wedge); radius?: mm (the roller's, \\
+         wedge: body (the wedge or cone); roller?: body (the roller on b's part, resting on the wedge; default: the body moving with b nearest the wedge); radius?: mm (the roller's, \\
          default from its size); from?, to?: a's travel the link covers (mm, default a's limits); link?: index (replace that motion \\
          link). The roller stays on the wedge's surface as a slides (a spring holds it there): b's values over the travel are worked \\
          out from the shapes in the plane the roller moves in. → link, lift: {min, max, unit}, samples",
@@ -429,7 +429,10 @@ fn wedge(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad(cmd, "the follower (b) is a lever on a revolute joint, or a slider")),
     };
     let body = |k: &str| p.get(k).and_then(Value::as_str).map(str::to_string).ok_or_else(|| bad(cmd, format!("`{k}` must name a body")));
-    let (wedge_body, roller_body) = (body("wedge")?, body("roller")?);
+    let wedge_body = body("wedge")?;
+    // The roller: the one given, else found (owner: it sits inside the lever where it can't be
+    // clicked) as the body that moves with b nearest the wedge, the larger of two at one place.
+    let given_roller = p.get("roller").and_then(Value::as_str).map(str::to_string);
     let limits = s.doc.assembly.joints.iter().find(|j| j.id == a).and_then(|j| j.limits.first().copied().flatten());
     let num = |k: &str| p.get(k).and_then(Value::as_f64).filter(|x| x.is_finite() && x.abs() < 1e6);
     let (from, to) = match (num("from"), num("to"), limits) {
@@ -454,6 +457,33 @@ fn wedge(s: &mut Session, p: &Value) -> Result<Value> {
     if dv.len() < 1e-6 {
         return Err(bad(cmd, "the wedge does not move when its joint slides: pick the slider that carries it"));
     }
+    let roller_body = match given_roller {
+        Some(r) => r,
+        None => {
+            let place = |t: &Session| -> Vec<(String, solidcraft_geom::Aabb3)> { t.world_state().bodies.iter().map(|x| (x.name.clone(), x.mesh().bounds())).collect() };
+            let before = place(&t);
+            let step = if turning { 3.0 } else { 0.5 };
+            drive(&mut t, b, b0 + step, turning)?;
+            let after = place(&t);
+            drive(&mut t, b, b0, turning)?;
+            let wb = before.iter().find(|x| x.0 == wedge_body).map(|x| x.1).ok_or_else(|| bad(cmd, format!("no body `{wedge_body}`")))?;
+            let gap = |bb: &solidcraft_geom::Aabb3| {
+                let c = bb.center();
+                let q = c.max(wb.min).min(wb.max);
+                c.dist(q)
+            };
+            before
+                .iter()
+                .zip(&after)
+                .filter(|(x, y)| x.0 == y.0 && x.0 != wedge_body && x.1.center().dist(y.1.center()) > 1e-6)
+                .min_by(|(x, _), (y, _)| {
+                    let (gx, gy) = (gap(&x.1), gap(&y.1));
+                    if (gx - gy).abs() < 0.5 { y.1.diagonal().total_cmp(&x.1.diagonal()) } else { gx.total_cmp(&gy) }
+                })
+                .map(|(x, _)| x.0.clone())
+                .ok_or_else(|| bad(cmd, "nothing moves with the follower's joint: pick its roller"))?
+        }
+    };
     let p0 = centre(&t, &roller_body)?;
     let step = if turning { 3.0 } else { 0.5 };
     drive(&mut t, b, b0 + step, turning)?;
@@ -499,7 +529,9 @@ fn wedge(s: &mut Session, p: &Value) -> Result<Value> {
             if pts.len() != 3 {
                 continue;
             }
-            let d: Vec<f64> = pts.iter().map(|q| (*q - p0).dot(normal)).collect();
+            // A vertex on the plane counts as just above it: a revolved wedge has its seam in the
+            // plane, and edges lying in it would otherwise give no section on one side.
+            let d: Vec<f64> = pts.iter().map(|q| (*q - p0).dot(normal)).map(|v| if v.abs() < 1e-9 { 1e-9 } else { v }).collect();
             let mut cut = Vec::new();
             for k in 0..3 {
                 let (i, j) = (k, (k + 1) % 3);
@@ -583,6 +615,11 @@ fn wedge(s: &mut Session, p: &Value) -> Result<Value> {
     // From the sample nearest where the wedge is now, out each way, each from the last.
     let near = xs.iter().enumerate().min_by(|p, q| (p.1 - a0).abs().total_cmp(&(q.1 - a0).abs())).map_or(0, |x| x.0);
     let rest = solve(a0, 0.0);
+    if std::env::var("WEDGE_DEBUG").is_ok() {
+        eprintln!("WEDGE p0 {p0:?} pivot {pivot:?} normal {normal:?} dv {dv:?} radius {radius} gap0 {} gap+ {} gap- {} inward {inward} rest {rest} segs {}", gap(a0, 0.0), gap(a0, 0.5), gap(a0, -0.5), segs.len());
+        let near: Vec<_> = segs.iter().filter(|sg| seg_dist((0.0, 0.0), **sg) < 12.0).take(10).collect();
+        eprintln!("WEDGE near segs {near:?}");
+    }
     let mut last = rest;
     for i in near..WEDGE_SAMPLES {
         last = solve(xs[i], last);
@@ -592,6 +629,10 @@ fn wedge(s: &mut Session, p: &Value) -> Result<Value> {
     for i in (0..near).rev() {
         last = solve(xs[i], last);
         moved[i] = last;
+    }
+    if std::env::var("WEDGE_DEBUG").is_ok() {
+        let show: Vec<String> = xs.iter().zip(&moved).step_by(6).map(|(x, m)| format!("{x:.1}:{m:.2}/{:.3}", gap(*x, *m))).collect();
+        eprintln!("WEDGE table {show:?}");
     }
     let table: Vec<f64> = moved.iter().map(|m| if turning { (b0 + m).to_radians() } else { b0 + m }).collect();
     if table.iter().any(|v| !v.is_finite()) {
@@ -952,7 +993,8 @@ mod tests {
         r(&mut s, "joint.as_built", json!({"type": "rigid", "a": lever, "b": roller, "at": {"frame": {"origin": [20, 0, 5], "z": [0, 1, 0]}}, "name": "Pin"}));
         r(&mut s, "joint.as_built", json!({"type": "slider", "a": frame, "b": cone, "at": {"frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}, "name": "Push", "limits": [[0, 15]]}));
         r(&mut s, "joint.as_built", json!({"type": "revolute", "a": frame, "b": lever, "at": {"frame": {"origin": [20, 0, 40], "z": [0, 1, 0]}}, "name": "Arm"}));
-        let out = r(&mut s, "joint.wedge", json!({"a": "Push", "b": "Arm", "wedge": "Cone", "roller": "Roller"}));
+        // The roller found without being picked (it hides inside the lever).
+        let out = r(&mut s, "joint.wedge", json!({"a": "Push", "b": "Arm", "wedge": "Cone"}));
         let lift = &out["lift"];
         assert!(lift["max"].as_f64().unwrap() - lift["min"].as_f64().unwrap() > 1.0, "{out}");
         // Driven, the roller stays on the cone: a radius from its slanted face.
