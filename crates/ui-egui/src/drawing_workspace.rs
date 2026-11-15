@@ -120,6 +120,9 @@ struct PlacedView {
     flip: bool,
     /// Drawn in 3D colour behind its lines (the 3D View button): same place and scale as the view.
     colour: bool,
+    /// Drawn with the parts apart, as the design's exploded view places them (the exploded
+    /// isometric of an assembly drawing, with its balloons).
+    exploded: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -674,7 +677,7 @@ impl State {
     /// The sheet on screen as saved JSON: its views, dimensions, notes and title block.
     fn page_json(&self) -> serde_json::Value {
         json!({
-            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "axis": v.axis.map(|(p, x, y)| json!([p, x, y])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "letter_off": v.letter_off, "flip": v.flip, "colour": v.colour})).collect::<Vec<_>>(),
+            "views": self.placed.iter().map(|v| json!({"view": v.view, "x": v.x, "y": v.y, "scale": v.scale, "dashed": v.dashed, "dims": v.dims, "section": v.section.as_ref().map(|(a, t)| json!([a, t])), "section_line": v.section_line, "section_path": v.section_path, "detail": v.detail, "align": v.align.map(|(p, h)| json!([p, h])), "axis": v.axis.map(|(p, x, y)| json!([p, x, y])), "custom": v.custom.map(|(y, p)| json!([y, p])), "rot": v.rot, "spin": v.spin, "label": v.label, "letter": v.letter, "cap": [v.cap.0, v.cap.1], "letter_off": v.letter_off, "flip": v.flip, "colour": v.colour, "exploded": v.exploded})).collect::<Vec<_>>(),
             "dims": self.dims.iter().map(|d| json!({"kind": d.kind, "a": [d.a.x, d.a.y], "b": [d.b.x, d.b.y], "at": d.at, "text": d.text, "slide": d.slide, "decimals": d.decimals, "style": d.style})).collect::<Vec<_>>(),
             "title": self.title, "number": self.number, "notes": self.notes, "bom": self.bom,
             "marks": self.marks,
@@ -968,6 +971,7 @@ impl State {
                     label: v.get("label").and_then(serde_json::Value::as_str).map(|t| t.chars().take(80).collect()),
                     letter: v.get("letter").and_then(serde_json::Value::as_str).map(|t| t.chars().take(1).collect()).unwrap_or_default(),
                     colour: v.get("colour").and_then(serde_json::Value::as_bool).unwrap_or(false),
+                    exploded: v.get("exploded").and_then(serde_json::Value::as_bool).unwrap_or(false),
                     cap: v
                         .get("cap")
                         .and_then(serde_json::Value::as_array)
@@ -1530,7 +1534,8 @@ fn params(st: &State) -> Value {
                 "y": v.y,
                 "hidden": if v.dashed { "dashed" } else { "omit" },
                 "dims": v.dims,
-                "center": st.centre,
+                // Centre lines belong to the flat views: an isometric or model view shows none.
+                "center": st.centre && v.view < 6 && v.custom.is_none(),
             });
             if v.rot % 4 != 0 {
                 o["rot"] = json!(v.rot % 4);
@@ -1549,6 +1554,9 @@ fn params(st: &State) -> Value {
             }
             if v.flip {
                 o["flip"] = json!(true);
+            }
+            if v.exploded {
+                o["exploded"] = json!(true);
             }
             if v.letter_off != [0.0; 4] {
                 o["letter_off"] = json!(v.letter_off);
@@ -1774,6 +1782,7 @@ fn auto_balloons(app: &mut SolveApp) -> Result<usize, String> {
     let to_sheet = |w: Vec3| pos2(bx.1 + (w.dot(right) as f32 - cx) * k, bx.2 + (w.dot(up) as f32 - cy) * k);
     let s = &app.session;
     let st = s.world_state();
+    let exploded = app.drawing.placed.get(bx.0).filter(|v| v.exploded).and_then(|_| s.doc.assembly.exploded.first());
     let centre_of = |names: &[String]| -> Option<Vec3> {
         let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
         for n in names {
@@ -1789,7 +1798,11 @@ fn auto_balloons(app: &mut SolveApp) -> Result<usize, String> {
         let at = comps.iter().find_map(|c| {
             let occ = s.doc.occurrences.iter().find(|o| o.component == *c && o.parent == 0)?;
             let names = s.occurrence_bodies(&[occ.id], true).ok()?;
-            centre_of(&names)
+            // On an exploded view the part sits where the exploded view moves it.
+            let apart = exploded
+                .and_then(|e| e.moves.iter().find(|(o, _)| *o == occ.id))
+                .map_or(Vec3::ZERO, |(_, d)| Vec3::new(d.x, d.y, d.z));
+            centre_of(&names).map(|w| w + apart)
         });
         if let Some(w) = at {
             marks.push((item, to_sheet(w)));
@@ -2002,6 +2015,7 @@ fn add_view(app: &mut SolveApp, view: usize) {
         letter_off: [0.0; 4],
         flip: false,
         colour: false,
+        exploded: false,
     });
     app.drawing.selected = Some(n);
     begin(app);
@@ -2070,6 +2084,7 @@ fn make_preview(app: &mut SolveApp, view: usize, scale: &str, rot: u8) -> Option
         letter_off: [0.0; 4],
         flip: false,
         colour: false,
+        exploded: false,
     });
     let mut p = params(&app.drawing);
     app.drawing.placed.pop();
@@ -4077,6 +4092,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::ui_kit::scope(ui, |ui| {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     let mut dirty = false;
+                    let mut want_explode = false;
                     let mut add: Option<usize> = None;
                     let mut remove: Option<usize> = None;
                     let mut start_projected: Option<usize> = None;
@@ -4262,6 +4278,11 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                             dirty |= crate::ui_kit::checkbox(ui, "Hidden lines (dashed)", &mut v.dashed).changed();
                             dirty |= crate::ui_kit::checkbox(ui, "Overall dimensions", &mut v.dims).changed();
+                            // An assembly's parts apart, as its exploded view places them (one is made when there is none).
+                            if v.section.is_none() && v.section_line.is_none() && v.detail.is_none() && crate::ui_kit::checkbox(ui, "Exploded (parts apart)", &mut v.exploded).changed() {
+                                dirty = true;
+                                want_explode |= v.exploded;
+                            }
                             // The caption under the view: edit it, hide it, or go back to the automatic one.
                             let mut shown = v.label.clone().unwrap_or_default();
                             ui.horizontal(|ui| {
@@ -4593,6 +4614,10 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     if let Some(i) = start_projected {
                         app.drawing.proj_tool = Some(i);
+                    }
+                    // An exploded view to draw: the design's first, made when it has none.
+                    if want_explode && app.session.doc.assembly.exploded.is_empty() && let Err(e) = app.run("explode.create", json!({})) {
+                        app.set_status(format!("Could not explode the assembly: {e}"), true);
                     }
                     if let Some(view) = add {
                         add_view(app, view);
@@ -6398,6 +6423,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     letter_off: [0.0; 4],
                     flip: false,
                     colour: app.drawing.placed.get(parent).is_some_and(|v| v.colour),
+                    exploded: false,
                     rot: match (free, view, app.drawing.placed.get(parent).map_or(0, |v| v.view)) {
                         (true, 2 | 3, 1 | 5) => {
                             if dx >= 0.0 {
@@ -7582,6 +7608,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             letter_off: [0.0; 4],
             flip: false,
             colour: false,
+            exploded: false,
         });
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
         begin(app);
@@ -7611,6 +7638,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             letter_off: [0.0; 4],
             flip: false,
             colour: false,
+            exploded: false,
         });
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
         begin(app);
@@ -7639,6 +7667,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             letter_off: [0.0; 4],
             flip: false,
             colour: false,
+            exploded: false,
         });
         app.drawing.selected = Some(app.drawing.placed.len() - 1);
         begin(app);
@@ -8876,6 +8905,7 @@ mod hand_drawn_tests {
             letter_off: [0.0; 4],
             flip: false,
             colour: false,
+            exploded: false,
         };
         let placed = vec![view(None), view(Some([10.0, 0.0, 10.0, 40.0]))];
         // Model (10,0)-(10,40) at scale 2 about the centre (10,20): sheet (100,110)-(100,190); the drawn chain line is 2.5 mm longer.
@@ -8970,5 +9000,125 @@ mod section_colour_tests {
         assert!(cuts_plane(&through, o, n));
         assert!(!cuts_plane(&behind, o, n));
         assert!(!cuts_plane(&[], o, n));
+    }
+}
+
+#[cfg(test)]
+mod example_sheet_tests {
+    use super::*;
+
+    /// Owner's example sheet: the centering gripper's assembly drawing (an exploded isometric
+    /// with balloons, a shaded picture, the parts list, a section and the outside views with
+    /// their sizes, the title block), saved as a PDF. GRIPPER_DESIGN: the design file;
+    /// GRIPPER_OUT: where the PDF goes.
+    #[test]
+    #[ignore]
+    fn make_gripper_assembly_drawing() {
+        let (Ok(design), Ok(out)) = (std::env::var("GRIPPER_DESIGN"), std::env::var("GRIPPER_OUT")) else { return };
+        let bytes = std::fs::read(&design).unwrap();
+        let doc = solidcraft_engine::io::read_design(&bytes).unwrap();
+        crate::gpu::install_cpu_picture_renderer();
+        let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        app.session.doc_mut().name = "Centering Gripper".into();
+        // The exploded view: the cylinder up, the fingers out, the plunger down a little.
+        let occ = |app: &SolveApp, name: &str| app.session.doc.find_component(name).and_then(|c| app.session.doc.occurrence_of(c)).map(|o| o.id).unwrap();
+        let moves: Vec<Value> = [("Cylinder Barrel", [0.0, 0.0, 120.0]), ("Cylinder Rod", [0.0, 0.0, 75.0]), ("Plunger", [0.0, 0.0, -10.0]), ("Right Finger", [55.0, 0.0, -25.0]), ("Left Finger", [-55.0, 0.0, -25.0])]
+            .iter()
+            .map(|(n, t)| json!({"occurrence": occ(&app, n), "translate": t}))
+            .collect();
+        app.run("explode.create", json!({"name": "Exploded", "moves": moves})).unwrap();
+        let d = &mut app.drawing;
+        d.paper = 3;
+        d.block_detail = std::env::var("BLOCK_DETAIL").is_ok();
+        // Only the centre lines of real holes and axes: no bolt circle through unrelated holes.
+        d.bolt = false;
+        d.landscape = true;
+        d.title = "CENTERING GRIPPER".into();
+        d.number = "DN-0318-001".into();
+        d.author = "DraftNew".into();
+        d.date = "2026-11-15".into();
+        d.company = "DraftNew".into();
+        d.material = "See parts list".into();
+        d.qty = "1".into();
+        d.notes = "Air 5 bar, cylinder Ø32 × 15. Grips Ø30 at 11.4 mm stroke.".into();
+        let view = |view: usize, x: f64, y: f64, scale: &str| PlacedView {
+            view,
+            x,
+            y,
+            scale: scale.into(),
+            dashed: false,
+            dims: false,
+            section: None,
+            section_line: None,
+            section_path: None,
+            detail: None,
+            align: None,
+            axis: None,
+            custom: None,
+            rot: 0,
+            spin: 0.0,
+            label: None,
+            letter: String::new(),
+            cap: (0.0, 0.0),
+            letter_off: [0.0; 4],
+            flip: false,
+            colour: false,
+            exploded: false,
+        };
+        let geo = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+        let sc = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+        let mut iso = view(6, geo("ISO_X", 80.0), geo("ISO_Y", 160.0), &sc("ISO_S", "0.5"));
+        iso.exploded = true;
+        iso.label = Some(String::new());
+        let mut front = view(0, geo("FRONT_X", 155.0), geo("FRONT_Y", 100.0), &sc("FRONT_S", "0.4"));
+        front.section = Some((1, "0".into()));
+        front.dims = true;
+        let mut side = view(2, geo("SIDE_X", 200.0), geo("SIDE_Y", 100.0), &sc("FRONT_S", "0.4"));
+        side.dims = true;
+        let mut top = view(1, geo("TOP_X", 270.0), geo("TOP_Y", 235.0), "0.5");
+        top.dims = true;
+        d.placed = vec![iso, front, side, top];
+        d.shaded = vec![{
+            let mut v = ShadedView::new(geo("SHADE_X", 368.0) as f32, geo("SHADE_Y", 228.0) as f32, geo("SHADE_W", 85.0) as f32, -0.6, 0.35);
+            v.bg = 1;
+            v.ratio = 1.1;
+            v
+        }];
+        refresh(&mut app);
+        assert!(app.drawing.sheet.is_some(), "{:?}", app.drawing.error);
+        auto_balloons(&mut app).unwrap();
+        // The bought-in parts after the made ones.
+        let n = app.drawing.bom.len();
+        for (k, (what, qty, mat)) in [
+            ("SHCS M6×22 (ISO 4762)", "4", "Steel 12.9"),
+            ("SHCS M6×26 (ISO 4762)", "4", "Steel 12.9"),
+            ("SHCS M5×26 (ISO 4762)", "6", "Steel 12.9"),
+            ("SHCS M4×18 (ISO 4762)", "4", "Steel 12.9"),
+            ("Pivot pin Ø6×50", "2", "S45C hardened"),
+            ("Roller Ø12×10 + axle Ø4", "2", "SUJ2"),
+            ("Grip pad 12×14×2", "2", "Urethane 90A"),
+            ("Tension spring Ø8 wire 0.9", "2", "SWP-B"),
+            ("Guide bush Ø36/Ø27 flanged", "1", "Bronze"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            app.drawing.bom.push([(n + k + 1).to_string(), what.to_string(), qty.to_string(), mat.to_string()]);
+        }
+        for r in app.drawing.bom.iter_mut().take(n) {
+            if r[3].trim().is_empty() {
+                r[3] = "AL6061 / S45C".into();
+            }
+        }
+        refresh(&mut app);
+        let images = pdf_images(&mut app);
+        eprintln!("pictures: {}", images.len());
+        let sheet = app.drawing.sheet.as_ref().unwrap();
+        let bytes = pdf_document(&[sheet_page(sheet, app.drawing.colours, &app.drawing.line_cols, images)]);
+        std::fs::write(format!("{out}/Centering-Gripper-Drawing.pdf"), bytes).unwrap();
+        let boxes: Vec<String> = sheet.boxes.iter().map(|b| format!("{}: {:.0},{:.0} {:.0}×{:.0}", b.0, b.1, b.2, b.3, b.4)).collect();
+        // The design with its exploded view kept.
+        app.run("file.save", json!({"path": format!("{out}/Centering-Gripper.draftnew")})).unwrap();
+        eprintln!("views {boxes:?}; bom rows {}; balloons {}", app.drawing.bom.len(), app.drawing.dims.iter().filter(|d| d.kind == 5).count());
     }
 }

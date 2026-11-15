@@ -389,6 +389,10 @@ fn manual_once(
             let mut lines: Vec<(Vec2, Vec2, bool)> = cut.into_iter().map(|(a, b)| (a, b, false)).collect();
             lines.extend(behind.into_iter().map(|(a, b)| (a, b, false)));
             std::rc::Rc::new(Projected { lines, lo, hi })
+        } else if item.get("exploded").is_some_and(|v| !v.is_null() && *v != Value::Bool(false))
+            && let Some((sc, pa, k)) = EXPLODED.with(|e| e.borrow().clone())
+        {
+            view_lines(&sc, &pa, view, custom, k)?
         } else {
             view_lines(scene, parts, view, custom, key)?
         };
@@ -1491,7 +1495,15 @@ fn build(s: &mut Session, p: &Value) -> Result<Built> {
     let (scene, parts) = scene_and_parts(s, tolerance, key)?;
 
     if let Some(list) = p.get("placements").and_then(Value::as_array) {
-        return manual(p, &scene, &parts, key, list, (sheet_w, sheet_h), first_angle, title, path.map(str::to_string));
+        let wanted = list.iter().take(12).find_map(|it| it.get("exploded").filter(|v| !v.is_null() && **v != Value::Bool(false)));
+        let alt = match wanted {
+            Some(which) => Some(exploded_scene(s, which, tolerance)?),
+            None => None,
+        };
+        EXPLODED.with(|e| *e.borrow_mut() = alt);
+        let built = manual(p, &scene, &parts, key, list, (sheet_w, sheet_h), first_angle, title, path.map(str::to_string));
+        EXPLODED.with(|e| *e.borrow_mut() = None);
+        return built;
     }
 
     // Project each view with its own orthographic camera (each is kept until the model changes,
@@ -2106,6 +2118,41 @@ struct Cache {
 
 thread_local! {
     static CACHE: std::cell::RefCell<Cache> = std::cell::RefCell::new(Cache::default());
+    /// The model with its parts apart (the design's exploded view), for placements marked
+    /// `exploded`, while a sheet is being built.
+    static EXPLODED: std::cell::RefCell<Option<(std::rc::Rc<meshes::Scene>, std::rc::Rc<Vec<sketch::Part>>, Key)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The model as the design's exploded view `which` (an id or name; any other value: the first)
+/// places its parts, for the placements that ask for it.
+fn exploded_scene(s: &Session, which: &Value, tolerance: f64) -> Result<(std::rc::Rc<meshes::Scene>, std::rc::Rc<Vec<sketch::Part>>, Key)> {
+    let views = &s.doc.assembly.exploded;
+    let key = match which {
+        Value::Number(n) => Some(n.to_string()),
+        Value::String(x) => Some(x.clone()),
+        _ => None,
+    };
+    let v = match key {
+        Some(k) => views.iter().find(|e| e.id.to_string() == k || e.name == k),
+        None => views.first(),
+    }
+    .ok_or_else(|| bad(CMD, "the design has no exploded view: make one (Exploded View) first"))?;
+    let mut t = s.scratch();
+    t.pending_moves.clear();
+    for (o, d) in &v.moves {
+        let Some(occ) = t.doc.occurrences.iter().find(|x| x.id == *o) else { continue };
+        let mut m = occ.transform;
+        if let Some(r) = m.get_mut(3) {
+            r[0] += d.x;
+            r[1] += d.y;
+            r[2] += d.z;
+        }
+        t.pending_moves.insert(*o, m);
+    }
+    let key = cache_key(&t, tolerance);
+    let scene = std::rc::Rc::new(meshes::prepare(&t, tolerance)?);
+    let parts = std::rc::Rc::new(sketch::parts(&t, tolerance).map_err(|e| bad(CMD, e))?);
+    Ok((scene, parts, key))
 }
 
 fn cache_key(s: &Session, tolerance: f64) -> Key {

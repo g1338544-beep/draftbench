@@ -293,3 +293,33 @@ fn layers_off_leaves_lines_out_of_the_export_only() {
     let preview = run(&mut s, "drawing.sheet", json!({"camera": c, "hidden": "omit", "layers_off": [true, false, false, false, false]}));
     assert!(preview.to_string().contains("\"visible\""), "the preview still holds them");
 }
+
+/// Owner: an assembly drawing's exploded isometric: a view marked `exploded` shows the parts apart
+/// (as the design's exploded view places them), the others as assembled.
+#[test]
+fn an_exploded_view_on_the_sheet_shows_the_parts_apart() {
+    let mut s = Session::default();
+    for (name, z) in [("A", 0), ("B", 10)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, z]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": "B:1", "translate": [0, 0, 40]}]}));
+    let tall = |sheet: &Value| {
+        let mut ys: Vec<f64> = Vec::new();
+        for it in sheet["items"].as_array().unwrap() {
+            if it["layer"] == "visible"
+                && let Some(l) = it["line"].as_array()
+            {
+                ys.extend(l.iter().filter_map(|q| q[1].as_f64()));
+            }
+        }
+        ys.iter().cloned().fold(f64::MIN, f64::max) - ys.iter().cloned().fold(f64::MAX, f64::min)
+    };
+    let plain = run(&mut s, "drawing.sheet", json!({"placements": [{"view": "front", "x": 150, "y": 150, "scale": 1}]}));
+    let apart = run(&mut s, "drawing.sheet", json!({"placements": [{"view": "front", "x": 150, "y": 150, "scale": 1, "exploded": "Apart"}]}));
+    assert!((tall(&plain) - 20.0).abs() < 0.5, "assembled: 20 tall ({})", tall(&plain));
+    assert!((tall(&apart) - 60.0).abs() < 0.5, "apart: 60 tall ({})", tall(&apart));
+    assert!(s.pending_moves.is_empty(), "the design is shown assembled still");
+}
