@@ -710,6 +710,7 @@ fn save_as_with_extension(app: &mut SolveApp, extension: &str) {
 
 /// File > Download design (browser build): the open design as a `.solidcraft` file download.
 fn download_design(app: &mut SolveApp) {
+    crate::drawing_workspace::keep_in_design(app);
     let name = format!("{}.{}", app.session.doc.name, solidcraft_engine::io::DESIGN_EXT);
     let result = app
         .session

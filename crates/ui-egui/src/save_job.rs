@@ -18,6 +18,8 @@ pub struct Saving {
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).
 pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
+    // The drawing's sheets go into the design file with it.
+    crate::drawing_workspace::keep_in_design(app);
     #[cfg(not(target_arch = "wasm32"))]
     if app.saving.is_none() && app.file_picker.is_none() && !app.file_load.busy() {
         let mut copy = app.session.scratch();

@@ -4091,6 +4091,38 @@ pub fn fit(app: &mut SolveApp) {
     app.drawing.fitted = Some((rect, [app.cam.target.x, app.cam.target.y, app.cam.distance]));
 }
 
+/// Where a design file keeps its drawing sheets (owner: the file sent to someone carries the drawing,
+/// not the 3D only): the design's properties under this tool's own key.
+pub(crate) const DESIGN_KEY: &str = "com.draftnew.drawing";
+
+/// Put the drawing's sheets into the design before it is saved, when they belong to it and changed
+/// (one property change; nothing when there is no sheet). A drawing too large for a design property
+/// stays on this computer only, and the status line says so.
+pub(crate) fn keep_in_design(app: &mut SolveApp) {
+    let design = app.session.doc.name.clone();
+    if !app.drawing.owner.is_empty() && app.drawing.owner != design {
+        return;
+    }
+    let pages = app.drawing.all_pages();
+    let any = pages.iter().any(|p| {
+        p.get("views").and_then(Value::as_array).is_some_and(|v| !v.is_empty()) || p.get("dims").and_then(Value::as_array).is_some_and(|v| !v.is_empty())
+    });
+    if !any {
+        return;
+    }
+    let value = json!({"pages": pages});
+    if app.session.doc.metadata.get(DESIGN_KEY) == Some(&value) {
+        return;
+    }
+    if serde_json::to_vec(&value).map_or(true, |b| b.len() > 60_000) {
+        app.set_status("The drawing is too large to keep in the design file: it stays on this computer", true);
+        return;
+    }
+    if let Err(e) = app.session.execute("document.metadata.set", &json!({"key": DESIGN_KEY, "value": value})) {
+        app.set_status(format!("Could not keep the drawing in the design: {e}"), true);
+    }
+}
+
 pub fn enter(app: &mut SolveApp) -> Result<(), String> {
     if active(app) {
         return Ok(());
@@ -4108,6 +4140,10 @@ pub fn enter(app: &mut SolveApp) -> Result<(), String> {
     let kept = app.drawing.sheet.take();
     let made = kept.is_some() && app.drawing.drawn_rev != 0 && app.drawing.drawn_design == design;
     app.drawing.switch_owner(&design);
+    // Sheets saved in the design file come first: the file may come from another computer.
+    if let Some(saved) = app.session.doc.metadata.get(DESIGN_KEY).filter(|v| v.get("pages").is_some()).cloned() {
+        app.drawing.saved_designs.insert(design.chars().take(120).collect(), saved);
+    }
     app.drawing.restore_design(&design);
     if app.drawing.title.is_empty() {
         app.drawing.title = app.session.doc.name.clone();
@@ -9122,6 +9158,29 @@ mod section_colour_tests {
 mod example_sheet_tests {
     use super::*;
 
+    /// Owner: the design file carries its drawing. Saved sheets go into the design, and the same
+    /// design opened on another computer (no sheets remembered there) shows them again.
+    #[test]
+    fn the_drawing_travels_in_the_design_file() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("solid.box", json!({"length": 20, "width": 10, "height": 5})).unwrap();
+        enter(&mut app).unwrap();
+        add_view(&mut app, 0);
+        app.drawing.title = "TRAVELLER".into();
+        keep_in_design(&mut app);
+        let kept = app.session.doc.metadata.get(DESIGN_KEY).cloned().expect("the sheets are in the design");
+        assert!(kept["pages"][0]["views"].as_array().is_some_and(|v| v.len() == 1), "{kept}");
+        // Saving again with nothing changed adds no step.
+        let steps = app.session.undo.len();
+        keep_in_design(&mut app);
+        assert_eq!(app.session.undo.len(), steps);
+        let doc = (*app.session.doc).clone();
+        let mut other = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        enter(&mut other).unwrap();
+        assert_eq!(other.drawing.placed.len(), 1, "the view comes back");
+        assert_eq!(other.drawing.title, "TRAVELLER");
+    }
+
     /// Owner's example sheet: the centering gripper's assembly drawing (an exploded isometric
     /// with balloons, a shaded picture, the parts list, a section and the outside views with
     /// their sizes, the title block), saved as a PDF. GRIPPER_DESIGN: the design file;
@@ -9293,7 +9352,9 @@ mod example_sheet_tests {
         std::fs::write(format!("{out}/Centering-Gripper-Drawing.pdf"), bytes).unwrap();
         let boxes: Vec<String> = sheet.boxes.iter().map(|b| format!("{}: {:.0},{:.0} {:.0}×{:.0}", b.0, b.1, b.2, b.3, b.4)).collect();
         // The design with its exploded view kept.
+        app.drawing.owner = app.session.doc.name.clone();
         app.run("file.save", json!({"path": format!("{out}/Centering-Gripper.draftnew")})).unwrap();
+        assert!(app.session.doc.metadata.get(DESIGN_KEY).is_some(), "the drawing is in the file");
         eprintln!("views {boxes:?}; bom rows {}; balloons {}", app.drawing.bom.len(), app.drawing.dims.iter().filter(|d| d.kind == 5).count());
     }
 }

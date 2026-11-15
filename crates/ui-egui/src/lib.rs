@@ -828,6 +828,10 @@ impl SolveApp {
         if matches!(id, "edit.undo" | "edit.redo") && drawing_workspace::step_history(self, id == "edit.undo") {
             return Ok(json!({}));
         }
+        // The drawing's sheets go into the design file with it.
+        if matches!(id, "file.save" | "file.save_as") {
+            drawing_workspace::keep_in_design(self);
+        }
         let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
