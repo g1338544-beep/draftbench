@@ -235,10 +235,18 @@ fn air_cylinder_steps(s: &mut Session, p: &Value) -> Result<Value> {
     s.execute("component.activate", &json!({"component": "root"}))?;
     s.execute("component.create", &json!({"name": format!("{name} Barrel")}))?;
     s.execute("solid.cylinder", &json!({"radius": bore * 0.5 + 3.0, "height": barrel_len, "base": pt(at), "axis": ax, "operation": "new"}))?;
-    // The rod, from inside the barrel's front out.
+    // Hollow, as a real one is (owner: parts must not overlap): the bore the piston runs in, a
+    // 3 mm back cap and a 6 mm front head with the rod's hole.
+    let rod_r = bore * 0.2;
+    let head = 6.0f64.min(barrel_len * 0.2);
+    s.execute("solid.cylinder", &json!({"radius": bore * 0.5, "height": barrel_len - 3.0 - head, "base": pt(at + axis * 3.0), "axis": ax, "operation": "cut"}))?;
+    s.execute("solid.cylinder", &json!({"radius": rod_r + 0.25, "height": head + 1.0, "base": pt(tip - axis * (head + 0.5)), "axis": ax, "operation": "cut"}))?;
+    // The rod with its piston, from inside the barrel's back out.
     s.execute("component.activate", &json!({"component": "root"}))?;
     s.execute("component.create", &json!({"name": format!("{name} Rod")}))?;
-    s.execute("solid.cylinder", &json!({"radius": bore * 0.2, "height": rod_len, "base": pt(at + axis * rod_back), "axis": ax, "operation": "new"}))?;
+    s.execute("solid.cylinder", &json!({"radius": rod_r, "height": rod_len, "base": pt(at + axis * rod_back), "axis": ax, "operation": "new"}))?;
+    let piston = 8.0f64.min(barrel_len - stroke - rod_back - head - 3.0).max(1.0);
+    s.execute("solid.cylinder", &json!({"radius": bore * 0.5 - 0.1, "height": piston, "base": pt(at + axis * rod_back), "axis": ax, "operation": "join"}))?;
     s.execute("component.activate", &json!({"component": "root"}))?;
     // The components by name (a joint takes a component's first occurrence).
     let (barrel, rod) = (format!("{name} Barrel"), format!("{name} Rod"));
@@ -875,6 +883,12 @@ mod tests {
         let barrel = bounds.iter().max_by(|a, b| a.size().y.total_cmp(&b.size().y)).unwrap();
         let rod = bounds.iter().min_by(|a, b| a.size().y.total_cmp(&b.size().y)).unwrap();
         assert!(rod.min.x < barrel.max.x - 5.0, "rod {rod:?} barrel {barrel:?}");
+        // Hollow barrel, rod and piston inside it: they never overlap, in or out.
+        for v in ["50 mm", "0 mm"] {
+            s.execute("joint.drive", &json!({"joint": "Pusher", "values": [v]})).unwrap();
+            let r = s.execute("inspect.interference", &json!({})).unwrap();
+            assert_eq!(r["interferences"], json!([]), "{v}: {r}");
+        }
     }
     /// Owner: a roller rolls over a bumpy surface, its centre rising over the bump and down again.
     #[test]
