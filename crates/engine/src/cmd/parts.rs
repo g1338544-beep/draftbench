@@ -22,7 +22,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         "the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction?, name?",
     ),
     CommandSpec::new("parts.insert", "Insert Part", insert).icon("fastener").params(
-        "family (socket_head_cap_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing); size (\"M6\", or \"608\" for bearings); \
+        "file?: a part file from My Parts (parts.my_list) with axis? (-z: the way into the hole, in the part's axes) and seat? (end | origin), or \
+         family (socket_head_cap_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing); size (\"M6\", or \"608\" for bearings); \
          length? (mm; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
          at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint) | point?: [x,y,z] with direction?: [x,y,z] (no joint); name?",
     ),
@@ -384,6 +385,14 @@ fn length_param(p: &Value, cmd: &str) -> Result<Option<f64>> {
 
 fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parts.insert (Insert Fastener)";
+    if p.get("file").is_some() {
+        let at = p.get("at").and_then(vec3).map(|a| hole_wall(s, a).unwrap_or(a));
+        let host = match at {
+            Some(a) => Some(super::joints::occurrence_at(s, a).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?),
+            None => None,
+        };
+        return super::parts_files::insert_file(s, p, at, host);
+    }
     let family = str_(p, "family").ok_or_else(|| bad(cmd, "`family` is required (parts.library)"))?.to_string();
     let size = str_(p, "size").ok_or_else(|| bad(cmd, "`size` is required"))?.to_string();
     let sh = shape(&family, &size, length_param(p, cmd)?).map_err(|e| bad(cmd, e))?;
@@ -574,6 +583,56 @@ mod tests {
         let (lo, hi) = bbox(&s, "SHCS M8x25");
         assert!((hi.z - 18.0).abs() < 1e-6 && (lo.z + 15.0).abs() < 1e-6, "{lo:?} {hi:?}");
         assert!(s.model.state().threads.iter().any(|t| t.designation == "M8" && (t.pitch - 1.25).abs() < 1e-9));
+    }
+
+    /// An ASCII STL of the box `lo`…`hi`.
+    fn box_stl(lo: [f64; 3], hi: [f64; 3]) -> String {
+        let p = |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
+        let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+        let mut t = String::from("solid part\n");
+        for q in quads {
+            for tri in [[q[0], q[1], q[2]], [q[0], q[2], q[3]]] {
+                t.push_str("facet normal 0 0 0\nouter loop\n");
+                for v in tri {
+                    let c = p(v);
+                    t.push_str(&format!("vertex {} {} {}\n", c[0], c[1], c[2]));
+                }
+                t.push_str("endloop\nendfacet\n");
+            }
+        }
+        t.push_str("endsolid part\n");
+        t
+    }
+
+    #[test]
+    fn a_my_parts_file_is_listed_and_stands_on_a_picked_hole() {
+        let tmp = std::env::temp_dir().join(format!("sc-my-parts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = std::fs::create_dir_all(&tmp);
+        let src = tmp.join("toggle clamp.stl");
+        let _ = std::fs::write(&src, box_stl([100.0, 0.0, 5.0], [110.0, 10.0, 25.0]));
+        let dir = format!("{}/lib/", tmp.display());
+        let mut s = Session::default();
+        let added = run(&mut s, "parts.my_add", json!({"path": src.to_string_lossy(), "dir": dir, "category": "Clamps"}));
+        assert!(s.execute("parts.my_add", &json!({"path": src.to_string_lossy(), "dir": dir, "category": "Clamps"})).is_err(), "no silent overwrite");
+        let listed = run(&mut s, "parts.my_list", json!({"dir": dir}));
+        let parts = listed["parts"].as_array().cloned().unwrap_or_default();
+        assert_eq!(parts.len(), 1, "{listed}");
+        assert_eq!((parts[0]["name"].as_str(), parts[0]["category"].as_str()), (Some("toggle clamp"), Some("Clamps")));
+        // Seated on a hole: the bottom of its box on the top face, centred on the hole's axis.
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 10], "diameter": 6.4}));
+        let r = run(&mut s, "parts.insert", json!({"file": added["path"], "at": [23.2, 15, 10]}));
+        assert!(r["joint"].is_number(), "{r}");
+        let (lo, hi) = bbox(&s, "toggle clamp");
+        assert!((lo.z - 10.0).abs() < 1e-6 && (hi.z - 30.0).abs() < 1e-6, "{lo:?} {hi:?}");
+        assert!(((lo.x + hi.x) / 2.0 - 20.0).abs() < 1e-6 && ((lo.y + hi.y) / 2.0 - 15.0).abs() < 1e-6, "{lo:?} {hi:?}");
+        // Hostile input is refused, nothing outside the folder is removed.
+        assert!(s.execute("parts.insert", &json!({"file": added["path"], "axis": "sideways"})).is_err());
+        assert!(s.execute("parts.my_remove", &json!({"path": src.to_string_lossy(), "dir": dir})).is_err());
+        run(&mut s, "parts.my_remove", json!({"path": added["path"], "dir": dir}));
+        assert_eq!(run(&mut s, "parts.my_list", json!({"dir": dir}))["parts"].as_array().map(Vec::len), Some(0));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
