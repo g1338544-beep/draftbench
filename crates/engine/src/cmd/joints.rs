@@ -1167,7 +1167,7 @@ fn cam_profile(s: &Session, p: &Value, cmd: &str) -> Result<CamProfile> {
 /// Add a coupling's motion link, or put it in place of link `link`: its ratio worked out from its
 /// sizes, its offset leaving b where it is (the teeth mesh as they are now), for a new link and
 /// one put in place of another alike.
-fn couple(s: &mut Session, p: &Value, cmd: &str, mut l: MotionLink) -> Result<Value> {
+pub(super) fn couple(s: &mut Session, p: &Value, cmd: &str, mut l: MotionLink) -> Result<Value> {
     let links = &s.doc.assembly.links;
     let replace = match p.get("link") {
         None => None,

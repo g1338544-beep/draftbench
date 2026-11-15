@@ -437,8 +437,25 @@ impl MotionLink {
         match &self.coupling {
             Some(Coupling::Cam(_)) if self.lift.len() == cam::CAM_SAMPLES => cam::lift_at(&self.lift, x) + self.offset,
             Some(Coupling::Cam(_)) => f64::NAN,
+            Some(Coupling::Wedge { from, to }) => wedge_at(&self.lift, *from, *to, x) + self.offset,
             _ => self.ratio * x + self.offset,
         }
+    }
+}
+
+/// b's value at a's `x` from a wedge's table over `from`…`to` (straight between samples, the end
+/// values past the ends); NaN for a table that is not one (a hand-edited file).
+pub fn wedge_at(table: &[f64], from: f64, to: f64, x: f64) -> f64 {
+    let n = table.len();
+    if n < 2 || !(from.is_finite() && to.is_finite() && x.is_finite()) || (to - from).abs() < 1e-12 {
+        return f64::NAN;
+    }
+    let f = ((x - from) / (to - from)).clamp(0.0, 1.0) * (n - 1) as f64;
+    let i = (f.floor() as usize).min(n - 2);
+    let k = f - i as f64;
+    match (table.get(i), table.get(i + 1)) {
+        (Some(p), Some(q)) => p + (q - p) * k,
+        _ => f64::NAN,
     }
 }
 
@@ -485,6 +502,11 @@ pub enum Coupling {
     /// A cam on a revolute joint (a) and its follower (b, a slider or a revolute): b rides the
     /// cam's profile (`joints_cam.rs`).
     Cam(cam::Cam),
+    /// A wedge or cone on a slider (a) pushing a roller on b (a lever on a revolute joint, or a
+    /// slider): b's values over a's travel from `from` to `to` (mm) are kept in `lift`, worked out
+    /// from the shapes when the link was made (`joint.wedge`), and b follows them, held at the
+    /// ends past them.
+    Wedge { from: f64, to: f64 },
 }
 
 impl Coupling {
@@ -498,6 +520,7 @@ impl Coupling {
                 cam::Follower::Roller { radius } => vec![radius],
                 _ => Vec::new(),
             },
+            Coupling::Wedge { .. } => Vec::new(),
         }
     }
 
@@ -509,6 +532,7 @@ impl Coupling {
                 cam::Follower::Roller { radius } => vec![radius],
                 _ => Vec::new(),
             },
+            Coupling::Wedge { .. } => Vec::new(),
         }
     }
 }
@@ -536,6 +560,8 @@ fn size_of(doc: &Document, st: &ModelState, s: &Size) -> Result<f64> {
 pub fn coupling_values(doc: &Document, st: &ModelState, l: &MotionLink) -> Option<Result<(f64, Vec<f64>)>> {
     l.coupling.as_ref().map(|c| match c {
         Coupling::Cam(c) => cam::table(doc, st, l, c).map(|t| (1.0, t)),
+        // Worked out from the shapes when it was made (the engine's `joint.wedge`).
+        Coupling::Wedge { .. } => Ok((1.0, l.lift.clone())),
         c => coupled(doc, st, l, c).map(|r| (r, Vec::new())),
     })
 }
@@ -560,7 +586,7 @@ fn coupled(doc: &Document, st: &ModelState, l: &MotionLink, c: &Coupling) -> Res
         Coupling::RackPinion { radius, reverse } => Ok(travel(size_of(doc, st, radius)?)? * sign(*reverse)),
         Coupling::Screw { pitch, reverse } => Ok(travel(size_of(doc, st, pitch)? / std::f64::consts::TAU)? * sign(*reverse)),
         // A cam's follower follows its table (`coupling_values`), not a ratio.
-        Coupling::Cam(_) => Ok(1.0),
+        Coupling::Cam(_) | Coupling::Wedge { .. } => Ok(1.0),
     }
 }
 

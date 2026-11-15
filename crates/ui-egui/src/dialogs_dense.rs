@@ -99,6 +99,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::Spring { .. } => Some("motion.spring"),
             crate::dialogs_assembly::Asm::Roller { .. } => Some("motion.roller"),
             crate::dialogs_assembly::Asm::Feeder { .. } => Some("parts.feeder"),
+            crate::dialogs_assembly::Asm::Wedge { .. } => Some("joint.wedge"),
             crate::dialogs_assembly::Asm::Coupling(f) => Some(f.command),
             crate::dialogs_assembly::Asm::Cam(_) => Some("joint.cam"),
             crate::dialogs_assembly::Asm::Trace(_) => Some("motion.trace"),

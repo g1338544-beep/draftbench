@@ -197,6 +197,12 @@ pub enum Asm {
         direction: usize,
         time: String,
     },
+    /// Wedge Cam: the wedge's slider and the follower's joint (indices into the joints); the
+    /// wedge and the roller picked.
+    Wedge {
+        a: usize,
+        b: usize,
+    },
     /// Gripper: the body and its fingers picked, the stroke typed.
     Gripper {
         stroke: String,
@@ -295,6 +301,7 @@ impl Asm {
             Asm::Spring { .. } => "SPRING",
             Asm::Roller { .. } => "ROLLER ON SURFACE",
             Asm::Feeder { .. } => "PART FEEDER",
+            Asm::Wedge { .. } => "WEDGE CAM",
             Asm::Coupling(f) => match f.command {
                 "joint.gear" => "GEAR",
                 "joint.rack_pinion" => "RACK AND PINION",
@@ -353,6 +360,16 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Asm::Roller { direction: 0, length: "100 mm".into() },
             vec![SelInput::new("Roller (a wheel on the surface)", BODIES, false), SelInput::new("Surface (what it rolls over)", BODIES, false)],
         ),
+        "joint.wedge" => {
+            let m = movable(s);
+            let kind = |i: usize, k: JointKind| s.doc.assembly.joints.get(i).is_some_and(|j| j.kind == k);
+            let a = m.iter().copied().find(|i| kind(*i, JointKind::Slider)).unwrap_or(0);
+            let b = m.iter().copied().find(|i| *i != a && kind(*i, JointKind::Revolute)).or_else(|| m.iter().copied().find(|i| *i != a)).unwrap_or(0);
+            (
+                Asm::Wedge { a, b },
+                vec![SelInput::new("Wedge or cone (body)", BODIES, false), SelInput::new("Roller (body on the lever)", BODIES, false)],
+            )
+        }
         "parts.feeder" => (
             Asm::Feeder { count: "4".into(), gap: "5 mm".into(), direction: 0, time: "1".into() },
             vec![SelInput::new("Part to feed", BODIES, false)],
@@ -1025,6 +1042,21 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             choice_row(ui, "Travels along", "rl_dir", direction, &FEED_WAYS);
             enter |= expr_row(ui, "Travel", length);
             crate::ui_kit::caption(ui, "Travel", crate::i18n::tr_label("Stand the roller on the surface first. Its centre keeps its height over the surface as it goes, up slopes and down again; drive the joint (or use it in a Motion Sequence)."));
+        }
+        Asm::Wedge { a, b } => {
+            let s = &app.session;
+            let joints: Vec<(usize, String)> = movable(s).into_iter().filter_map(|i| s.doc.assembly.joints.get(i).map(|j| (i, j.name.clone()))).collect();
+            if joints.len() < 2 {
+                ui.label(RichText::new(crate::i18n::tr_label("Make the joints first: a slider for the wedge (e.g. an Air Cylinder) and a revolute joint for each lever.")).color(t.text_dim));
+                return false;
+            }
+            let names: Vec<&str> = joints.iter().map(|j| j.1.as_str()).collect();
+            for (label, id, slot) in [("Wedge slides on", "wd_a", &mut *a), ("Lever turns on", "wd_b", &mut *b)] {
+                let mut pick = joints.iter().position(|j| j.0 == *slot).unwrap_or(0);
+                choice_row(ui, label, id, &mut pick, &names);
+                *slot = joints.get(pick).map_or(0, |j| j.0);
+            }
+            crate::ui_kit::caption(ui, "Wedge slides on", crate::i18n::tr_label("The roller stays on the wedge as it slides (a spring holds it there), so the lever turns by the wedge's shape. Make one for each lever."));
         }
         Asm::Feeder { count, gap, direction, time } => {
             enter |= expr_row(ui, "Parts in the queue", count);
@@ -1783,6 +1815,13 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 _ => [1.0, 0.0, 0.0],
             };
             cmd("motion.roller", json!({"roller": roller, "surface": surface, "direction": d, "length": eval(length, ValueKind::Length)?}))
+        }
+        Asm::Wedge { a, b } => {
+            let js = &s.doc.assembly.joints;
+            let (Some(ja), Some(jb)) = (js.get(*a).map(|j| j.id), js.get(*b).map(|j| j.id)) else { return Err("pick the wedge's joint and the lever's".into()) };
+            let wedge = sel_items(inputs, 0).iter().find_map(body_of).ok_or("click the wedge or cone")?;
+            let roller = sel_items(inputs, 1).iter().find_map(body_of).ok_or("click the roller")?;
+            cmd("joint.wedge", json!({"a": ja, "b": jb, "wedge": wedge, "roller": roller}))
         }
         Asm::Feeder { count, gap, direction, time } => {
             let part = sel_items(inputs, 0).iter().find_map(body_of).ok_or("click the part to feed")?;

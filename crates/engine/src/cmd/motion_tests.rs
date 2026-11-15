@@ -456,3 +456,18 @@ fn hostile_animation_params_are_refused() {
     assert!(root.join("in.gif").exists() && !dir.join("out").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Owner: an explode video: the parts move out to the exploded view, drawn frame by frame, and the
+/// design keeps its placements.
+#[test]
+fn an_exploded_view_plays_as_an_animation() {
+    let mut s = rail();
+    run(&mut s, "explode.create", json!({"name": "Apart", "scale": 2}));
+    let before = s.doc.clone();
+    let gif = out_dir("explode").join("apart.gif");
+    let p = json!({"explode": "Apart", "path": gif.to_string_lossy(), "samples": 5, "width": 48, "height": 32, "back_and_forth": true});
+    let r = super::animation::export_with(&s, &p, Some(&cpu)).unwrap();
+    assert_eq!(gif_frames(&std::fs::read(&gif).unwrap()), (48, 32, 8), "{r}");
+    assert_eq!(s.doc, before, "the design is not changed");
+    assert!(super::animation::export_with(&s, &json!({"explode": "Nope", "path": gif.to_string_lossy()}), Some(&cpu)).is_err());
+}

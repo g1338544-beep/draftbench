@@ -41,6 +41,13 @@ pub static COMMANDS: &[CommandSpec] = &[
          keeps its height over the surface as it goes, up its slopes and down again (a Pin in Path on the surface's shape, sampled \\
          along the way). → joint, points, travel",
     ),
+    CommandSpec::new("joint.wedge", "Wedge Cam", wedge).at("SOLID", "ASSEMBLE").icon("cam").params(
+        "a: the wedge's or cone's joint (a slider, it drives); b: the follower's joint (a lever on a revolute joint, or a slider); \\
+         wedge: body (the wedge or cone); roller: body (the roller on b's part, resting on the wedge); radius?: mm (the roller's, \\
+         default from its size); from?, to?: a's travel the link covers (mm, default a's limits); link?: index (replace that motion \\
+         link). The roller stays on the wedge's surface as a slides (a spring holds it there): b's values over the travel are worked \\
+         out from the shapes in the plane the roller moves in. → link, lift: {min, max, unit}, samples",
+    ),
     CommandSpec::new("parts.feeder", "Part Feeder", feeder).at("SOLID", "ASSEMBLE").icon("joint").params(
         "part: body (the part fed); count?: parts in the queue (default 4); gap?: mm between them (default 5); direction?: X|-X|Y|-Y \\
          (the way they feed, default X); time?: s per index (default 1); name?. Makes a track under the part and copies of it queued \\
@@ -387,6 +394,228 @@ fn roller_steps(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"joint": name, "points": pts.len(), "travel": travel}))
 }
 
+/// Samples of a wedge's table over a's travel.
+const WEDGE_SAMPLES: usize = 121;
+
+/// Wedge Cam (owner's picture: an air cylinder pushes a cone down between two levers; rollers on
+/// the levers ride the cone, so the levers turn and the fingers close). The follower's values
+/// over the slider's travel come from the shapes: the wedge's outline in the plane the roller
+/// moves in, the roller kept a radius from it.
+fn wedge(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "joint.wedge";
+    let (a, b) = (joint_id(s, p.get("a"), cmd)?, joint_id(s, p.get("b"), cmd)?);
+    if a == b {
+        return Err(bad(cmd, "the wedge's joint and the follower's are different joints"));
+    }
+    let kind = |id: u64| s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.kind);
+    if kind(a) != Some(solidcraft_doc::joints::JointKind::Slider) {
+        return Err(bad(cmd, "the wedge (a) slides on a slider joint"));
+    }
+    let turning = match kind(b) {
+        Some(solidcraft_doc::joints::JointKind::Revolute) => true,
+        Some(solidcraft_doc::joints::JointKind::Slider) => false,
+        _ => return Err(bad(cmd, "the follower (b) is a lever on a revolute joint, or a slider")),
+    };
+    let body = |k: &str| p.get(k).and_then(Value::as_str).map(str::to_string).ok_or_else(|| bad(cmd, format!("`{k}` must name a body")));
+    let (wedge_body, roller_body) = (body("wedge")?, body("roller")?);
+    let limits = s.doc.assembly.joints.iter().find(|j| j.id == a).and_then(|j| j.limits.first().copied().flatten());
+    let num = |k: &str| p.get(k).and_then(Value::as_f64).filter(|x| x.is_finite() && x.abs() < 1e6);
+    let (from, to) = match (num("from"), num("to"), limits) {
+        (Some(f), Some(t), _) => (f, t),
+        (f, t, Some((lo, hi))) => (f.unwrap_or(lo), t.unwrap_or(hi)),
+        _ => return Err(bad(cmd, "give `from` and `to` (the wedge's travel), or limits on its joint")),
+    };
+    if (to - from).abs() < 1e-6 {
+        return Err(bad(cmd, "`from` and `to` must differ"));
+    }
+    let (a0, b0) = (value_now(s, a, 0), value_now(s, b, 0));
+    // Probe how the parts move, on a copy.
+    let mut t = s.scratch();
+    t.pending_moves.clear();
+    let centre = |t: &Session, n: &str| t.world_state().body(n).map(|x| x.mesh().bounds().center()).ok_or_else(|| bad(cmd, format!("no body `{n}`")));
+    let unit = |turn: bool| if turn { "deg" } else { "mm" };
+    let drive = |t: &mut Session, j: u64, v: f64, turn: bool| t.execute("joint.drive", &json!({"joint": j, "values": [format!("{v} {}", unit(turn))]})).map(|_| ());
+    let w0 = centre(&t, &wedge_body)?;
+    drive(&mut t, a, a0 + 1.0, false)?;
+    let dv = centre(&t, &wedge_body)? - w0;
+    drive(&mut t, a, a0, false)?;
+    if dv.len() < 1e-6 {
+        return Err(bad(cmd, "the wedge does not move when its joint slides: pick the slider that carries it"));
+    }
+    let p0 = centre(&t, &roller_body)?;
+    let step = if turning { 3.0 } else { 0.5 };
+    drive(&mut t, b, b0 + step, turning)?;
+    let p1 = centre(&t, &roller_body)?;
+    drive(&mut t, b, b0 + 2.0 * step, turning)?;
+    let p2 = centre(&t, &roller_body)?;
+    drive(&mut t, b, b0, turning)?;
+    if p0.dist(p1) < 1e-6 {
+        return Err(bad(cmd, "the roller does not move with the follower's joint: pick the roller on that part"));
+    }
+    // The plane the roller moves in, and where it turns about.
+    let (normal, pivot) = if turning {
+        let n = (p1 - p0).cross(p2 - p1).normalized().ok_or_else(|| bad(cmd, "the roller turns about its own centre: pick a roller off the lever's pivot"))?;
+        // The circle through the three places.
+        let (u, v) = (p1 - p0, p2 - p0);
+        let w = u.cross(v);
+        let c = p0 + (w.cross(u) * v.dot(v) + v.cross(w) * u.dot(u)) * (0.5 / w.dot(w));
+        (n, c)
+    } else {
+        let e = (p1 - p0).normalized().unwrap_or(Vec3::X);
+        (e.cross(dv).normalized().ok_or_else(|| bad(cmd, "the follower slides along the wedge's line: it can't be pushed sideways"))?, p0)
+    };
+    if dv.normalized().is_some_and(|d| d.dot(normal).abs() > 0.05) {
+        return Err(bad(cmd, "the wedge must slide in the plane the roller moves in"));
+    }
+    let ux = dv.normalized().unwrap_or(Vec3::X);
+    let uy = normal.cross(ux);
+    let flat = |q: Vec3| ((q - p0).dot(ux), (q - p0).dot(uy));
+    let radius = match num("radius").filter(|r| *r > 0.0) {
+        Some(r) => r,
+        None => {
+            let sz = t.world_state().body(&roller_body).map(|x| x.mesh().bounds().size()).unwrap_or(Vec3::ZERO);
+            sz.x.max(sz.y).max(sz.z) * 0.5
+        }
+    };
+    // The wedge's outline where the plane cuts it.
+    let segs: Vec<((f64, f64), (f64, f64))> = {
+        let st = t.world_state();
+        let m = st.body(&wedge_body).map(|x| x.mesh()).ok_or_else(|| bad(cmd, format!("no body `{wedge_body}`")))?;
+        let mut out = Vec::new();
+        for tri in m.triangles.iter().take(400_000) {
+            let pts: Vec<Vec3> = tri.iter().filter_map(|i| m.positions.get(*i as usize).copied()).collect();
+            if pts.len() != 3 {
+                continue;
+            }
+            let d: Vec<f64> = pts.iter().map(|q| (*q - p0).dot(normal)).collect();
+            let mut cut = Vec::new();
+            for k in 0..3 {
+                let (i, j) = (k, (k + 1) % 3);
+                if (d[i] > 0.0) != (d[j] > 0.0) {
+                    let f = d[i] / (d[i] - d[j]);
+                    cut.push(flat(pts[i] + (pts[j] - pts[i]) * f));
+                }
+            }
+            if let [x, y] = cut[..] {
+                out.push((x, y));
+            }
+        }
+        out
+    };
+    if segs.is_empty() {
+        return Err(bad(cmd, "the wedge does not cross the plane the roller moves in"));
+    }
+    let seg_dist = |q: (f64, f64), (p, r): ((f64, f64), (f64, f64))| {
+        let (dx, dy) = (r.0 - p.0, r.1 - p.1);
+        let l2 = dx * dx + dy * dy;
+        let k = if l2 > 0.0 { (((q.0 - p.0) * dx + (q.1 - p.1) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+        (q.0 - p.0 - dx * k).hypot(q.1 - p.1 - dy * k)
+    };
+    let len = dv.len();
+    // The roller's centre for b moved by `m` (degrees or mm from where it is now).
+    let piv = flat(pivot);
+    let e2 = flat(p1);
+    let place = |m: f64| -> (f64, f64) {
+        if turning {
+            let a = m.to_radians();
+            let (sn, cs) = a.sin_cos();
+            let (x, y) = (-piv.0, -piv.1);
+            (piv.0 + x * cs - y * sn, piv.1 + x * sn + y * cs)
+        } else {
+            let k = m / step;
+            (e2.0 * k, e2.1 * k)
+        }
+    };
+    // Gap between roller and wedge with the wedge at a's `x`: negative where they overlap.
+    let gap = |x: f64, m: f64| -> f64 {
+        let shift = (x - a0) * len;
+        let q = place(m);
+        let q = (q.0 - shift, q.1);
+        segs.iter().map(|sg| seg_dist(q, *sg)).fold(f64::INFINITY, f64::min) - radius
+    };
+    // Which way b moves toward the wedge.
+    let inward = if gap(a0, 0.5) < gap(a0, -0.5) { 1.0 } else { -1.0 };
+    let solve = |x: f64, start: f64| -> f64 {
+        let g = |m: f64| gap(x, m);
+        let g0 = g(start);
+        if g0.abs() < 1e-6 {
+            return start;
+        }
+        // Overlapping: out until clear; clear: in until touching.
+        let dir = if g0 < 0.0 { -inward } else { inward };
+        let h = if turning { 0.25 } else { 0.1 };
+        let (mut lo, mut hi) = (start, start);
+        // Half a turn at most: past that the roller has lost the wedge (it stays where it was).
+        for _ in 0..(180.0 / h) as usize {
+            hi = lo + dir * h;
+            if (g(hi) >= 0.0) != (g0 >= 0.0) {
+                break;
+            }
+            lo = hi;
+        }
+        if (g(hi) >= 0.0) == (g0 >= 0.0) {
+            return start;
+        }
+        for _ in 0..50 {
+            let mid = 0.5 * (lo + hi);
+            if (g(mid) >= 0.0) == (g0 >= 0.0) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    };
+    let xs: Vec<f64> = (0..WEDGE_SAMPLES).map(|i| from + (to - from) * i as f64 / (WEDGE_SAMPLES - 1) as f64).collect();
+    let mut moved = vec![0.0; WEDGE_SAMPLES];
+    // From the sample nearest where the wedge is now, out each way, each from the last.
+    let near = xs.iter().enumerate().min_by(|p, q| (p.1 - a0).abs().total_cmp(&(q.1 - a0).abs())).map_or(0, |x| x.0);
+    let rest = solve(a0, 0.0);
+    let mut last = rest;
+    for i in near..WEDGE_SAMPLES {
+        last = solve(xs[i], last);
+        moved[i] = last;
+    }
+    last = moved[near];
+    for i in (0..near).rev() {
+        last = solve(xs[i], last);
+        moved[i] = last;
+    }
+    let table: Vec<f64> = moved.iter().map(|m| if turning { (b0 + m).to_radians() } else { b0 + m }).collect();
+    if table.iter().any(|v| !v.is_finite()) {
+        return Err(bad(cmd, "the roller's path could not be worked out"));
+    }
+    let l = solidcraft_doc::joints::MotionLink {
+        a,
+        ia: 0,
+        b,
+        ib: 0,
+        ratio: 1.0,
+        offset: 0.0,
+        coupling: Some(solidcraft_doc::joints::Coupling::Wedge { from, to }),
+        lift: table.clone(),
+    };
+    let mut out = super::joints::couple(s, p, cmd, l)?;
+    // The roller goes onto the wedge (the spring holds it there), even if it was modelled clear.
+    if let Some(link) = out["link"].as_u64().and_then(|i| usize::try_from(i).ok())
+        && s.doc.assembly.links.get(link).is_some_and(|k| k.offset != 0.0)
+    {
+        if let Some(k) = s.doc_mut().assembly.links.get_mut(link) {
+            k.offset = 0.0;
+        }
+        let depth = s.undo.len();
+        let r = s.execute("joint.drive", &json!({"joint": a, "values": [format!("{a0} mm")]}));
+        s.undo.truncate(depth);
+        r?;
+    }
+    let shown: Vec<f64> = table.iter().map(|v| if turning { v.to_degrees() } else { *v }).collect();
+    let (lo, hi) = shown.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+    out["lift"] = json!({"min": lo, "max": hi, "unit": unit(turning)});
+    out["samples"] = json!(WEDGE_SAMPLES);
+    out["touching"] = json!(rest.abs() < 1e-3);
+    Ok(out)
+}
+
 /// Part Feeder (owner): the part and copies of it queued along a track, indexed forward one
 /// pitch at a time.
 fn feeder(s: &mut Session, p: &Value) -> Result<Value> {
@@ -677,6 +906,39 @@ mod tests {
             assert!((b - a - 25.0).abs() < 1e-6, "{before:?} {after:?}");
         }
         assert!(!s.doc.assembly.studies.is_empty(), "an index sequence");
+    }
+
+    /// Owner's picture: a cone slides down between levers; the roller on a lever rides the cone,
+    /// so the lever turns as the cone moves (Wedge Cam).
+    #[test]
+    fn a_wedge_turns_the_lever_its_roller_rides() {
+        let mut s = Session::default();
+        let r = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap();
+        r(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-60, -5, 60], "operation": "new", "body_name": "Frame"}));
+        r(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [-10, -10, -10], "operation": "new", "body_name": "Cone"}));
+        r(&mut s, "solid.move", json!({"bodies": ["Cone"], "axis": [0, 1, 0], "angle": "45 deg"}));
+        r(&mut s, "solid.box", json!({"length": 4, "width": 6, "height": 37, "corner": [18, -3, 5], "operation": "new", "body_name": "Lever"}));
+        r(&mut s, "solid.cylinder", json!({"radius": 4, "height": 6, "base": [20, -3, 5], "axis": [0, 1, 0], "operation": "new", "body_name": "Roller"}));
+        let frame = occurrence_for(&mut s, "Frame", "t").unwrap();
+        r(&mut s, "occurrence.ground", json!({"occurrence": frame, "grounded": true}));
+        let cone = occurrence_for(&mut s, "Cone", "t").unwrap();
+        let lever = occurrence_for(&mut s, "Lever", "t").unwrap();
+        let roller = occurrence_for(&mut s, "Roller", "t").unwrap();
+        r(&mut s, "joint.as_built", json!({"type": "rigid", "a": lever, "b": roller, "at": {"frame": {"origin": [20, 0, 5], "z": [0, 1, 0]}}, "name": "Pin"}));
+        r(&mut s, "joint.as_built", json!({"type": "slider", "a": frame, "b": cone, "at": {"frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}, "name": "Push", "limits": [[0, 15]]}));
+        r(&mut s, "joint.as_built", json!({"type": "revolute", "a": frame, "b": lever, "at": {"frame": {"origin": [20, 0, 40], "z": [0, 1, 0]}}, "name": "Arm"}));
+        let out = r(&mut s, "joint.wedge", json!({"a": "Push", "b": "Arm", "wedge": "Cone", "roller": "Roller"}));
+        let lift = &out["lift"];
+        assert!(lift["max"].as_f64().unwrap() - lift["min"].as_f64().unwrap() > 1.0, "{out}");
+        // Driven, the roller stays on the cone: a radius from its slanted face.
+        r(&mut s, "joint.drive", json!({"joint": "Push", "values": ["10 mm"]}));
+        let st = s.world_state();
+        let c = st.body("Roller").unwrap().mesh().bounds().center();
+        let cone_c = st.body("Cone").unwrap().mesh().bounds().center();
+        assert!((cone_c.z - 10.0).abs() < 1e-6, "the cone went up into the roller: {cone_c:?}");
+        // The cone's slanted faces: |x| + |z| = 10√2 about its centre.
+        let gap = ((c.x - cone_c.x).abs() + (c.z - cone_c.z).abs() - 200f64.sqrt()) / 2f64.sqrt();
+        assert!((gap - 4.0).abs() < 0.05, "on the face: {gap} {c:?}");
     }
 
 }

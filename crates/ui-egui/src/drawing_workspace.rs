@@ -1747,6 +1747,121 @@ fn parse(v: &Value) -> Option<Sheet> {
     })
 }
 
+/// Auto balloons (owner): a balloon on each part of the assembly in the drawing's pictorial view
+/// (else its first plain view), numbered as the parts list (Bill of Materials) numbers its rows,
+/// leaders running out past the view's edge. Balloons placed before are replaced. The parts list
+/// is filled too when it is empty.
+fn auto_balloons(app: &mut SolveApp) -> Result<usize, String> {
+    let bom = app.run("assembly.bom", json!({}))?;
+    let rows = bom.get("rows").and_then(Value::as_array).cloned().unwrap_or_default();
+    if rows.is_empty() {
+        return Err("No parts to balloon: the design has no components (make the parts components first)".into());
+    }
+    let sheet = app.drawing.sheet.as_ref().ok_or("Place a view first, then add the balloons")?;
+    let usable = |i: usize| app.drawing.placed.get(i).is_some_and(|v| v.rot == 0 && v.section.is_none() && v.section_line.is_none() && v.detail.is_none());
+    let pictorial = |i: usize| app.drawing.placed.get(i).is_some_and(|v| v.view >= 6 || v.custom.is_some());
+    let bx = sheet
+        .boxes
+        .iter()
+        .find(|b| usable(b.0) && pictorial(b.0))
+        .or_else(|| sheet.boxes.iter().find(|b| usable(b.0)))
+        .copied()
+        .ok_or("Place a plain view first (not a section or a detail), then add the balloons")?;
+    let k = sheet.scales.iter().find(|s| s.0 == bx.0).map(|s| s.1).filter(|k| *k > 0.0 && k.is_finite()).ok_or("the view has no scale yet: Update the drawing")?;
+    let (cx, cy) = sheet.centres.iter().find(|s| s.0 == bx.0).map(|s| (s.1, s.2)).ok_or("the view is not drawn yet: Update the drawing")?;
+    let (yaw, pitch) = app.drawing.placed.get(bx.0).map(view_angles).unwrap_or((0.0, 0.0));
+    let (right, up, _) = Camera { yaw, pitch, ..Default::default() }.basis();
+    let to_sheet = |w: Vec3| pos2(bx.1 + (w.dot(right) as f32 - cx) * k, bx.2 + (w.dot(up) as f32 - cy) * k);
+    let s = &app.session;
+    let st = s.world_state();
+    let centre_of = |names: &[String]| -> Option<Vec3> {
+        let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
+        for n in names {
+            let m = st.body(n)?.mesh().bounds();
+            b = b.union(&m);
+        }
+        (!b.is_empty()).then(|| b.center())
+    };
+    let mut marks: Vec<(String, Pos2)> = Vec::new();
+    for row in rows.iter().take(200) {
+        let item = row.get("item").map(|i| i.to_string().trim_matches('"').to_string()).unwrap_or_default();
+        let comps: Vec<u64> = row.get("components").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+        let at = comps.iter().find_map(|c| {
+            let occ = s.doc.occurrences.iter().find(|o| o.component == *c && o.parent == 0)?;
+            let names = s.occurrence_bodies(&[occ.id], true).ok()?;
+            centre_of(&names)
+        });
+        if let Some(w) = at {
+            marks.push((item, to_sheet(w)));
+        }
+    }
+    if marks.is_empty() {
+        return Err("None of the parts list's parts could be found in the view".into());
+    }
+    // Leaders out from the view's middle, past its edge, spread round it.
+    let mid = pos2(bx.1, bx.2);
+    let reach = bx.3.max(bx.4) * 0.5 + 12.0;
+    let mut placed: Vec<Pos2> = Vec::new();
+    let mut out = Vec::new();
+    for (item, a) in marks {
+        let d = a - mid;
+        let mut ang = if d.length() > 1e-3 { d.y.atan2(d.x) } else { 0.8 };
+        let mut b = mid + egui::vec2(ang.cos(), ang.sin()) * reach;
+        // Keep balloons apart (12 mm).
+        for _ in 0..36 {
+            if placed.iter().all(|p| (*p - b).length() > 12.0) {
+                break;
+            }
+            ang += 0.17;
+            b = mid + egui::vec2(ang.cos(), ang.sin()) * reach;
+        }
+        placed.push(b);
+        out.push(DimItem { kind: 5, a, b, at: 0.0, text: item, slide: 0.0, decimals: -1, style: 0 });
+    }
+    let n = out.len();
+    app.drawing.dims.retain(|d| d.kind != 5);
+    app.drawing.dims.extend(out);
+    if app.drawing.bom.is_empty() {
+        app.drawing.bom = rows
+            .iter()
+            .take(40)
+            .map(|r| {
+                let text = |k: &str| r.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                let description = [text("description"), text("part_number"), text("definition")].into_iter().find(|t| !t.is_empty()).unwrap_or_default();
+                let material = r.get("properties").and_then(|p| p.get("material")).and_then(Value::as_str).unwrap_or("").to_string();
+                let item = r.get("item").map(|i| i.to_string().trim_matches('"').to_string()).unwrap_or_default();
+                let count = r.get("count").map(|c| c.to_string()).unwrap_or_default();
+                [item, description.chars().take(60).collect(), count, material.chars().take(60).collect()]
+            })
+            .collect();
+    }
+    refresh(app);
+    Ok(n)
+}
+
+/// Explode video (owner): the parts moving out to the exploded view and back, saved as a GIF from
+/// the 3D window's camera; an exploded view is made first when the design has none.
+fn explode_video(app: &mut SolveApp) {
+    if app.session.doc.assembly.exploded.is_empty()
+        && let Err(e) = app.run("explode.create", json!({}))
+    {
+        app.set_status(format!("Could not explode the assembly: {e}"), true);
+        return;
+    }
+    let Some(view) = app.session.doc.assembly.exploded.last().map(|v| v.id) else { return };
+    let camera = app.cam;
+    app.pick_save("Exploded view.gif", &["gif"], move |app, path| {
+        let Some(mut path) = path else { return };
+        if !path.to_ascii_lowercase().ends_with(".gif") {
+            path.push_str(".gif");
+        }
+        match app.run("motion.export_animation", json!({"explode": view, "path": path, "camera": camera, "back_and_forth": true, "fps": 20})) {
+            Ok(_) => app.set_status(crate::i18n::format("ui.saved_to", &[("path", &path)]), false),
+            Err(e) => app.set_status(format!("Explode video: {e}"), true),
+        }
+    });
+}
+
 /// Start an Update: the model first, then each placed view, one stage per frame.
 fn begin(app: &mut SolveApp) {
     // Adding a view, switching sheet and the like lay the sheet out again from the model the drawing was last
@@ -4353,6 +4468,16 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 }
                                 Err(e) => app.set_status(format!("Could not read the parts list: {e}"), true),
                             }
+                        }
+                        if crate::ui_kit::button(ui, "Auto balloons", crate::ui_kit::Button::Small).clicked() {
+                            match auto_balloons(app) {
+                                Ok(n) => app.set_status(format!("{n} balloons placed, numbered as the parts list"), false),
+                                Err(e) => app.set_status(e, true),
+                            }
+                            dirty = true;
+                        }
+                        if crate::ui_kit::button(ui, "Explode video", crate::ui_kit::Button::Small).clicked() {
+                            explode_video(app);
                         }
                         if app.drawing.bom.len() < 40 && crate::ui_kit::button(ui, "Add row", crate::ui_kit::Button::Small).clicked() {
                             let n = app.drawing.bom.len() + 1;

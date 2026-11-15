@@ -613,7 +613,24 @@ pub(crate) fn nearest_face(body: &Body, p: Vec3) -> Result<usize> {
 /// fails the sewn body is kept as it is.
 pub fn stitch_seamless(bodies: &[&Body], tol: f64) -> Result<Body> {
     let sewn = stitch(bodies, tol)?;
-    Ok(crate::boolean_record::healed(&sewn).unwrap_or(sewn))
+    // A closed result heals with its history; an open one (a sheet) has its faces merged on
+    // their own (the history-keeping copy needs a closed shell).
+    if !sewn.is_surface()
+        && let Ok(b) = guard("seamless", || crate::boolean_record::healed(&sewn))
+    {
+        return Ok(b);
+    }
+    let merged = guard("seamless", || {
+        let shells: Vec<mt::Shell> = sewn.solid.boundaries().iter().map(|sh| crate::heal::merge_open_shell(sh, sewn.size()).unwrap_or_else(|| sh.clone())).collect();
+        match <[mt::Shell; 1]>::try_from(shells) {
+            Ok([shell]) => Ok(surface_of(shell)),
+            Err(_) => Err(KernelError::Invalid("several sheets".into())),
+        }
+    });
+    Ok(match merged {
+        Ok(b) if b.face_count() < sewn.face_count() => b,
+        _ => sewn,
+    })
 }
 
 /// Sew surface bodies along edges that coincide (within `tol`): one body, a solid when the

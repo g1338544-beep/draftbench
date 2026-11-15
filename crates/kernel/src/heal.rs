@@ -597,6 +597,15 @@ impl Trace {
     }
 }
 
+/// An open shell (a sheet) with its coplanar neighbouring faces merged and the straight edges that
+/// leaves split joined; `None` when nothing merges.
+pub(crate) fn merge_open_shell(shell: &mt::Shell, size: f64) -> Option<mt::Shell> {
+    let tol = (size * 1e-7).max(1e-9);
+    let mut trace = Trace { on: false, input: HashMap::new(), made: HashMap::new() };
+    let (merged, _) = merge_coplanar(shell, tol, &[])?;
+    Some(merge_collinear(&merged, &mut trace).unwrap_or(merged))
+}
+
 fn heal_shells(solid: &Solid, size: f64, keep: &[Vec<Vec3>], traced: bool, faces_only: bool) -> Option<(Solid, Option<HealMap>)> {
     let tol = (size * 1e-7).max(1e-9);
     let mut shells = Vec::new();
