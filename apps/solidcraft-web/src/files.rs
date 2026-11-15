@@ -30,6 +30,8 @@ const RECOVERY: &str = "recovery.solidcraft";
 /// when there is no current one.
 const LEGACY_RECOVERY: &str = "recovery.solvecraft";
 const RECOVERY_META: &str = "recovery.json";
+/// My Parts' files in OPFS (the engine's `parts_files::default_dir` in the browser).
+const MY_PARTS: &str = "parts_";
 
 /// What to do with a file brought in from the computer.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -295,7 +297,8 @@ pub fn start(files: &Rc<Files>) {
                         *files.recovery.borrow_mut() = Some((n, meta["path"].as_str().map(str::to_string)));
                         continue;
                     }
-                    if name != RECOVERY {
+                    // My Parts' files (`parts_…`) are listed by Insert Part, not as designs.
+                    if name != RECOVERY && !name.starts_with(MY_PARTS) {
                         entries.push(Entry { name: name.clone(), size: bytes.len() as u64, modified });
                     }
                     vfs::insert(&format!("{OPFS}{name}"), bytes);
@@ -323,7 +326,7 @@ pub fn flush(files: &Rc<Files>) {
                 {
                     let mut e = files.entries.borrow_mut();
                     e.retain(|x| x.name != name);
-                    if name != RECOVERY && name != RECOVERY_META {
+                    if name != RECOVERY && name != RECOVERY_META && !name.starts_with(MY_PARTS) {
                         e.push(Entry { name: name.clone(), size: bytes.len() as u64, modified: js_sys::Date::now() });
                         e.sort_by_key(|a| a.name.to_lowercase());
                     }

@@ -61,6 +61,7 @@ mod mesh;
 mod metadata;
 pub(crate) mod motion;
 mod parts;
+pub(crate) mod parts_files;
 mod script;
 mod remove_params;
 mod resize_face;
@@ -295,6 +296,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(motion::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
+    v.extend(parts_files::COMMANDS.iter());
     v.extend(resize_face::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
