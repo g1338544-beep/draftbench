@@ -166,6 +166,7 @@ pub mod drawing_workspace;
 mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
+pub mod long_press;
 pub mod mouse_gesture;
 pub(crate) mod navigation;
 pub(crate) mod open_meshing;
@@ -523,6 +524,8 @@ pub struct SolveApp {
     pub synthetic: Vec<egui::Event>,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
+    /// A finger held on a touch screen right-clicks ([`long_press`]).
+    pub long_press: long_press::LongPress,
     control_rx: Option<Receiver<ControlRequest>>,
     /// Control requests that change the design, held while a file loads or an agent's design
     /// change computes.
@@ -649,6 +652,7 @@ impl SolveApp {
             frame_rate: frame_rate::FrameRate::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
+            long_press: long_press::LongPress::default(),
             control_rx: None,
             agent_chat: Default::default(),
             control_held: Default::default(),
@@ -1740,6 +1744,10 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         frame_watch::begin(self);
+        // A finger held still: the frame that turns it into a right click must come.
+        if self.long_press.waiting() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
         // Insert DXF / SVG waiting for its sketch: the file is asked for once the plane is picked;
         // dropped when Create Sketch was cancelled.
         if let Some(cmd) = PENDING_INSERT.with(std::cell::Cell::get) {
@@ -1831,6 +1839,7 @@ impl SolveApp {
 
     /// Inject synthetic events (one pointer event per frame).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
+        self.long_press.hook(raw);
         if self.synthetic.is_empty() {
             return;
         }
