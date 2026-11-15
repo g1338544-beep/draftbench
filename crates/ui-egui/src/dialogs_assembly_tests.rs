@@ -1055,3 +1055,44 @@ fn each_inputs_picks_have_their_own_colour() {
         assert!(a.r().max(a.g()).max(a.b()) >= 200, "bright");
     }
 }
+
+/// Owner's videos: an Air Cylinder from its dialog, then a Motion Sequence and a Pick and Place
+/// built in theirs, each run as one command.
+#[test]
+fn air_cylinder_sequence_and_pick_place_dialogs_run() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for axis in [2usize, 0] {
+        app.start("parts.air_cylinder");
+        let d = app.dialog.as_mut().unwrap();
+        if let Kind::Assembly(Asm::AirCylinder { axis: a, .. }) = &mut d.kind {
+            *a = axis;
+        }
+        let d = app.dialog.clone().unwrap();
+        for (id, p) in apply_commands(&app, &d).unwrap() {
+            app.run(&id, p).unwrap();
+        }
+        app.dialog = None;
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 2, "two cylinders' sliders");
+    app.start("motion.sequence");
+    let d = app.dialog.as_mut().unwrap();
+    let Kind::Assembly(Asm::Sequence { moves, .. }) = &mut d.kind else { panic!("{:?}", d.kind) };
+    moves[0].1 = "50".into();
+    moves.push((usize::MAX, String::new(), "0.5".into()));
+    moves.push((0, "0".into(), "1".into()));
+    let d = app.dialog.clone().unwrap();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "motion.sequence");
+    app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    app.dialog = None;
+    app.start("motion.pick_place");
+    let d = app.dialog.as_mut().unwrap();
+    let Kind::Assembly(Asm::PickPlace { values, .. }) = &mut d.kind else { panic!("{:?}", d.kind) };
+    values[0] = "40".into();
+    values[2] = "30".into();
+    let d = app.dialog.clone().unwrap();
+    let cmds = apply_commands(&app, &d).unwrap();
+    let r = app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    assert_eq!(r["seconds"], json!(6.0), "{r}");
+    assert_eq!(app.session.doc.assembly.studies.len(), 2);
+}
