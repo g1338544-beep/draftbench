@@ -179,6 +179,10 @@ pub enum Asm {
         name: String,
         moves: Vec<(usize, String, String)>,
     },
+    /// Gripper: the body and its fingers picked, the stroke typed.
+    Gripper {
+        stroke: String,
+    },
     /// Pick and Place: the lift, travel and (optional) grip joints and their values.
     PickPlace {
         lift: usize,
@@ -269,6 +273,7 @@ impl Asm {
             Asm::AirCylinder { .. } => "AIR CYLINDER",
             Asm::Sequence { .. } => "MOTION SEQUENCE",
             Asm::PickPlace { .. } => "PICK AND PLACE",
+            Asm::Gripper { .. } => "GRIPPER",
             Asm::Coupling(f) => match f.command {
                 "joint.gear" => "GEAR",
                 "joint.rack_pinion" => "RACK AND PINION",
@@ -319,6 +324,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             let first = movable(s).first().copied().unwrap_or(0);
             (Asm::Sequence { name: "Sequence".into(), moves: vec![(first, String::new(), "1".into())] }, vec![])
         }
+        "motion.gripper" => (
+            Asm::Gripper { stroke: "10 mm".into() },
+            vec![SelInput::new("Gripper body (holds the fingers)", BODIES, false), SelInput::new("Fingers (2 or more)", BODIES, true)],
+        ),
         "motion.pick_place" => {
             let m = movable(s);
             let (lift, travel) = (m.first().copied().unwrap_or(0), m.get(1).copied().unwrap_or(0));
@@ -972,6 +981,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             enter |= expr_row(ui, "Stroke", stroke);
             choice_row(ui, "Rod comes out along", "ac_axis", axis, &CYLINDER_AXES);
             crate::ui_kit::caption(ui, "Bore", crate::i18n::tr_label("The barrel and the rod become components; the rod slides its stroke (drive it, or use it in a Motion Sequence)."));
+        }
+        Asm::Gripper { stroke } => {
+            enter |= expr_row(ui, "Stroke (each finger)", stroke);
+            crate::ui_kit::caption(
+                ui,
+                "Stroke (each finger)",
+                crate::i18n::tr_label("1. Click the gripper's body.  2. Click the fingers.  3. Set how far each finger moves. The fingers close toward the middle together; drive the first finger's joint (or use it in a Motion Sequence) to open and close."),
+            );
         }
         Asm::Sequence { name, moves } => {
             let s = &app.session;
@@ -1687,6 +1704,14 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 })
                 .collect::<Result<_, String>>()?;
             cmd("motion.sequence", json!({"name": name.trim(), "moves": list}))
+        }
+        Asm::Gripper { stroke } => {
+            let base = sel_items(inputs, 0).iter().find_map(body_of).ok_or("click the gripper's body")?;
+            let fingers: Vec<String> = sel_items(inputs, 1).iter().filter_map(body_of).map(str::to_string).collect();
+            if fingers.len() < 2 {
+                return Err("click two or more fingers".into());
+            }
+            cmd("motion.gripper", json!({"base": base, "fingers": fingers, "stroke": eval(stroke, ValueKind::Length)?}))
         }
         Asm::PickPlace { lift, travel, grip, values } => {
             let js = &s.doc.assembly.joints;

@@ -23,6 +23,12 @@ pub static COMMANDS: &[CommandSpec] = &[
          back?: travel's value at the pick (default its value now); close?, open?: grip's values; time?: s per move (default 1); name?. \
          A Motion Sequence: down, close, up, across, down, open, up, back",
     ),
+    CommandSpec::new("motion.gripper", "Gripper", gripper).at("SOLID", "ASSEMBLE").icon("joint").params(
+        "base: body (the gripper's body, it holds the fingers); fingers: [bodies] (two or more, each made a component when it is not \\
+         one); stroke?: mm (how far each finger travels, default 10); direction?: [x,y,z] (the way the fingers close, default from \\
+         the first finger toward the middle of them all); name?. Each finger slides toward the middle, linked to the first so they \\
+         close and open together; limited to the stroke (0 open … stroke closed). → joints, drive: the first finger's joint",
+    ),
     CommandSpec::new("parts.air_cylinder", "Air Cylinder", air_cylinder).at("SOLID", "ASSEMBLE").icon("joint").params(
         "bore?: mm (default 20); stroke?: mm (default 50); at?: [x,y,z] (the barrel's back end, default the origin); axis?: X|Y|Z|-X|-Y|-Z \
          (the rod comes out along it, default Z); name?. Makes the barrel and the rod as components, the rod sliding out of the barrel \
@@ -214,9 +220,110 @@ fn air_cylinder_steps(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"barrel": barrel, "rod": rod, "joint": j.get("joint").cloned().unwrap_or(Value::Null), "name": name, "stroke": stroke}))
 }
 
+/// The occurrence a body's component sits in, making the body a component of its own first when
+/// it is loose in the design (a joint moves components).
+fn occurrence_for(s: &mut Session, body: &str, cmd: &str) -> Result<u64> {
+    let comp = |s: &Session| -> Option<u64> {
+        let st = s.world_state();
+        let b = st.body(body)?;
+        Some(s.doc.model_body_component(b))
+    };
+    let c = comp(s).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+    if c == 0 {
+        s.execute("component.from_bodies", &json!({"bodies": [body]}))?;
+    }
+    let c = comp(s).filter(|c| *c != 0).ok_or_else(|| bad(cmd, format!("`{body}` could not be made a component")))?;
+    s.doc.occurrence_of(c).map(|o| o.id).ok_or_else(|| bad(cmd, format!("`{body}` is not placed")))
+}
+
+/// Gripper (owner: "a new, simple gripper"): pick the body and its fingers, set the stroke; each
+/// finger slides toward the middle, all linked so they close and open together.
+fn gripper(s: &mut Session, p: &Value) -> Result<Value> {
+    let depth = s.undo.len();
+    let r = gripper_steps(s, p);
+    s.undo.truncate(depth);
+    r
+}
+
+fn gripper_steps(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "motion.gripper";
+    let base = p.get("base").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`base` must name the gripper's body"))?.to_string();
+    let fingers: Vec<String> =
+        p.get("fingers").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    if fingers.len() < 2 || fingers.len() > 8 {
+        return Err(bad(cmd, "pick 2 to 8 fingers"));
+    }
+    if fingers.contains(&base) {
+        return Err(bad(cmd, "the body can't also be a finger"));
+    }
+    let stroke = match p.get("stroke") {
+        None | Some(Value::Null) => 10.0,
+        Some(v) => v.as_f64().filter(|x| x.is_finite() && *x > 0.0 && *x < 1e4).ok_or_else(|| bad(cmd, "`stroke` must be mm"))?,
+    };
+    let centres: Vec<Vec3> = {
+        let st = s.world_state();
+        fingers
+            .iter()
+            .map(|f| st.body(f).map(|b| b.mesh().bounds().center()).ok_or_else(|| bad(cmd, format!("no body `{f}`"))))
+            .collect::<Result<_>>()?
+    };
+    let middle = centres.iter().fold(Vec3::ZERO, |a, b| a + *b) * (1.0 / centres.len() as f64);
+    let given = p.get("direction").and_then(vec3).and_then(|d| d.normalized());
+    let a = occurrence_for(s, &base, cmd)?;
+    let n = s.doc.assembly.joints.len() + 1;
+    let name = p.get("name").and_then(Value::as_str).map_or_else(|| format!("Gripper{n}"), str::to_string);
+    let mut joints = Vec::new();
+    for (k, (f, c)) in fingers.iter().zip(&centres).enumerate() {
+        // Toward the middle: the closing way of this finger.
+        let close = match given {
+            Some(d) => {
+                if (middle - *c).dot(d) < 0.0 { -d } else { d }
+            }
+            None => (middle - *c).normalized().ok_or_else(|| bad(cmd, "two fingers sit in the same place: give a `direction`"))?,
+        };
+        let b = occurrence_for(s, f, cmd)?;
+        if b == a {
+            return Err(bad(cmd, format!("`{f}` is in the gripper body's component: make each finger a component of its own")));
+        }
+        let jn = format!("{name}-{}", k + 1);
+        s.execute(
+            "joint.as_built",
+            &json!({"type": "slider", "a": a, "b": b, "at": {"frame": {"origin": [c.x, c.y, c.z], "z": [close.x, close.y, close.z]}}, "name": jn, "limits": [[0, stroke]]}),
+        )?;
+        joints.push(jn);
+    }
+    for j in joints.iter().skip(1) {
+        s.execute("joint.motion_link", &json!({"a": joints[0], "b": j, "ratio": 1}))?;
+    }
+    Ok(json!({"joints": joints, "drive": joints[0], "stroke": stroke}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Owner: a new, simple Gripper. A palm and two fingers 40 apart along X: closing the first
+    /// finger by 10 closes the other by 10 too, toward the middle; one undo step.
+    #[test]
+    fn a_gripper_closes_its_fingers_together() {
+        let mut s = Session::default();
+        for (name, x) in [("Palm", -5.0), ("Left", -20.0), ("Right", 20.0)] {
+            s.execute("solid.box", &json!({"length": if name == "Palm" { 10 } else { 4 }, "width": 10, "height": 10, "corner": [x - 2.0, 0, 0], "operation": "new", "body_name": name})).unwrap();
+        }
+        s.execute("component.from_bodies", &json!({"bodies": ["Palm"]})).unwrap();
+        let palm = s.doc.occurrences.iter().find(|o| o.name.starts_with("Palm")).unwrap().name.clone();
+        s.execute("occurrence.ground", &json!({"occurrence": palm, "grounded": true})).unwrap();
+        let undo = s.undo.len();
+        let r = s.execute("motion.gripper", &json!({"base": "Palm", "fingers": ["Left", "Right"], "stroke": 12})).unwrap();
+        assert_eq!(s.undo.len(), undo + 1, "one undo step: {r}");
+        s.execute("joint.drive", &json!({"joint": r["drive"], "value": 10})).unwrap();
+        let st = s.world_state();
+        let x = |b: &str| st.body(b).unwrap().mesh().bounds().center().x;
+        assert!((x("Left") - (-10.0)).abs() < 1e-6 && (x("Right") - 10.0).abs() < 1e-6, "{} {}", x("Left"), x("Right"));
+        drop(st);
+        let e = s.execute("motion.gripper", &json!({"base": "Palm", "fingers": ["Left"]})).unwrap_err().to_string();
+        assert!(e.contains("2 to 8 fingers"), "{e}");
+    }
 
     /// Owner's videos: an air cylinder whose rod slides its stroke, moved by a Motion Sequence
     /// (out, wait, back), and a pick and place made of the usual moves.

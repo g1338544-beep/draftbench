@@ -184,7 +184,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "ASSEMBLE",
         panel: "MOTION",
         promoted: 3,
-        ids: &["joint.drive", "motion.study", "explode.create", "motion.sequence", "motion.pick_place", "parts.air_cylinder", "motion.trace"],
+        ids: &["joint.drive", "motion.study", "explode.create", "motion.sequence", "motion.gripper", "motion.pick_place", "parts.air_cylinder", "motion.trace"],
     },
     Section {
         tab: "ASSEMBLE",

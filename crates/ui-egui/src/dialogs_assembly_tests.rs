@@ -1096,3 +1096,20 @@ fn air_cylinder_sequence_and_pick_place_dialogs_run() {
     assert_eq!(r["seconds"], json!(6.0), "{r}");
     assert_eq!(app.session.doc.assembly.studies.len(), 2);
 }
+
+/// Owner: the new Gripper dialog: the body, the fingers, the stroke; one command.
+#[test]
+fn the_gripper_dialog_makes_a_gripper() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for (name, x, l) in [("Palm", -7, 10), ("Left", -22, 4), ("Right", 18, 4)] {
+        app.run("solid.box", json!({"length": l, "width": 10, "height": 10, "corner": [x, 0, 0], "operation": "new", "body_name": name})).unwrap();
+    }
+    app.start("motion.gripper");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Palm".into() }];
+    d.inputs[1].items = vec![Sel::Body { name: "Left".into() }, Sel::Body { name: "Right".into() }];
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "motion.gripper");
+    let r = app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    assert_eq!(r["joints"].as_array().unwrap().len(), 2, "{r}");
+}
