@@ -229,7 +229,15 @@ fn manual_once(
         let n = (v.x * v.x + v.y * v.y).sqrt();
         if n > 1e-9 { Some(Vec2::new(v.x / n, v.y / n)) } else { None }
     };
-    let axes = hole_axes(scene, parts, key);
+    // The parts' real axes when the sheet is built from a design (owner: no centre line that is
+    // not one), else read off the views.
+    let real_axes = ROUND_AXES.with(|r| r.borrow().clone());
+    let measured = real_axes.is_some();
+    // Each axis with its cylinders' radii (none when read off the views).
+    let (axes, radii): (Vec<(Vec3, Vec3)>, Vec<Vec<f64>>) = match real_axes {
+        Some(list) => list.into_iter().map(|(a, b, r)| ((a, b), r)).unzip(),
+        None => hole_axes(scene, parts, key).into_iter().map(|a| (a, Vec::new())).unzip(),
+    };
     // The scale of the first plain view: a section drawn at the same scale needs no ratio in its title.
     let mut ref_scale: Option<f64> = None;
     for (index, item) in list.iter().take(12).enumerate() {
@@ -592,7 +600,8 @@ fn manual_once(
                 let (mut q0, mut q1) = (Vec2::new(p0.dot(rv), p0.dot(uv)), Vec2::new(p1.dot(rv), p1.dot(uv)));
                 // An upright axis runs the length of its hole as the cut itself shows it: between the two walls
                 // standing either side of it.
-                if (q0.x - q1.x).abs() < 1e-6
+                if !measured
+                    && (q0.x - q1.x).abs() < 1e-6
                     && let Some((lo, hi)) = wall_span(&all.lines, q0.x)
                 {
                     (q0, q1) = (Vec2::new(q0.x, lo), Vec2::new(q0.x, hi));
@@ -707,9 +716,18 @@ fn manual_once(
                 };
                 Vec2::new(q.x * cs - q.y * sn, q.x * sn + q.y * cs)
             };
-            for (p0, p1) in &axes {
-                let a = to_sheet(turned(Vec2::new(p0.dot(rv), p0.dot(uv))));
-                let b = to_sheet(turned(Vec2::new(p1.dot(rv), p1.dot(uv))));
+            for (k, (p0, p1)) in axes.iter().enumerate() {
+                let (q0, q1) = (Vec2::new(p0.dot(rv), p0.dot(uv)), Vec2::new(p1.dot(rv), p1.dot(uv)));
+                // A part's axis only where the part shows (owner: no centre line of something hidden
+                // when hidden lines are not drawn): an outline line of one of its cylinders beside it.
+                if let Some(rs) = radii.get(k)
+                    && !rs.is_empty()
+                    && !shows_beside(&all.lines, q0, q1, rs, dashed)
+                {
+                    continue;
+                }
+                let a = to_sheet(turned(q0));
+                let b = to_sheet(turned(q1));
                 let d = Vec2::new(b.x - a.x, b.y - a.y);
                 let len = (d.x * d.x + d.y * d.y).sqrt();
                 if len.is_finite() && len > 1.0 {
@@ -1044,6 +1062,34 @@ fn hole_axes(scene: &meshes::Scene, parts: &[sketch::Part], key: Key) -> Vec<(Ve
     }
     out.truncate(120);
     out
+}
+
+/// Whether a line of the view runs along the axis `q0`–`q1` at one of the radii `rs` from it,
+/// overlapping it: the cylinder's outline, so the part shows there (hidden lines count only when
+/// the view draws them).
+fn shows_beside(lines: &[(Vec2, Vec2, bool)], q0: Vec2, q1: Vec2, rs: &[f64], dashed: bool) -> bool {
+    let d = Vec2::new(q1.x - q0.x, q1.y - q0.y);
+    let len = (d.x * d.x + d.y * d.y).sqrt();
+    if !(len > 1e-9) {
+        return true;
+    }
+    let u = Vec2::new(d.x / len, d.y / len);
+    let tol = rs.iter().cloned().fold(0.0_f64, f64::max).mul_add(0.03, 0.05);
+    let side = |r: f64| lines.iter().any(|(a, b, hidden)| {
+        if *hidden && !dashed {
+            return false;
+        }
+        let e = Vec2::new(b.x - a.x, b.y - a.y);
+        let el = (e.x * e.x + e.y * e.y).sqrt();
+        if el < 1e-6 || (e.x * u.y - e.y * u.x).abs() > 0.02 * el {
+            return false;
+        }
+        let off = (a.x - q0.x) * u.y - (a.y - q0.y) * u.x;
+        let (t0, t1) = ((a.x - q0.x) * u.x + (a.y - q0.y) * u.y, (b.x - q0.x) * u.x + (b.y - q0.y) * u.y);
+        (off - r).abs() <= tol && t0.max(t1) > 0.0 && t0.min(t1) < len
+    });
+    // Both outline lines of one cylinder: a stray line in line with one side is not the part.
+    rs.iter().any(|r| side(*r) && side(-*r))
 }
 
 /// Vertical lines at `u - r` and `u + r` (a hole's two sides seen from the side): their extent along the vertical.
@@ -1510,8 +1556,10 @@ fn build(s: &mut Session, p: &Value) -> Result<Built> {
             None => None,
         };
         EXPLODED.with(|e| *e.borrow_mut() = alt);
+        ROUND_AXES.with(|r| *r.borrow_mut() = Some(round_axes(s)));
         let built = manual(p, &scene, &parts, key, list, (sheet_w, sheet_h), first_angle, title, path.map(str::to_string));
         EXPLODED.with(|e| *e.borrow_mut() = None);
+        ROUND_AXES.with(|r| *r.borrow_mut() = None);
         return built;
     }
 
@@ -2136,6 +2184,8 @@ thread_local! {
     static CACHE: std::cell::RefCell<Cache> = std::cell::RefCell::new(Cache::default());
     /// The model with its parts apart (the design's exploded view), for placements marked
     /// `exploded`, while a sheet is being built.
+    /// The visible bodies' round-face axes while a sheet is built (see [`round_axes`]).
+    static ROUND_AXES: std::cell::RefCell<Option<Vec<(Vec3, Vec3, Vec<f64>)>>> = const { std::cell::RefCell::new(None) };
     static EXPLODED: std::cell::RefCell<Option<(std::rc::Rc<meshes::Scene>, std::rc::Rc<Vec<sketch::Part>>, Key)>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -2169,6 +2219,22 @@ fn exploded_scene(s: &Session, which: &Value, tolerance: f64) -> Result<(std::rc
     let scene = std::rc::Rc::new(meshes::prepare(&t, tolerance)?);
     let parts = std::rc::Rc::new(sketch::parts(&t, tolerance).map_err(|e| bad(CMD, e))?);
     Ok((scene, parts, key))
+}
+
+/// The axes of the visible bodies' cylinders and cones, each body's own (owner: a centre line is a
+/// real axis of a part; holes in line in different parts are not joined into one long line).
+fn round_axes(s: &Session) -> Vec<(Vec3, Vec3, Vec<f64>)> {
+    let world = s.world_state();
+    let mut out = Vec::new();
+    for b in world.bodies.iter().filter(|b| s.body_visible(&b.name)).take(5000) {
+        if let Ok(axes) = solidcraft_kernel::round_axes(&b.body) {
+            out.extend(axes);
+        }
+        if out.len() > 4000 {
+            break;
+        }
+    }
+    out
 }
 
 fn cache_key(s: &Session, tolerance: f64) -> Key {

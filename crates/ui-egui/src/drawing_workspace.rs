@@ -1766,14 +1766,20 @@ fn parse(v: &Value) -> Option<Sheet> {
 /// on the side of the view its part is on, in the order the parts stand from top to bottom, so no
 /// two leaders cross; 10 mm apart, kept on the sheet.
 fn balloon_columns(marks: &[(String, Pos2)], (cx, cy, w, h): (f32, f32, f32, f32), (sheet_w, sheet_h): (f32, f32)) -> Vec<DimItem> {
-    const GAP: f32 = 10.0;
+    // A balloon is about 11 mm across: 11.5 mm apart, never touching.
+    const GAP: f32 = 11.5;
+    // Half the balloons on each side (the parts furthest left on the left), so neither column runs long.
+    let mut by_x: Vec<&(String, Pos2)> = marks.iter().collect();
+    by_x.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
+    let half = by_x.len().div_ceil(2);
     let mut out = Vec::new();
     for left in [true, false] {
-        let mut side: Vec<&(String, Pos2)> = marks.iter().filter(|m| (m.1.x < cx) == left).collect();
+        let mut side: Vec<&(String, Pos2)> = if left { by_x[..half].to_vec() } else { by_x[half..].to_vec() };
         // Top first (the sheet's y runs up).
         side.sort_by(|a, b| b.1.y.total_cmp(&a.1.y));
         let x = if left { (cx - w * 0.5 - 12.0).max(16.0) } else { (cx + w * 0.5 + 12.0).min(sheet_w - 16.0) };
-        let (lo, hi) = ((cy - h * 0.5 - 6.0).max(16.0), (cy + h * 0.5 + 6.0).min(sheet_h - 16.0));
+        // Within the view's own height: nothing beside it above or below (a parts list) is covered.
+        let (lo, hi) = ((cy - h * 0.5 + 2.0).max(16.0), (cy + h * 0.5 + 4.0).min(sheet_h - 16.0));
         // Each balloon as level with its part as it can be, pushed down past the one above it…
         let mut ys: Vec<f32> = Vec::with_capacity(side.len());
         for m in &side {
@@ -1802,6 +1808,25 @@ fn balloon_columns(marks: &[(String, Pos2)], (cx, cy, w, h): (f32, f32, f32, f32
                 for (k, y) in ys.iter_mut().enumerate() {
                     *y = hi - step * k as f32;
                 }
+            }
+        }
+        // Two leaders that still cross swap balloons (that always uncrosses them), until none do.
+        let cross = |a1: Pos2, b1: Pos2, a2: Pos2, b2: Pos2| {
+            let side = |p: Pos2, q: Pos2, r: Pos2| (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+            side(a1, b1, a2) * side(a1, b1, b2) < 0.0 && side(a2, b2, a1) * side(a2, b2, b1) < 0.0
+        };
+        for _ in 0..side.len() * side.len() {
+            let mut swapped = false;
+            for i in 0..side.len() {
+                for j in i + 1..side.len() {
+                    if cross(side[i].1, pos2(x, ys[i]), side[j].1, pos2(x, ys[j])) {
+                        ys.swap(i, j);
+                        swapped = true;
+                    }
+                }
+            }
+            if !swapped {
+                break;
             }
         }
         for (m, y) in side.iter().zip(ys) {
@@ -8352,6 +8377,14 @@ fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
 }
 
 /// The sheet as a one-page vector PDF at paper size (mm → points), ready to print.
+/// Where a text of width `w` starts in the PDF, turned `angle` degrees about its bottom centre `p`
+/// (owner: a vertical dimension's value reads along its line on paper too): a text matrix.
+fn pdf_text_place(p: Pos2, w: f32, angle: f32) -> String {
+    let (s, c) = if angle.is_finite() { angle.to_radians().sin_cos() } else { (0.0, 1.0) };
+    let (x, y) = (p.x - c * w / 2.0, p.y - s * w / 2.0);
+    format!("{c:.5} {s:.5} {:.5} {c:.5} {x:.3} {y:.3} Tm", -s)
+}
+
 fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4], user_cols: &[LineCol]) -> (String, f32, f32) {
     use std::fmt::Write as _;
     let k = 72.0 / 25.4;
@@ -8391,12 +8424,12 @@ fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4], user_cols: &[LineCol]) -> (St
             }
         };
         match shape {
-            Shape::Text(p, h, t, _, _) if pdf_has_thai(t) => {
+            Shape::Text(p, h, t, angle, _) if pdf_has_thai(t) => {
                 if let Some((hex, w)) = pdf_thai_run(t, *h) {
-                    let _ = writeln!(c, "BT {r:.3} {g:.3} {b:.3} rg /F2 {h:.3} Tf {:.3} {:.3} Td <{hex}> Tj ET", p.x - w / 2.0, p.y);
+                    let _ = writeln!(c, "BT {r:.3} {g:.3} {b:.3} rg /F2 {h:.3} Tf {} <{hex}> Tj ET", pdf_text_place(*p, w, *angle));
                 }
             }
-            Shape::Text(p, h, t, _, _) => {
+            Shape::Text(p, h, t, angle, _) => {
                 let bytes: Vec<u8> = t.chars().map(|ch| if (ch as u32) < 256 { ch as u32 as u8 } else { b'?' }).collect();
                 let mut esc = String::new();
                 for b in bytes {
@@ -8412,7 +8445,7 @@ fn sheet_pdf_content(sheet: &Sheet, cols: [u8; 4], user_cols: &[LineCol]) -> (St
                     }
                 }
                 let w = h * 0.5 * t.chars().count() as f32;
-                let _ = writeln!(c, "BT {r:.3} {g:.3} {b:.3} rg /F1 {h:.3} Tf {:.3} {:.3} Td ({esc}) Tj ET", p.x - w / 2.0, p.y);
+                let _ = writeln!(c, "BT {r:.3} {g:.3} {b:.3} rg /F1 {h:.3} Tf {} ({esc}) Tj ET", pdf_text_place(*p, w, *angle));
             }
             other => {
                 let pts: Vec<Pos2> = match other {
@@ -8964,8 +8997,8 @@ mod hand_drawn_tests {
         );
     }
 
-    /// Owner: balloons stand in tidy columns beside the view, on the side of their part, in the
-    /// order the parts stand, so no two leaders cross, and 10 mm or more apart.
+    /// Owner: balloons stand in tidy columns beside the view, on the side of their part, so no two
+    /// leaders cross, and far enough apart not to touch.
     #[test]
     fn balloons_stand_in_columns_and_their_leaders_do_not_cross() {
         let marks: Vec<(String, Pos2)> = [(-20.0, 150.0), (-5.0, 152.0), (-30.0, 100.0), (25.0, 120.0), (10.0, 121.0), (30.0, 60.0), (-1.0, 60.0)]
@@ -8983,9 +9016,10 @@ mod hand_drawn_tests {
         for (i, p) in out.iter().enumerate() {
             for q in &out[i + 1..] {
                 if (p.b.x < 200.0) == (q.b.x < 200.0) {
-                    assert!((p.b.y - q.b.y).abs() >= 9.99, "{} and {} apart", p.text, q.text);
-                    // Same column: the higher part has the higher balloon (leaders do not cross).
-                    assert_eq!(p.a.y > q.a.y, p.b.y > q.b.y, "{} and {} in order", p.text, q.text);
+                    assert!((p.b.y - q.b.y).abs() >= 11.49, "{} and {} apart", p.text, q.text);
+                    let side = |o: Pos2, t: Pos2, r: Pos2| (t.x - o.x) * (r.y - o.y) - (t.y - o.y) * (r.x - o.x);
+                    let crossed = side(p.a, p.b, q.a) * side(p.a, p.b, q.b) < 0.0 && side(q.a, q.b, p.a) * side(q.a, q.b, p.b) < 0.0;
+                    assert!(!crossed, "the leaders of {} and {} cross", p.text, q.text);
                 }
             }
         }
@@ -9033,7 +9067,8 @@ mod hand_drawn_tests {
 
 #[cfg(test)]
 mod picture_size_tests {
-    use super::{PdfPage, Picture, pdf_document, picture_size};
+    use super::{PdfPage, Picture, pdf_document, pdf_text_place, picture_size};
+    use egui::pos2;
 
     #[test]
     fn a_long_thin_view_keeps_its_shape() {
@@ -9043,6 +9078,17 @@ mod picture_size_tests {
         assert_eq!((w, h), (250, 188));
         let (w, h) = picture_size(f32::NAN, f32::NAN);
         assert!(w >= 8 && h >= 8 && w <= 2400 && h <= 2400);
+    }
+
+    /// Owner: a vertical dimension's value is printed turned along its line, not level across it.
+    #[test]
+    fn pdf_text_keeps_its_turn() {
+        let level = pdf_text_place(pos2(100.0, 50.0), 20.0, 0.0);
+        assert_eq!(level, "1.00000 0.00000 -0.00000 1.00000 90.000 50.000 Tm");
+        let up = pdf_text_place(pos2(100.0, 50.0), 20.0, 90.0);
+        let n: Vec<f32> = up.split_whitespace().take(6).filter_map(|v| v.parse().ok()).collect();
+        assert!(n[0].abs() < 1e-4 && (n[1] - 1.0).abs() < 1e-4 && (n[2] + 1.0).abs() < 1e-4, "{up}");
+        assert!((n[4] - 100.0).abs() < 1e-3 && (n[5] - 40.0).abs() < 1e-3, "starts half its width below the centre: {up}");
     }
 
     /// A colour picture lands on the paper where its view is: its millimetres are scaled to points like the lines.
@@ -9186,15 +9232,15 @@ mod example_sheet_tests {
         front.dims = true;
         let mut side = view(2, geo("SIDE_X", 52.0), fy, &fs);
         side.dims = true;
-        let mut top = view(1, fx, geo("TOP_Y", 84.0), &fs);
-        top.cap = (0.0, -16.0);
+        let mut top = view(1, fx, geo("TOP_Y", 80.0), &fs);
+        top.cap = (0.0, -14.0);
         top.dims = true;
-        let mut iso = view(6, geo("ISO_X", 305.0), geo("ISO_Y", 222.0), &sc("ISO_S", "0.2"));
+        let mut iso = view(6, geo("ISO_X", 340.0), geo("ISO_Y", 222.0), &sc("ISO_S", "0.25"));
         iso.exploded = true;
         iso.label = Some(String::new());
         d.placed = vec![front, side, top, iso];
         d.shaded = vec![{
-            let mut v = ShadedView::new(geo("SHADE_X", 188.0) as f32, geo("SHADE_Y", 92.0) as f32, geo("SHADE_W", 48.0) as f32, -0.6, 0.35);
+            let mut v = ShadedView::new(geo("SHADE_X", 232.0) as f32, geo("SHADE_Y", 228.0) as f32, geo("SHADE_W", 46.0) as f32, -0.6, 0.35);
             v.bg = 1;
             v.ratio = 1.6;
             v

@@ -357,3 +357,35 @@ fn a_cutting_line_shows_on_the_top_view_only_and_a_compact_parts_list_is_lower()
     let low = run(&mut s, "drawing.sheet", json!({"placements": views, "bom": rows, "bom_row": 5}));
     assert!(height(&low) < height(&tall) - 1.0, "lower rows: {} vs {}", height(&low), height(&tall));
 }
+
+/// Owner: centre lines are the parts' real axes: two pins in line on different bodies get one each
+/// (not one long line across the gap), and a pin hidden inside a block gets none where hidden
+/// lines are not drawn.
+#[test]
+fn centre_lines_are_each_parts_own_axis_and_only_where_it_shows() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 10, "base": [0, 0, 0], "axis": [0, 0, 1], "operation": "new"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 10, "base": [0, 0, 30], "axis": [0, 0, 1], "operation": "new"}));
+    // A block with a pin inside it, along Y: hidden from the top.
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "corner": [60, -20, 0]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 30, "base": [80, -15, 10], "axis": [0, 1, 0], "operation": "new"}));
+    let centre = |sheet: &Value| -> Vec<(f64, f64, f64, f64)> {
+        sheet["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|it| it["layer"] == "center")
+            .filter_map(|it| {
+                let l = it["line"].as_array()?;
+                Some((l[0][0].as_f64()?, l[0][1].as_f64()?, l[1][0].as_f64()?, l[1][1].as_f64()?))
+            })
+            .collect()
+    };
+    let front = run(&mut s, "drawing.sheet", json!({"placements": [{"view": "front", "x": 150, "y": 150, "scale": 1}]}));
+    let upright: Vec<_> = centre(&front).into_iter().filter(|l| (l.0 - l.2).abs() < 1e-6 && (l.1 - l.3).abs() > 5.0).collect();
+    assert!(upright.iter().all(|l| (l.1 - l.3).abs() < 20.0), "no centre line joins the two pins: {upright:?}");
+    assert!(upright.len() >= 2, "each pin its own: {upright:?}");
+    let top = run(&mut s, "drawing.sheet", json!({"placements": [{"view": "top", "x": 150, "y": 150, "scale": 1}]}));
+    let along_y: Vec<_> = centre(&top).into_iter().filter(|l| (l.0 - l.2).abs() < 1e-6 && (l.1 - l.3).abs() > 20.0).collect();
+    assert!(along_y.is_empty(), "the hidden pin has no centre line from the top: {along_y:?}");
+}

@@ -60,6 +60,61 @@ pub(crate) fn surface_of(f: &mt::Face, size: f64) -> Option<FaceSurface> {
     })
 }
 
+/// The axes of a body's round faces (cylinders and cones) as segments: each from where its faces
+/// start to where they end along it. Faces on one axis that meet or overlap make one segment,
+/// so a stepped pin has one axis and two screws in line on different bodies stay two (owner: a
+/// drawing's centre lines are the parts' real axes, none joined across parts). Mesh bodies and
+/// bodies with no round faces have none; a kernel failure is reported as an error. With each
+/// axis: the radii of its cylinders (up to 8; cones add none), to tell where the part shows.
+pub fn round_axes(b: &Body) -> crate::Result<Vec<(Vec3, Vec3, Vec<f64>)>> {
+    crate::guard("round axes", || {
+        let size = b.size().max(1e-9);
+        let tol = size * 1e-6;
+        // (a point on the axis, its direction, the span along it)
+        let mut found: Vec<(Vec3, Vec3, f64, f64, Vec<f64>)> = Vec::new();
+        for f in b.solid.face_iter().take(20_000) {
+            let (origin, axis, radius) = match surface_of(f, size) {
+                Some(FaceSurface::Cylinder { origin, axis, radius }) => (origin, axis.vec(), Some(radius)),
+                Some(FaceSurface::Cone { apex, axis, .. }) => (apex, axis.vec(), None),
+                _ => continue,
+            };
+            // One sign for each direction, so faces on one axis facing either way compare.
+            let flip = if axis.x.abs() > 1e-9 { axis.x < 0.0 } else if axis.y.abs() > 1e-9 { axis.y < 0.0 } else { axis.z < 0.0 };
+            let axis = if flip { axis * -1.0 } else { axis };
+            let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+            for v in f.vertex_iter() {
+                let t = (from_p3(v.point()) - origin).dot(axis);
+                lo = lo.min(t);
+                hi = hi.max(t);
+            }
+            if !(lo.is_finite() && hi.is_finite() && hi - lo > tol) {
+                continue;
+            }
+            // Measured from the axis's point nearest the world origin, so faces on one axis compare.
+            let base = origin - axis * origin.dot(axis);
+            let shift = origin.dot(axis);
+            let (lo, hi) = (lo + shift, hi + shift);
+            let same = found
+                .iter_mut()
+                .find(|(o, a, l, h, _)| a.dot(axis) > 1.0 - 1e-9 && (*o - base).len() <= tol * 10.0 && lo <= *h + tol && hi >= *l - tol);
+            match same {
+                Some((_, _, l, h, radii)) => {
+                    *l = l.min(lo);
+                    *h = h.max(hi);
+                    if let Some(r) = radius
+                        && radii.len() < 8
+                        && !radii.iter().any(|q| (q - r).abs() <= tol)
+                    {
+                        radii.push(r);
+                    }
+                }
+                None => found.push((base, axis, lo, hi, radius.into_iter().collect())),
+            }
+        }
+        Ok(found.into_iter().take(500).map(|(o, a, l, h, r)| (o + a * l, o + a * h, r)).collect())
+    })
+}
+
 /// The circle (or arc of one) an edge's curve lies on, from its exact curve.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EdgeCircle {
