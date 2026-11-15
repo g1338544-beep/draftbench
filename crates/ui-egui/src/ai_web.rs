@@ -11,7 +11,7 @@ use egui::RichText;
 use serde_json::{Value, json};
 
 use crate::i18n::tr_label;
-use crate::{SolveApp, Tokens, ui_kit};
+use crate::{SolveApp, theme::Tokens, ui_kit};
 
 /// A POST to the model (url, headers, JSON body); the answer (HTTP status, body text) comes to
 /// the callback.
