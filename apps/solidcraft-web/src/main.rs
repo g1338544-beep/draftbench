@@ -561,6 +561,47 @@ mod web {
         Ok(uint8_arr.to_vec())
     }
 
+    /// The web AI assistant's POST to the model: the browser's fetch, its answer to `done`.
+    fn ai_post(url: &str, headers: &[(&str, &str)], body: String, done: Box<dyn FnOnce(Result<(u16, String), String>)>) {
+        let url = url.to_string();
+        let headers: Vec<(String, String)> = headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        wasm_bindgen_futures::spawn_local(async move {
+            let r = async {
+                let window = web_sys::window().ok_or("no window")?;
+                let h = web_sys::Headers::new().map_err(|e| format!("{e:?}"))?;
+                for (k, v) in &headers {
+                    h.set(k, v).map_err(|e| format!("{e:?}"))?;
+                }
+                let init = web_sys::RequestInit::new();
+                init.set_method("POST");
+                init.set_headers(&h);
+                init.set_body(&wasm_bindgen::JsValue::from_str(&body));
+                let req = web_sys::Request::new_with_str_and_init(&url, &init).map_err(|e| format!("{e:?}"))?;
+                let resp_val = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&req)).await.map_err(|e| format!("{e:?}"))?;
+                let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "response cast failed")?;
+                let status = resp.status();
+                let text = wasm_bindgen_futures::JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?).await.map_err(|e| format!("{e:?}"))?;
+                Ok::<_, String>((status, text.as_string().unwrap_or_default()))
+            }
+            .await;
+            done(r);
+        });
+    }
+
+    /// Where the web assistant's key is kept: this browser's local storage.
+    fn ai_key_store() -> solidcraft_ui_egui::ai_web::AiKeyStore {
+        const KEY: &str = "draftnew_ai_key";
+        let storage = || web_sys::window().and_then(|w| w.local_storage().ok().flatten());
+        solidcraft_ui_egui::ai_web::AiKeyStore {
+            get: Box::new(move || storage().and_then(|s| s.get_item(KEY).ok().flatten()).filter(|k| !k.is_empty())),
+            set: Box::new(move |k: &str| {
+                if let Some(s) = storage() {
+                    let _ = if k.is_empty() { s.remove_item(KEY) } else { s.set_item(KEY, k) };
+                }
+            }),
+        }
+    }
+
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
         // The page computes on its own thread: a modelled thread (minutes of work) would freeze
@@ -630,6 +671,8 @@ mod web {
                             print_pdf: Some(Box::new(files::print_pdf)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
                             install_app: Some(crate::install::service(&cc.egui_ctx)),
+                            ai_post: Some(Box::new(ai_post)),
+                            ai_key: Some(ai_key_store()),
                             ..Default::default()
                         };
                         // Thumbnails of saves and start-page cards.

@@ -184,7 +184,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "ASSEMBLE",
         panel: "MOTION",
         promoted: 3,
-        ids: &["joint.drive", "motion.study", "explode.create", "motion.sequence", "motion.gripper", "motion.pick_place", "parts.air_cylinder", "motion.trace"],
+        ids: &["joint.drive", "motion.study", "explode.create", "motion.sequence", "motion.gripper", "motion.pick_place", "parts.air_cylinder", "motion.spring", "motion.roller", "parts.feeder", "motion.trace"],
     },
     Section {
         tab: "ASSEMBLE",
@@ -415,6 +415,7 @@ pub const SECTIONS: &[Section] = &[
 pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("cf.material_cost", "Cost"),
     ("cf.trimlines", "Trimlines"),
+    ("motion.roller", "Roller"),
     ("appearance.assign", "Colour & Material"),
     ("component.capture_position", "Capture Pos."),
     ("component.create", "New Comp."),

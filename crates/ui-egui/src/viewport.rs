@@ -3472,6 +3472,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::ref_images::show(app, ui, &painter, &proj);
     crate::dialogs_assembly::origins(app, &painter, &proj);
     crate::dialogs_assembly::joint_glyphs(app, &painter, &proj);
+    crate::dialogs_assembly::spring_glyphs(app, &painter, &proj);
     overlays(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch_text_handles::show(app, ui, &painter, &proj, hover);

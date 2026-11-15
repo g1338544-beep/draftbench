@@ -37,7 +37,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::Stitch { bodies, tolerance } => {
+        FeatureKind::Stitch { bodies, tolerance, seamless } => {
             let tol = val(vals, tolerance, Kind::Length)?;
             let idx: Vec<usize> = bodies
                 .iter()
@@ -45,7 +45,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 .collect::<Result<_>>()?;
             let Some(&first) = idx.first() else { return Err(DocError::Invalid("pick the surfaces to stitch".into())) };
             let refs: Vec<&kernel::Body> = idx.iter().filter_map(|i| st.bodies.get(*i).map(|b| &b.body)).collect();
-            let sewn = kernel::stitch(&refs, tol)?;
+            let sewn = if *seamless { kernel::stitch_seamless(&refs, tol)? } else { kernel::stitch(&refs, tol)? };
             let Some(mb) = st.bodies.get(first).cloned() else { return Err(DocError::Invalid("body".into())) };
             if let Some(slot) = st.bodies.get_mut(first) {
                 *slot = ModelBody::new(mb.name, sewn, mb.feature);

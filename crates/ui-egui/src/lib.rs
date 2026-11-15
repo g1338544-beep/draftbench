@@ -11,6 +11,7 @@ use crate::ui_kit::{Container, Surface};
 
 pub mod access;
 pub mod agent_chat;
+pub mod ai_web;
 pub mod agent_cursor;
 pub mod bom_panel;
 pub mod browser;
@@ -379,6 +380,10 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// The system keychain, for API agents' keys; None: keys can't be stored.
     pub secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
+    /// POST to the AI model for the web assistant (`ai_web`); None: no web assistant.
+    pub ai_post: Option<ai_web::AiPost>,
+    /// Where the web assistant's key is kept (the browser's storage); None: not kept.
+    pub ai_key: Option<ai_web::AiKeyStore>,
 }
 
 thread_local! {
@@ -428,6 +433,8 @@ pub struct SolveApp {
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// The Material Cost window, when open.
     pub material_cost: Option<material_cost::CostWindow>,
+    /// The web AI assistant's panel and conversation.
+    pub ai_web: ai_web::AiWeb,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
     /// Mouse gestures: the ring of tools and its customization window.
@@ -596,6 +603,7 @@ impl SolveApp {
             script: None,
             material_card_review: None,
             material_cost: None,
+            ai_web: Default::default(),
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
             tree: browser::TreeState::default(),
@@ -2047,6 +2055,7 @@ impl SolveApp {
         script_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         material_cost::show(self, ui.ctx());
+        ai_web::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());

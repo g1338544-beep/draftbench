@@ -1299,6 +1299,10 @@ pub enum FeatureKind {
         #[serde(default = "zero_expr")]
         #[walk(length = "Tolerance")]
         tolerance: Expr,
+        /// Seamless: faces of one smooth surface across the sewn edges become one face (no seam
+        /// lines left), as after a join.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        seamless: bool,
     },
     /// Surface bodies thickened into solids along their normals (by half each way when
     /// `symmetric`).

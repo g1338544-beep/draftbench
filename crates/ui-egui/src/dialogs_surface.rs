@@ -27,9 +27,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             chain: bool = false => *chain,
         } => json!({"distance": distance});
         Stitch("surface.stitch", "SEW", [("Surfaces", BODIES, true)],
-            FeatureKind::Stitch { tolerance, .. }) {
+            FeatureKind::Stitch { tolerance, seamless, .. }) {
             tolerance: String = String::new() => if tolerance.trim() == "0" { String::new() } else { tolerance.to_string() },
-        } => json!({});
+            seamless: bool = true => *seamless,
+        } => json!({"seamless": seamless});
         Thicken("surface.thicken", "THICKEN", [("Surfaces", BODIES, true)],
             FeatureKind::Thicken { thickness, symmetric, operation, .. }) {
             thickness: String = "2 mm".into() => thickness.to_string(),
@@ -269,8 +270,9 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
     let mut enter = false;
     match k {
-        Surf::Stitch { tolerance } => {
+        Surf::Stitch { tolerance, seamless } => {
             enter |= hint_row(ui, "Tolerance", tolerance, "tight");
+            ui_kit::options(ui, "sew_options", &mut [("Seamless (no seam lines)", seamless)]);
         }
         Surf::Thicken { thickness, symmetric, operation } => {
             enter |= expr_row(ui, "Thickness", thickness);
@@ -832,9 +834,9 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             let cmd = if matches!(k, Surf::Unstitch) { "surface.unstitch" } else { "surface.reverse_normal" };
             (cmd, json!({"body": body, "faces": faces}))
         }
-        Surf::Stitch { tolerance } => {
+        Surf::Stitch { tolerance, seamless } => {
             need(0, "the surfaces to stitch")?;
-            let mut p = json!({ "bodies": items(inputs, 0).body_names() });
+            let mut p = json!({ "bodies": items(inputs, 0).body_names(), "seamless": *seamless });
             put(&mut p, &[("tolerance", tolerance)]);
             ("surface.stitch", p)
         }

@@ -1113,3 +1113,47 @@ fn the_gripper_dialog_makes_a_gripper() {
     let r = app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
     assert_eq!(r["joints"].as_array().unwrap().len(), 2, "{r}");
 }
+
+/// Owner: a Spring from its dialog: one end on each part; it is drawn as a coil between them.
+#[test]
+fn the_spring_dialog_hooks_two_parts() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for (name, x) in [("Base", 0), ("Plunger", 40)] {
+        app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "operation": "new", "body_name": name})).unwrap();
+    }
+    app.start("motion.spring");
+    let mut d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::Assembly(Asm::Spring { .. })), "{:?}", d.kind);
+    d.inputs[0].items = vec![Sel::Vertex { body: "Base".into(), point: Vec3::new(10.0, 5.0, 5.0) }];
+    d.inputs[1].items = vec![Sel::Vertex { body: "Plunger".into(), point: Vec3::new(40.0, 5.0, 5.0) }];
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "motion.spring");
+    app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    let sp = &app.session.doc.assembly.springs[0];
+    let (a, b) = solidcraft_engine::cmd::motion_kit::spring_ends(&app.session.doc, sp);
+    assert!((b - a).len() > 25.0, "{a:?} {b:?}");
+    assert!(sp.coil(a, b, 16).len() > 100, "a coil to draw");
+}
+
+/// Owner: Roller on Surface and Part Feeder from their dialogs, each one command.
+#[test]
+fn roller_and_feeder_dialogs_run() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 200, "width": 40, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Floor"})).unwrap();
+    app.run("solid.box", json!({"length": 16, "width": 10, "height": 16, "corner": [12, 15, 10], "operation": "new", "body_name": "Wheel"})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 10, "height": 8, "corner": [0, 100, 0], "operation": "new", "body_name": "Blank"})).unwrap();
+    app.start("motion.roller");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Wheel".into() }];
+    d.inputs[1].items = vec![Sel::Body { name: "Floor".into() }];
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "motion.roller");
+    app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    app.dialog = None;
+    app.start("parts.feeder");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Blank".into() }];
+    let cmds = apply_commands(&app, &d).unwrap();
+    let r = app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
+    assert_eq!(r["parts"].as_array().unwrap().len(), 4, "{r}");
+}

@@ -23,11 +23,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.stitch", "Sew", stitch)
         .at("SURFACE", "MODIFY")
         .icon("surface_stitch")
-        .params("bodies: [names] (surfaces sewn into the first; a solid when they close); tolerance?: expr (default: tight)"),
+        .params("bodies: [names] (surfaces sewn into the first; a solid when they close); tolerance?: expr (default: tight); seamless?: bool (default false: faces that run on as one surface across the sewn edges become one face, leaving no seam lines)"),
     CommandSpec::new("surface.sew_auto", "Auto Sew", sew_auto)
         .at("SURFACE", "MODIFY")
         .icon("surface_stitch")
-        .params("tolerance?: expr (default 0.05 mm: gaps this small are closed). Sews every surface (open) body of the design that touches another into one, a solid when they close; needs at least two surface bodies"),
+        .params("tolerance?: expr (default 0.05 mm: gaps this small are closed); seamless?: bool (merge the faces across the seams). Sews every surface (open) body of the design that touches another into one, a solid when they close; needs at least two surface bodies"),
     CommandSpec::new("surface.thicken", "Thicken", thicken)
         .at("SURFACE", "CREATE")
         .icon("surface_thicken")
@@ -574,7 +574,7 @@ fn stitch(s: &mut Session, p: &Value) -> Result<Value> {
     let bodies = bodies_param(s, p, cmd)?;
     let tolerance = expr(p, "tolerance").unwrap_or_else(|| "0".into());
     check_expr(s, &tolerance, Kind::Length, cmd, "tolerance")?;
-    add_feature(s, p, FeatureKind::Stitch { bodies: bodies.into_iter().map(BodyName).collect(), tolerance })
+    add_feature(s, p, FeatureKind::Stitch { bodies: bodies.into_iter().map(BodyName).collect(), tolerance, seamless: bool_(p, "seamless").unwrap_or(false) })
 }
 
 /// Sews all the surface bodies of the design in one go, no picking.
@@ -586,7 +586,7 @@ fn sew_auto(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let tolerance = expr(p, "tolerance").unwrap_or_else(|| "0.05".into());
     check_expr(s, &tolerance, Kind::Length, cmd, "tolerance")?;
-    add_feature(s, p, FeatureKind::Stitch { bodies: names.into_iter().map(BodyName).collect(), tolerance })
+    add_feature(s, p, FeatureKind::Stitch { bodies: names.into_iter().map(BodyName).collect(), tolerance, seamless: bool_(p, "seamless").unwrap_or(false) })
 }
 
 fn thicken(s: &mut Session, p: &Value) -> Result<Value> {
@@ -935,6 +935,37 @@ mod tests {
         assert_eq!(cold.world_state().bodies.len(), 3);
         assert!(s.execute("surface.unstitch", &json!({"body": "Nope"})).is_err());
         assert!(s.execute("surface.unstitch", &json!({})).is_err());
+    }
+
+    /// Owner: Seamless Sew: a box cut into its six faces and sewn back seamless is one solid;
+    /// two side-by-side plates sewn seamless leave no seam line between them (one face).
+    #[test]
+    fn a_seamless_sew_leaves_no_seam_lines() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 2, "body_name": "A"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 2, "corner": [10, 0, 0], "body_name": "B"}));
+        for b in ["A", "B"] {
+            run(&mut s, "surface.unstitch", json!({"body": b}));
+        }
+        // The two tops, side by side along x = 10.
+        let tops: Vec<String> = s
+            .world_state()
+            .bodies
+            .iter()
+            .filter(|b| (b.mesh().bounds().min.z - 2.0).abs() < 1e-9)
+            .map(|b| b.name.clone())
+            .collect();
+        assert_eq!(tops.len(), 2, "{tops:?}");
+        run(&mut s, "surface.stitch", json!({"bodies": tops.clone()}));
+        assert_eq!(s.world_state().body(&tops[0]).unwrap().body.face_count(), 2, "an ordinary sew keeps the seam");
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "surface.stitch", json!({"bodies": tops.clone(), "seamless": true}));
+        let st = s.world_state();
+        let sewn = st.body(&tops[0]).unwrap();
+        assert_eq!(sewn.body.face_count(), 1, "no seam left");
+        assert!((solidcraft_kernel::measure(&sewn.body).unwrap().area - 200.0).abs() < 1e-6);
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(cold.world_state().body(&tops[0]).unwrap().body.face_count(), 1, "reopened");
     }
 
     /// A patch turned over thickens the other way; a solid is not turned over.

@@ -179,6 +179,24 @@ pub enum Asm {
         name: String,
         moves: Vec<(usize, String, String)>,
     },
+    /// Spring: its two ends picked; coil radius, wire and turns typed.
+    Spring {
+        radius: String,
+        wire: String,
+        turns: String,
+    },
+    /// Roller on Surface: the roller and the surface picked; the way it travels and how far.
+    Roller {
+        direction: usize,
+        length: String,
+    },
+    /// Part Feeder: the part picked; how many queue, their gap, the feed way and the index time.
+    Feeder {
+        count: String,
+        gap: String,
+        direction: usize,
+        time: String,
+    },
     /// Gripper: the body and its fingers picked, the stroke typed.
     Gripper {
         stroke: String,
@@ -274,6 +292,9 @@ impl Asm {
             Asm::Sequence { .. } => "MOTION SEQUENCE",
             Asm::PickPlace { .. } => "PICK AND PLACE",
             Asm::Gripper { .. } => "GRIPPER",
+            Asm::Spring { .. } => "SPRING",
+            Asm::Roller { .. } => "ROLLER ON SURFACE",
+            Asm::Feeder { .. } => "PART FEEDER",
             Asm::Coupling(f) => match f.command {
                 "joint.gear" => "GEAR",
                 "joint.rack_pinion" => "RACK AND PINION",
@@ -324,6 +345,18 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             let first = movable(s).first().copied().unwrap_or(0);
             (Asm::Sequence { name: "Sequence".into(), moves: vec![(first, String::new(), "1".into())] }, vec![])
         }
+        "motion.spring" => (
+            Asm::Spring { radius: "5 mm".into(), wire: "1 mm".into(), turns: "8".into() },
+            vec![SelInput::new("End 1 (a point on a part)", SNAPS, false), SelInput::new("End 2 (a point on the other part)", SNAPS, false)],
+        ),
+        "motion.roller" => (
+            Asm::Roller { direction: 0, length: "100 mm".into() },
+            vec![SelInput::new("Roller (a wheel on the surface)", BODIES, false), SelInput::new("Surface (what it rolls over)", BODIES, false)],
+        ),
+        "parts.feeder" => (
+            Asm::Feeder { count: "4".into(), gap: "5 mm".into(), direction: 0, time: "1".into() },
+            vec![SelInput::new("Part to feed", BODIES, false)],
+        ),
         "motion.gripper" => (
             Asm::Gripper { stroke: "10 mm".into() },
             vec![SelInput::new("Gripper body (holds the fingers)", BODIES, false), SelInput::new("Fingers (2 or more)", BODIES, true)],
@@ -981,6 +1014,24 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             enter |= expr_row(ui, "Stroke", stroke);
             choice_row(ui, "Rod comes out along", "ac_axis", axis, &CYLINDER_AXES);
             crate::ui_kit::caption(ui, "Bore", crate::i18n::tr_label("The barrel and the rod become components; the rod slides its stroke (drive it, or use it in a Motion Sequence)."));
+        }
+        Asm::Spring { radius, wire, turns } => {
+            enter |= expr_row(ui, "Coil radius", radius);
+            enter |= expr_row(ui, "Wire", wire);
+            enter |= expr_row(ui, "Turns", turns);
+            crate::ui_kit::caption(ui, "Coil radius", crate::i18n::tr_label("Each end stays on its part: the spring stretches and squeezes as they move (it shows the motion; it pushes nothing)."));
+        }
+        Asm::Roller { direction, length } => {
+            choice_row(ui, "Travels along", "rl_dir", direction, &FEED_WAYS);
+            enter |= expr_row(ui, "Travel", length);
+            crate::ui_kit::caption(ui, "Travel", crate::i18n::tr_label("Stand the roller on the surface first. Its centre keeps its height over the surface as it goes, up slopes and down again; drive the joint (or use it in a Motion Sequence)."));
+        }
+        Asm::Feeder { count, gap, direction, time } => {
+            enter |= expr_row(ui, "Parts in the queue", count);
+            enter |= expr_row(ui, "Gap between parts", gap);
+            choice_row(ui, "Feeds along", "pf_dir", direction, &FEED_WAYS[..4]);
+            enter |= expr_row(ui, "Seconds per index", time);
+            crate::ui_kit::caption(ui, "Parts in the queue", crate::i18n::tr_label("Makes a track under the part, copies it into a queue behind, and a Motion Sequence that moves them forward one part at a time."));
         }
         Asm::Gripper { stroke } => {
             enter |= expr_row(ui, "Stroke (each finger)", stroke);
@@ -1705,6 +1756,43 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 .collect::<Result<_, String>>()?;
             cmd("motion.sequence", json!({"name": name.trim(), "moves": list}))
         }
+        Asm::Spring { radius, wire, turns } => {
+            let end = |i: usize, what: &str| -> Result<(Vec3, Option<String>), String> {
+                let x = sel_items(inputs, i).first().ok_or(format!("pick {what}"))?;
+                let at = crate::dialogs_move::sel_point(app, Some(x)).ok_or(format!("pick {what}"))?;
+                Ok((at, body_of(x).map(str::to_string)))
+            };
+            let ((a, ba), (b, bb)) = (end(0, "the spring's first end")?, end(1, "its other end")?);
+            let turns: f64 = turns.trim().parse().map_err(|_| "Turns must be a number".to_string())?;
+            let mut p = json!({"from": [a.x, a.y, a.z], "to": [b.x, b.y, b.z], "radius": eval(radius, ValueKind::Length)?, "wire": eval(wire, ValueKind::Length)?, "turns": turns});
+            if let Some(n) = ba {
+                p["from_body"] = json!(n);
+            }
+            if let Some(n) = bb {
+                p["to_body"] = json!(n);
+            }
+            cmd("motion.spring", p)
+        }
+        Asm::Roller { direction, length } => {
+            let roller = sel_items(inputs, 0).iter().find_map(body_of).ok_or("click the roller")?;
+            let surface = sel_items(inputs, 1).iter().find_map(body_of).ok_or("click the surface it rolls over")?;
+            let d = match FEED_WAYS.get(*direction).copied().unwrap_or("X") {
+                "-X" => [-1.0, 0.0, 0.0],
+                "Y" => [0.0, 1.0, 0.0],
+                "-Y" => [0.0, -1.0, 0.0],
+                _ => [1.0, 0.0, 0.0],
+            };
+            cmd("motion.roller", json!({"roller": roller, "surface": surface, "direction": d, "length": eval(length, ValueKind::Length)?}))
+        }
+        Asm::Feeder { count, gap, direction, time } => {
+            let part = sel_items(inputs, 0).iter().find_map(body_of).ok_or("click the part to feed")?;
+            let n: u64 = count.trim().parse().map_err(|_| "Parts in the queue must be a whole number".to_string())?;
+            let secs: f64 = time.trim().parse().map_err(|_| "Seconds per index must be a number".to_string())?;
+            cmd(
+                "parts.feeder",
+                json!({"part": part, "count": n, "gap": eval(gap, ValueKind::Length)?, "direction": FEED_WAYS.get(*direction).copied().unwrap_or("X"), "time": secs}),
+            )
+        }
         Asm::Gripper { stroke } => {
             let base = sel_items(inputs, 0).iter().find_map(body_of).ok_or("click the gripper's body")?;
             let fingers: Vec<String> = sel_items(inputs, 1).iter().filter_map(body_of).map(str::to_string).collect();
@@ -2401,6 +2489,30 @@ pub fn drawn_joints(app: &SolveApp) -> Vec<(u64, bool)> {
 /// Joint glyphs in the viewport: a ring where the joint sits, its motion axis, and its limits
 /// (ticks on the ring for a turn, along the axis for a slide). Glyphs are only drawn; they are
 /// never picked in the viewport.
+/// The ways a roller travels or a feeder feeds.
+const FEED_WAYS: [&str; 4] = ["X", "-X", "Y", "-Y"];
+
+/// The springs (Spring), each a coil between its two parts wherever they are now.
+pub fn spring_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let doc = &app.session.doc;
+    if doc.assembly.springs.is_empty() {
+        return;
+    }
+    let t = Tokens::get();
+    for sp in doc.assembly.springs.iter().take(500) {
+        let (a, b) = solidcraft_engine::cmd::motion_kit::spring_ends(doc, sp);
+        let pts: Vec<Pos2> = sp.coil(a, b, 16).into_iter().filter_map(|q| proj.to_screen(q)).collect();
+        if pts.len() > 1 {
+            painter.add(egui::Shape::line(pts, Stroke::new(2.0, t.accent)));
+        }
+        for end in [a, b] {
+            if let Some(c) = proj.to_screen(end) {
+                painter.circle_filled(c, 3.0, t.accent);
+            }
+        }
+    }
+}
+
 pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let drawn = drawn_joints(app);
     if drawn.is_empty() {

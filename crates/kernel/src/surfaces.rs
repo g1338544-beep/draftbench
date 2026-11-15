@@ -608,6 +608,14 @@ pub(crate) fn nearest_face(body: &Body, p: Vec3) -> Result<usize> {
     best.map(|(_, f)| f as usize).ok_or_else(|| KernelError::Invalid("no face there".into()))
 }
 
+/// [`stitch`], then the faces that run on as one surface across the sewn edges (coplanar
+/// neighbours, as after a join) merged into one face, so no seam lines are left. When merging
+/// fails the sewn body is kept as it is.
+pub fn stitch_seamless(bodies: &[&Body], tol: f64) -> Result<Body> {
+    let sewn = stitch(bodies, tol)?;
+    Ok(crate::boolean_record::healed(&sewn).unwrap_or(sewn))
+}
+
 /// Sew surface bodies along edges that coincide (within `tol`): one body, a solid when the
 /// faces close up. Faces are turned so that neighbours agree. The result's history is over
 /// `bodies`: each face the one it was sewn from, each edge the edges sewn into it.

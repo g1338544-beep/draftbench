@@ -1769,6 +1769,11 @@ fn assistant_button(app: &mut SolveApp, ui: &mut egui::Ui, at: Rect) {
     };
     crate::ui_kit::assistant_entry(ui, &resp, state, app.agent_chat.open, ui.ctx().global_style().animation_time > 0.0);
     if resp.on_hover_text(tip).clicked() {
+        // The browser build talks to Claude itself (it can't start an agent).
+        if app.services.ai_post.is_some() {
+            crate::ai_web::toggle(app);
+            return;
+        }
         crate::agent_chat::toggle(app);
     }
 }

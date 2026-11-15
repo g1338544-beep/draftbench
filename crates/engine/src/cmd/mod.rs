@@ -23,7 +23,7 @@ macro_rules! planned {
 mod bom;
 mod browser;
 pub mod cf;
-mod motion_kit;
+pub mod motion_kit;
 pub mod drawing_symbols;
 mod layers;
 pub(crate) mod clearance;

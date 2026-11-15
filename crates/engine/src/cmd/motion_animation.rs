@@ -64,7 +64,21 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
         Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
     };
     let guides = crate::view::Guides { grid: shown("grid")?, axes: shown("axes")? };
-    let (default, given, plan) = motion_plan(s, p, cmd)?;
+    // An exploded view played: the parts move from where they are placed out to it.
+    let exploded = match p.get("explode") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let i = super::view_index(s, &json!({"view": v}), cmd)?;
+            Some(s.doc.assembly.exploded.get(i).cloned().ok_or_else(|| bad(cmd, "no such exploded view"))?)
+        }
+    };
+    let (default, given, plan) = match &exploded {
+        Some(_) => (40, Default::default(), None),
+        None => {
+            let (d, g, pl) = motion_plan(s, p, cmd)?;
+            (d, g, Some(pl))
+        }
+    };
     // At least 4 frames fit even at the largest size.
     let max = MAX_FRAMES.min(if gif { MAX_GIF_PIXELS } else { MAX_PNG_PIXELS } / (width as usize * height as usize));
     let n = sample_count(p, default.min(max), max, cmd).map_err(|_| bad(cmd, format!("`samples` must be 2…{max} for {width} × {height} frames")))?;
@@ -88,10 +102,28 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
     let (mut frames, mut bytes, mut drawn_by) = (Vec::new(), 0, "");
     let mut stop = (Value::Null, Value::Null, Value::Null);
     for k in 0..n {
-        let want = plan(&t, k, n);
-        let (r, _) = drive_with_contact(&mut t, &want, &given)?;
-        if stop.0.is_null() && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object()) {
-            stop = (json!(k), r["stopped_by_loop"].clone(), r["stopped_by_contact"].clone());
+        if let (Some(v), true) = (&exploded, plan.is_none()) {
+            // Eased, so the parts start and stop gently.
+            let x = if n > 1 { k as f64 / (n - 1) as f64 } else { 1.0 };
+            let f = x * x * (3.0 - 2.0 * x);
+            t.pending_moves.clear();
+            for (o, d) in &v.moves {
+                let Some(occ) = t.doc.occurrences.iter().find(|x| x.id == *o) else { continue };
+                let mut m = occ.transform;
+                if let Some(r) = m.get_mut(3) {
+                    r[0] += d.x * f;
+                    r[1] += d.y * f;
+                    r[2] += d.z * f;
+                }
+                t.pending_moves.insert(*o, m);
+            }
+            t.revision += 1;
+        } else if let Some(plan) = &plan {
+            let want = plan(&t, k, n);
+            let (r, _) = drive_with_contact(&mut t, &want, &given)?;
+            if stop.0.is_null() && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object()) {
+                stop = (json!(k), r["stopped_by_loop"].clone(), r["stopped_by_contact"].clone());
+            }
         }
         let scene = crate::view::scene_with_guides(&t, &cam, s.section, guides);
         let picture = capture::rgba_with(Some(renderer), &scene, &cam, width, height).map_err(|e| bad(cmd, e))?;

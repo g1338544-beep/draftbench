@@ -585,6 +585,45 @@ pub struct Assembly {
     pub studies: Vec<crate::motion::MotionStudy>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
+    /// Springs drawn between two parts, stretching and squeezing as they move.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub springs: Vec<Spring>,
+}
+
+/// A spring between two parts (owner's machine videos): each end a point fixed on an occurrence
+/// (in its own coordinates, 0 = the design), drawn as a coil from one to the other wherever the
+/// parts are. It shows the motion; it pushes nothing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Spring {
+    pub id: u64,
+    pub name: String,
+    pub a: u64,
+    pub at_a: [f64; 3],
+    pub b: u64,
+    pub at_b: [f64; 3],
+    /// Coil radius and wire diameter, mm; turns along its length.
+    pub radius: f64,
+    pub wire: f64,
+    pub turns: f64,
+}
+
+impl Spring {
+    /// The coil's centre line from end to end, in world space, `per_turn` points a turn.
+    pub fn coil(&self, a: Vec3, b: Vec3, per_turn: usize) -> Vec<Vec3> {
+        let axis = b - a;
+        let Some(z) = axis.normalized() else { return vec![a, b] };
+        let x = if z.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+        let (Some(u), Some(v)) = (z.cross(x).normalized(), z.cross(x).normalized().map(|u| z.cross(u))) else { return vec![a, b] };
+        let turns = if self.turns.is_finite() { self.turns.clamp(1.0, 200.0) } else { 8.0 };
+        let n = ((turns * per_turn.clamp(4, 64) as f64) as usize).clamp(8, 20_000);
+        (0..=n)
+            .map(|i| {
+                let t = i as f64 / n as f64;
+                let ang = t * turns * std::f64::consts::TAU;
+                a + axis * t + (u * ang.cos() + v * ang.sin()) * self.radius
+            })
+            .collect()
+    }
 }
 
 impl Assembly {

@@ -29,6 +29,24 @@ pub static COMMANDS: &[CommandSpec] = &[
          the first finger toward the middle of them all); name?. Each finger slides toward the middle, linked to the first so they \\
          close and open together; limited to the stroke (0 open … stroke closed). → joints, drive: the first finger's joint",
     ),
+    CommandSpec::new("motion.spring", "Spring", spring).at("SOLID", "ASSEMBLE").icon("coil").params(
+        "from: [x,y,z], to: [x,y,z] (its two ends, each on the part nearest it: the end moves with that part); from_body?, to_body? \\
+         (the parts, when not the nearest); radius?: mm (default 5); wire?: mm (default 1); turns?: (default 8); name?. Drawn as a \\
+         coil between the parts, stretching and squeezing as they move; it shows the motion, it pushes nothing. → spring",
+    ),
+    CommandSpec::new("motion.spring_delete", "Delete Spring", spring_delete).icon("delete").params("spring: id | name"),
+    CommandSpec::new("motion.roller", "Roller on Surface", roller).at("SOLID", "ASSEMBLE").icon("joint").params(
+        "roller: body (a wheel or roller standing on the surface); surface: body (what it rolls over); direction: [x,y,z] (the way \\
+         it travels); length?: mm (how far, default 100); down?: [x,y,z] (toward the surface, default -Z); name?. The roller's centre \\
+         keeps its height over the surface as it goes, up its slopes and down again (a Pin in Path on the surface's shape, sampled \\
+         along the way). → joint, points, travel",
+    ),
+    CommandSpec::new("parts.feeder", "Part Feeder", feeder).at("SOLID", "ASSEMBLE").icon("joint").params(
+        "part: body (the part fed); count?: parts in the queue (default 4); gap?: mm between them (default 5); direction?: X|-X|Y|-Y \\
+         (the way they feed, default X); time?: s per index (default 1); name?. Makes a track under the part and copies of it queued \\
+         behind, each sliding along the track, linked to the first, and a Motion Sequence that indexes them one pitch at a time. \\
+         → track, parts, joint, study, pitch",
+    ),
     CommandSpec::new("parts.air_cylinder", "Air Cylinder", air_cylinder).at("SOLID", "ASSEMBLE").icon("joint").params(
         "bore?: mm (default 20); stroke?: mm (default 50); at?: [x,y,z] (the barrel's back end, default the origin); axis?: X|Y|Z|-X|-Y|-Z \
          (the rod comes out along it, default Z); name?. Makes the barrel and the rod as components, the rod sliding out of the barrel \
@@ -298,9 +316,276 @@ fn gripper_steps(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"joints": joints, "drive": joints[0], "stroke": stroke}))
 }
 
+
+/// Roller on Surface (owner): a roller or wheel rolls over a surface, its centre keeping its
+/// height above it, up and down the surface's shape. Built as a Pin in Path on the surface: the
+/// path is the surface sampled along the way, lifted by the roller's height over it now.
+fn roller(s: &mut Session, p: &Value) -> Result<Value> {
+    let depth = s.undo.len();
+    let r = roller_steps(s, p);
+    s.undo.truncate(depth);
+    r
+}
+
+/// The roller's path over the surface: from `c` along `dir`, each point as high above the
+/// surface (along -`down`) as `c` is now. Stops where the surface ends.
+pub fn roller_path(surface: &solidcraft_geom::Mesh, c: Vec3, dir: Vec3, down: Vec3, length: f64, reach: f64) -> Option<Vec<Vec3>> {
+    let (gap, _) = surface.raycast(c, down)?;
+    let n = ((length / 2.0).ceil() as usize).clamp(8, 400);
+    let mut out: Vec<Vec3> = Vec::new();
+    for i in 0..=n {
+        let q = c + dir * (length * i as f64 / n as f64);
+        let o = q - down * reach;
+        let Some((t, _)) = surface.raycast(o, down) else { break };
+        let at = o + down * t - down * gap;
+        if out.last().is_none_or(|l| l.dist(at) > 1e-6) {
+            out.push(at);
+        }
+    }
+    (out.len() > 1).then_some(out)
+}
+
+fn roller_steps(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "motion.roller";
+    let name_of = |k: &str| p.get(k).and_then(Value::as_str).map(str::to_string).ok_or_else(|| bad(cmd, format!("`{k}` must name a body")));
+    let (roller, surface) = (name_of("roller")?, name_of("surface")?);
+    if roller == surface {
+        return Err(bad(cmd, "the roller and the surface are different bodies"));
+    }
+    let down = p.get("down").and_then(vec3).unwrap_or(-Vec3::Z).normalized().ok_or_else(|| bad(cmd, "`down` must be a direction"))?;
+    let dir = p.get("direction").and_then(vec3).ok_or_else(|| bad(cmd, "`direction` must be [x, y, z]"))?;
+    let dir = (dir - down * dir.dot(down)).normalized().ok_or_else(|| bad(cmd, "`direction` must run along the surface, not toward it"))?;
+    let length = match p.get("length") {
+        None | Some(Value::Null) => 100.0,
+        Some(v) => v.as_f64().filter(|x| x.is_finite() && *x > 0.0 && *x < 1e5).ok_or_else(|| bad(cmd, "`length` must be mm"))?,
+    };
+    let (c, path) = {
+        let st = s.world_state();
+        let rb = st.body(&roller).ok_or_else(|| bad(cmd, format!("no body `{roller}`")))?;
+        let sb = st.body(&surface).ok_or_else(|| bad(cmd, format!("no body `{surface}`")))?;
+        let (rm, sm) = (rb.mesh(), sb.mesh());
+        let c = rm.bounds().center();
+        let reach = sm.bounds().diagonal() + rm.bounds().diagonal() + length;
+        let path = roller_path(&sm, c, dir, down, length, reach)
+            .ok_or_else(|| bad(cmd, "the roller is not over the surface: stand it on the surface, and point `down` at it"))?;
+        (c, path)
+    };
+    let a = occurrence_for(s, &surface, cmd)?;
+    let b = occurrence_for(s, &roller, cmd)?;
+    if a == b {
+        return Err(bad(cmd, "the roller and the surface are in one component: make the roller a component of its own"));
+    }
+    let axle = dir.cross(down).normalized().unwrap_or(Vec3::Z);
+    let n = s.doc.assembly.joints.len() + 1;
+    let name = p.get("name").and_then(Value::as_str).map_or_else(|| format!("Roller{n}"), str::to_string);
+    let pts: Vec<[f64; 3]> = path.iter().map(|q| [q.x, q.y, q.z]).collect();
+    let travel: f64 = path.windows(2).map(|w| w[0].dist(w[1])).sum();
+    s.execute(
+        "joint.as_built",
+        &json!({"type": "pin_path", "a": a, "b": b, "at": {"occurrence": 0, "point": [c.x, c.y, c.z], "z": [axle.x, axle.y, axle.z]}, "path": pts, "path_on": "a", "name": name}),
+    )?;
+    Ok(json!({"joint": name, "points": pts.len(), "travel": travel}))
+}
+
+/// Part Feeder (owner): the part and copies of it queued along a track, indexed forward one
+/// pitch at a time.
+fn feeder(s: &mut Session, p: &Value) -> Result<Value> {
+    let depth = s.undo.len();
+    let r = feeder_steps(s, p);
+    s.undo.truncate(depth);
+    r
+}
+
+fn feeder_steps(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "parts.feeder";
+    let part = p.get("part").and_then(Value::as_str).map(str::to_string).ok_or_else(|| bad(cmd, "`part` must name a body"))?;
+    let count = match p.get("count") {
+        None | Some(Value::Null) => 4,
+        Some(v) => v.as_u64().filter(|n| (1..=20).contains(n)).ok_or_else(|| bad(cmd, "`count` is 1 to 20"))? as usize,
+    };
+    let num = |k: &str, d: f64, max: f64| -> Result<f64> {
+        match p.get(k) {
+            None | Some(Value::Null) => Ok(d),
+            Some(v) => v.as_f64().filter(|x| x.is_finite() && *x >= 0.0 && *x < max).ok_or_else(|| bad(cmd, format!("`{k}` must be 0 or more"))),
+        }
+    };
+    let (gap, time) = (num("gap", 5.0, 1e4)?, num("time", 1.0, 600.0)?.max(0.05));
+    let along = match p.get("direction").and_then(Value::as_str).unwrap_or("X") {
+        "X" => Vec3::X,
+        "-X" => -Vec3::X,
+        "Y" => Vec3::Y,
+        "-Y" => -Vec3::Y,
+        _ => return Err(bad(cmd, "`direction` is X, -X, Y or -Y")),
+    };
+    let bb = s.world_state().body(&part).map(|b| b.mesh().bounds()).ok_or_else(|| bad(cmd, format!("no body `{part}`")))?;
+    let size = bb.size();
+    let extent = (size.x * along.x).abs() + (size.y * along.y).abs();
+    let pitch = extent + gap;
+    if pitch <= 1e-6 {
+        return Err(bad(cmd, "the part has no length along the feed: give a `gap`"));
+    }
+    let n = s.doc.assembly.joints.len() + 1;
+    let name = p.get("name").and_then(Value::as_str).map_or_else(|| format!("Feeder {n}"), str::to_string);
+    // The queue: copies behind the part, one pitch apart.
+    let mut parts = vec![part.clone()];
+    for k in 1..count {
+        let before: std::collections::BTreeSet<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        let t = -along * (pitch * k as f64);
+        s.execute("solid.move", &json!({"bodies": [part], "translate": [t.x, t.y, t.z], "copy": true}))?;
+        let made = s.world_state().bodies.iter().map(|b| b.name.clone()).find(|b| !before.contains(b)).ok_or_else(|| bad(cmd, "the part could not be copied"))?;
+        parts.push(made);
+    }
+    // The track: a floor under the queue and the room it feeds into, and a wall each side.
+    let lo_along = |v: Vec3| v.x * along.x.abs() + v.y * along.y.abs();
+    let (q_lo, q_hi) = {
+        let reach = pitch * count as f64;
+        let ends = [lo_along(bb.min), lo_along(bb.max)];
+        let sign = along.x + along.y;
+        if sign > 0.0 { (ends[0] - pitch * (count - 1) as f64 - gap, ends[1] + reach) } else { (ends[0] - reach, ends[1] + pitch * (count - 1) as f64 + gap) }
+    };
+    let wall = 3.0;
+    let side = if along.x.abs() > 0.5 { Vec3::Y } else { Vec3::X };
+    let (s_lo, s_hi) = (bb.min.dot(side) - wall, bb.max.dot(side) + wall);
+    let floor_z = bb.min.z;
+    let wall_h = (size.z * 0.5).max(2.0);
+    let boxed = |a_lo: f64, a_hi: f64, c_lo: f64, c_hi: f64, z_lo: f64, z_hi: f64| -> Value {
+        let ax = if along.x.abs() > 0.5 { Vec3::X } else { Vec3::Y };
+        let corner = ax * a_lo + side * c_lo + Vec3::Z * z_lo;
+        let (l, w) = if along.x.abs() > 0.5 { (a_hi - a_lo, c_hi - c_lo) } else { (c_hi - c_lo, a_hi - a_lo) };
+        json!({"length": l, "width": w, "height": z_hi - z_lo, "corner": [corner.x, corner.y, corner.z], "operation": "new"})
+    };
+    let track = format!("{name} Track");
+    s.execute("component.activate", &json!({"component": "root"}))?;
+    s.execute("component.create", &json!({"name": track}))?;
+    s.execute("solid.box", &boxed(q_lo, q_hi, s_lo, s_hi, floor_z - wall, floor_z))?;
+    s.execute("solid.box", &boxed(q_lo, q_hi, s_lo, s_lo + wall, floor_z, floor_z + wall_h))?;
+    s.execute("solid.box", &boxed(q_lo, q_hi, s_hi - wall, s_hi, floor_z, floor_z + wall_h))?;
+    s.execute("component.activate", &json!({"component": "root"}))?;
+    let track_occ = {
+        let c = s.doc.components.iter().find(|c| c.name == track).map(|c| c.id).ok_or_else(|| bad(cmd, "the track was not made"))?;
+        s.doc.occurrence_of(c).map(|o| o.id).ok_or_else(|| bad(cmd, "the track is not placed"))?
+    };
+    // Each part slides along the track, all linked to the first.
+    let mut joints = Vec::new();
+    for (k, body) in parts.iter().enumerate() {
+        let c = s.world_state().body(body).map(|b| b.mesh().bounds().center()).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+        let b = occurrence_for(s, body, cmd)?;
+        let jn = format!("{name}-{}", k + 1);
+        s.execute(
+            "joint.as_built",
+            &json!({"type": "slider", "a": track_occ, "b": b, "at": {"frame": {"origin": [c.x, c.y, c.z], "z": [along.x, along.y, along.z]}}, "name": jn, "limits": [[0, pitch * count as f64]]}),
+        )?;
+        joints.push(jn);
+    }
+    for j in joints.iter().skip(1) {
+        s.execute("joint.motion_link", &json!({"a": joints[0], "b": j, "ratio": 1}))?;
+    }
+    let mut moves = Vec::new();
+    for k in 1..=count {
+        moves.push(json!({"joint": joints[0], "to": pitch * k as f64, "time": time}));
+        moves.push(json!({"wait": time * 0.5}));
+    }
+    let r = s.execute("motion.sequence", &json!({"name": format!("{name} Index"), "moves": moves}))?;
+    Ok(json!({"track": track, "parts": parts, "joint": joints[0], "joints": joints, "study": r.get("study").cloned().unwrap_or(Value::Null), "pitch": pitch}))
+}
+
+/// The occurrence an end belongs to (the part nearest the point, or the one named) and the point
+/// in that occurrence's own coordinates.
+fn spring_end(s: &Session, at: Vec3, body: Option<&str>, cmd: &str) -> Result<(u64, [f64; 3])> {
+    let st = s.world_state();
+    let b = match body {
+        Some(n) => st.body(n).ok_or_else(|| bad(cmd, format!("no body `{n}`")))?,
+        None => st
+            .bodies
+            .iter()
+            .min_by(|x, y| {
+                let d = |b: &solidcraft_doc::ModelBody| b.mesh().positions.iter().map(|q| q.dist(at)).fold(f64::MAX, f64::min);
+                d(x).total_cmp(&d(y))
+            })
+            .ok_or_else(|| bad(cmd, "no part near the spring's end"))?,
+    };
+    let comp = s.doc.model_body_component(b);
+    let occ = if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map_or(0, |o| o.id) };
+    let m = if occ == 0 { solidcraft_doc::IDENTITY } else { solidcraft_doc::joints::occurrence_world(&s.doc, occ) };
+    let local = solidcraft_doc::apply_point(&solidcraft_doc::mat_inverse(&m).unwrap_or(solidcraft_doc::IDENTITY), at);
+    Ok((occ, [local.x, local.y, local.z]))
+}
+
+fn spring(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "motion.spring";
+    let from = p.get("from").and_then(vec3).ok_or_else(|| bad(cmd, "`from` must be a point"))?;
+    let to = p.get("to").and_then(vec3).ok_or_else(|| bad(cmd, "`to` must be a point"))?;
+    if !(from.is_finite() && to.is_finite()) || from.dist(to) < 1e-6 {
+        return Err(bad(cmd, "the spring's two ends must be apart"));
+    }
+    let num = |k: &str, d: f64| -> Result<f64> {
+        match p.get(k) {
+            None | Some(Value::Null) => Ok(d),
+            Some(v) => v.as_f64().filter(|x| x.is_finite() && *x > 0.0 && *x < 1e4).ok_or_else(|| bad(cmd, format!("`{k}` must be more than 0"))),
+        }
+    };
+    let (radius, wire, turns) = (num("radius", 5.0)?, num("wire", 1.0)?, num("turns", 8.0)?.clamp(1.0, 200.0));
+    let (a, at_a) = spring_end(s, from, p.get("from_body").and_then(Value::as_str), cmd)?;
+    let (b, at_b) = spring_end(s, to, p.get("to_body").and_then(Value::as_str), cmd)?;
+    let springs = &s.doc.assembly.springs;
+    if springs.len() >= 500 {
+        return Err(bad(cmd, "too many springs"));
+    }
+    let id = springs.iter().map(|x| x.id).max().unwrap_or(0) + 1;
+    let name = p.get("name").and_then(Value::as_str).filter(|n| !n.trim().is_empty()).map_or_else(|| format!("Spring{id}"), str::to_string);
+    let sp = solidcraft_doc::joints::Spring { id, name: name.clone(), a, at_a, b, at_b, radius, wire, turns };
+    s.doc_mut().assembly.springs.push(sp);
+    Ok(json!({"spring": id, "name": name, "a": a, "b": b}))
+}
+
+fn spring_delete(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "motion.spring_delete";
+    let key = match p.get("spring") {
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::String(x)) => x.clone(),
+        _ => return Err(bad(cmd, "`spring` must be an id or a name")),
+    };
+    let i = s.doc.assembly.springs.iter().position(|x| x.id.to_string() == key || x.name == key).ok_or_else(|| bad(cmd, format!("no spring `{key}`")))?;
+    let gone = s.doc_mut().assembly.springs.remove(i);
+    Ok(json!({"deleted": gone.id}))
+}
+
+/// Where a spring's two ends are now (world space).
+pub fn spring_ends(doc: &solidcraft_doc::Document, sp: &solidcraft_doc::joints::Spring) -> (Vec3, Vec3) {
+    let end = |occ: u64, at: [f64; 3]| {
+        let p = Vec3::new(at[0], at[1], at[2]);
+        if occ == 0 { p } else { solidcraft_doc::apply_point(&solidcraft_doc::joints::occurrence_world(doc, occ), p) }
+    };
+    (end(sp.a, sp.at_a), end(sp.b, sp.at_b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Owner's videos: a spring between two parts follows them. Between the air cylinder's barrel
+    /// and its rod's tip: as the rod slides 30 out the spring stretches 30; deleting it removes it.
+    #[test]
+    fn a_spring_stretches_with_the_parts() {
+        let mut s = Session::default();
+        s.execute("parts.air_cylinder", &json!({"bore": 20, "stroke": 50, "axis": "X", "name": "Push"})).unwrap();
+        s.execute("occurrence.ground", &json!({"occurrence": "Push Barrel", "grounded": true})).ok();
+        let tip = s.world_state().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
+        let undo = s.undo.len();
+        let r = s.execute("motion.spring", &json!({"from": [0, 0, 0], "to": [tip, 0, 0], "from_body": s.world_state().bodies[0].name.clone(), "to_body": s.world_state().bodies[1].name.clone()})).unwrap();
+        assert_eq!(s.undo.len(), undo + 1);
+        let len = |s: &Session| {
+            let (a, b) = spring_ends(&s.doc, &s.doc.assembly.springs[0]);
+            a.dist(b)
+        };
+        let before = len(&s);
+        s.execute("joint.drive", &json!({"joint": "Push", "value": 30})).unwrap();
+        assert!((len(&s) - before - 30.0).abs() < 1e-6, "{} → {}", before, len(&s));
+        let coil = s.doc.assembly.springs[0].coil(Vec3::ZERO, Vec3::new(0.0, 0.0, 40.0), 16);
+        assert!(coil.iter().all(|q| ((q.x * q.x + q.y * q.y).sqrt() - 5.0).abs() < 1e-9), "radius 5 all along");
+        s.execute("motion.spring_delete", &json!({"spring": r["name"]})).unwrap();
+        assert!(s.doc.assembly.springs.is_empty());
+    }
 
     /// Owner: a new, simple Gripper. A palm and two fingers 40 apart along X: closing the first
     /// finger by 10 closes the other by 10 too, toward the middle; one undo step.
@@ -351,4 +636,47 @@ mod tests {
         let r = s.execute("motion.pick_place", &json!({"lift": "Pusher", "travel": "Pusher", "down": 40, "up": 0, "there": 20, "back": 0})).unwrap();
         assert_eq!(r["seconds"], json!(6.0), "six moves of a second: {r}");
     }
+    /// Owner: a roller rolls over a bumpy surface, its centre rising over the bump and down again.
+    #[test]
+    fn a_roller_rides_over_the_surface() {
+        let mut s = Session::default();
+        let r = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap();
+        r(&mut s, "solid.box", json!({"length": 200, "width": 40, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Floor"}));
+        r(&mut s, "solid.box", json!({"length": 20, "width": 40, "height": 10, "corner": [90, 0, 10], "operation": "join", "body_name": "Floor"}));
+        r(&mut s, "solid.cylinder", json!({"radius": 8, "height": 10, "base": [20, 15, 18], "axis": [0, 1, 0], "operation": "new"}));
+        let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        let (floor, wheel) = (names[0].clone(), names[1].clone());
+        let out = r(&mut s, "motion.roller", json!({"roller": wheel, "surface": floor, "direction": [1, 0, 0], "length": 150}));
+        assert!(out["points"].as_u64().unwrap() > 10, "{out}");
+        let at = |s: &Session| s.world_state().body(&wheel).map(|b| b.mesh().bounds().center()).unwrap();
+        let start = at(&s);
+        r(&mut s, "joint.drive", json!({"joint": out["joint"].clone(), "values": ["0 deg", "80 mm"]}));
+        let top = at(&s);
+        assert!((top.z - start.z - 10.0).abs() < 1.0, "over the bump: {start:?} {top:?}");
+        r(&mut s, "joint.drive", json!({"joint": out["joint"].clone(), "values": ["0 deg", "40 mm"]}));
+        assert!((at(&s).z - start.z).abs() < 1.0, "on the floor");
+    }
+
+    /// Owner: a part feeder queues copies of the part on a track and indexes them forward.
+    #[test]
+    fn a_part_feeder_queues_and_indexes_parts() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 8, "corner": [0, 0, 0], "operation": "new", "body_name": "Blank"})).unwrap();
+        let undo = s.undo.len();
+        let out = s.execute("parts.feeder", &json!({"part": "Blank", "count": 3, "gap": 5})).unwrap();
+        assert_eq!(s.undo.len(), undo + 1, "one undo step");
+        assert_eq!(out["pitch"], json!(25.0), "{out}");
+        assert_eq!(out["parts"].as_array().unwrap().len(), 3);
+        assert_eq!(s.doc.assembly.joints.len(), 3);
+        let parts: Vec<String> = out["parts"].as_array().unwrap().iter().filter_map(Value::as_str).map(str::to_string).collect();
+        let xs = |s: &Session| -> Vec<f64> { parts.iter().map(|p| s.world_state().body(p).map(|b| b.mesh().bounds().center().x).unwrap_or(f64::NAN)).collect() };
+        let before = xs(&s);
+        s.execute("joint.drive", &json!({"joint": out["joint"].clone(), "values": ["25 mm"]})).unwrap();
+        let after = xs(&s);
+        for (a, b) in before.iter().zip(&after) {
+            assert!((b - a - 25.0).abs() < 1e-6, "{before:?} {after:?}");
+        }
+        assert!(!s.doc.assembly.studies.is_empty(), "an index sequence");
+    }
+
 }
