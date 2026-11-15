@@ -223,7 +223,11 @@ fn air_cylinder_steps(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let n = s.doc.assembly.joints.len() + 1;
     let name = p.get("name").and_then(Value::as_str).map_or_else(|| format!("Cylinder {n}"), str::to_string);
-    let (barrel_len, rod_len) = (stroke + 3.0 * bore.max(10.0) * 0.5, stroke + bore);
+    // The rod starts near the barrel's back and sticks out a bore's length, so it stays inside
+    // the barrel all the way out (owner: the rod came out of the barrel at full stroke).
+    let barrel_len = stroke + 3.0 * bore.max(10.0) * 0.5;
+    let rod_back = 4.0f64.min(barrel_len - stroke - 1.0).max(0.0);
+    let rod_len = barrel_len - rod_back + bore;
     let tip = at + axis * barrel_len;
     let pt = |v: Vec3| json!([v.x, v.y, v.z]);
     let ax = pt(axis);
@@ -234,7 +238,7 @@ fn air_cylinder_steps(s: &mut Session, p: &Value) -> Result<Value> {
     // The rod, from inside the barrel's front out.
     s.execute("component.activate", &json!({"component": "root"}))?;
     s.execute("component.create", &json!({"name": format!("{name} Rod")}))?;
-    s.execute("solid.cylinder", &json!({"radius": bore * 0.2, "height": rod_len, "base": pt(tip - axis * bore), "axis": ax, "operation": "new"}))?;
+    s.execute("solid.cylinder", &json!({"radius": bore * 0.2, "height": rod_len, "base": pt(at + axis * rod_back), "axis": ax, "operation": "new"}))?;
     s.execute("component.activate", &json!({"component": "root"}))?;
     // The components by name (a joint takes a component's first occurrence).
     let (barrel, rod) = (format!("{name} Barrel"), format!("{name} Rod"));
@@ -864,6 +868,13 @@ mod tests {
         // Pick and place: the same rod as lift and travel is enough to check the moves' order.
         let r = s.execute("motion.pick_place", &json!({"lift": "Pusher", "travel": "Pusher", "down": 40, "up": 0, "there": 20, "back": 0})).unwrap();
         assert_eq!(r["seconds"], json!(6.0), "six moves of a second: {r}");
+        // All the way out, the rod is still in the barrel (it came out before).
+        s.execute("joint.drive", &json!({"joint": "Pusher", "values": ["50 mm"]})).unwrap();
+        let st = s.world_state();
+        let bounds: Vec<_> = st.bodies.iter().map(|b| b.mesh().bounds()).collect();
+        let barrel = bounds.iter().max_by(|a, b| a.size().y.total_cmp(&b.size().y)).unwrap();
+        let rod = bounds.iter().min_by(|a, b| a.size().y.total_cmp(&b.size().y)).unwrap();
+        assert!(rod.min.x < barrel.max.x - 5.0, "rod {rod:?} barrel {barrel:?}");
     }
     /// Owner: a roller rolls over a bumpy surface, its centre rising over the bump and down again.
     #[test]
