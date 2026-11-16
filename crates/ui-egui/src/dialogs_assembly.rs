@@ -900,8 +900,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             if f.animate {
                 // One small step a frame (120 over a cycle), never a jump: a slow preview slows the
                 // motion down instead of skipping ahead, so it can be followed by eye.
-                let speed = speed_factor();
-                f.phase = (f.phase + speed / 120.0).fract();
+                // The next step only once the last one is on the screen: the screen repaints every
+                // 16 ms while a preview computes, so stepping on each repaint skipped several steps
+                // at once, unevenly (owner: a 98-body gripper jerked while its joint played).
+                if animation_may_step(app.preview.busy) {
+                    let speed = speed_factor();
+                    f.phase = (f.phase + speed / 120.0).fract();
+                }
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(40));
             }
         }
@@ -1873,6 +1878,12 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             cmd("motion.pick_place", p)
         }
     })
+}
+
+/// Whether a playing joint may take its next step: not while the preview of the last step is still
+/// being computed (so a slow preview slows the motion down instead of skipping ahead).
+pub(crate) fn animation_may_step(preview_busy: bool) -> bool {
+    !preview_busy
 }
 
 /// The preview's commands: OK's, with the joint's values playing its motion while animating.
