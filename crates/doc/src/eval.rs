@@ -1506,7 +1506,7 @@ impl Model {
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev_fp = first.checked_sub(1).and_then(|i| self.results.get(i)).map_or(0, |r| r.fingerprint);
         for (i, f) in doc.features.iter().enumerate().skip(first) {
-            let before = self.state_before(i);
+            let before = self.state_before_index(i);
             prev_fp = chain_fingerprint(doc, &vals, f, prev_fp, i >= marker, &steps, &before);
             if let Some(r) = self.results.get_mut(i).filter(|r| r.id == f.id) {
                 r.fingerprint = prev_fp;
@@ -1539,7 +1539,7 @@ impl Model {
 
     /// The model as it stood before feature `i` was evaluated: the last result before it that
     /// built something (the empty model before the first).
-    fn state_before(&self, i: usize) -> Arc<ModelState> {
+    fn state_before_index(&self, i: usize) -> Arc<ModelState> {
         self.results.iter().take(i).rev().find(|r| !r.skipped).map_or_else(|| self.empty.clone(), |r| r.state.clone())
     }
 
@@ -1555,7 +1555,7 @@ impl Model {
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev = 0;
         doc.features.iter().zip(&self.results).enumerate().all(|(i, (f, r))| {
-            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &steps, &self.state_before(i));
+            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &steps, &self.state_before_index(i));
             r.id == f.id && r.fingerprint == prev
         })
     }
