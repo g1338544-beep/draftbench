@@ -422,6 +422,22 @@ impl Camera {
         let r = (b.diagonal() * 0.5).max(1.0);
         self.distance = if self.fov > 0.0 { r / (self.fov * 0.5).sin() * 1.1 } else { r / 0.4 * 1.15 };
     }
+    /// The same camera turned about its viewing direction so that world direction `up` reads
+    /// straight up the screen (a moved WCS's ZC in its own isometric view). Unchanged when `up`
+    /// runs along the viewing direction.
+    pub fn with_screen_up(&self, up: Vec3) -> Camera {
+        let level = Camera { roll: 0.0, ..*self };
+        let (right, screen_up, back) = level.basis();
+        let flat = up - back * up.dot(back);
+        if !(flat.len() > 1e-9) {
+            return *self;
+        }
+        let roll = (-flat.dot(right)).atan2(flat.dot(screen_up));
+        if !roll.is_finite() {
+            return *self;
+        }
+        Camera { roll: roll.rem_euclid(std::f64::consts::TAU), ..level }
+    }
     /// The same camera looking from direction `back` (target → eye). Straight up or down
     /// keeps the yaw, rounded to the nearest quarter turn so the view stays square.
     pub fn looking_from(&self, back: Vec3) -> Camera {

@@ -188,19 +188,38 @@ pub fn pick_origin() {
     PICK_ORIGIN.with(|p| p.set(true));
 }
 
+thread_local! {
+    /// The guide points of the model state they were found on (worked out once per model, not
+    /// every frame while picking).
+    static GUIDE_CACHE: RefCell<Option<(std::sync::Arc<solidcraft_engine::doc::ModelState>, std::rc::Rc<Vec<(Vec3, &'static str)>>)>> = const { RefCell::new(None) };
+}
+
+/// At most this many guide points in all (a big assembly stays responsive).
+const MAX_GUIDES: usize = 200_000;
+
 /// The points a click can take: edge ends, the middle of straight edges and the centres of
-/// circles and arcs (a hole's centre), of the bodies shown.
-fn guide_points(app: &SolveApp) -> Vec<(Vec3, &'static str)> {
+/// circles and arcs (a hole's centre), of every body shown (owner: on an imported assembly of
+/// 132 bodies the origin would not take the centres of the later ones).
+fn guide_points(app: &SolveApp) -> std::rc::Rc<Vec<(Vec3, &'static str)>> {
     let st = crate::open_meshing::shown_world(app);
+    if let Some(hit) = GUIDE_CACHE.with(|c| c.borrow().as_ref().filter(|(s, _)| std::sync::Arc::ptr_eq(s, &st)).map(|(_, g)| g.clone())) {
+        return hit;
+    }
     let mut out: Vec<(Vec3, &'static str)> = Vec::new();
-    let add = |p: Vec3, what: &'static str, out: &mut Vec<(Vec3, &'static str)>| {
-        if !out.iter().any(|(q, _)| q.dist(p) < 1e-6) {
+    // Nearly equal points are one (a grid of 1 µm finds them without comparing every pair).
+    let mut seen: std::collections::HashSet<(i64, i64, i64)> = std::collections::HashSet::new();
+    let mut add = |p: Vec3, what: &'static str, out: &mut Vec<(Vec3, &'static str)>| {
+        if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+            return;
+        }
+        let key = ((p.x * 1e3).round() as i64, (p.y * 1e3).round() as i64, (p.z * 1e3).round() as i64);
+        if seen.insert(key) {
             out.push((p, what));
         }
     };
-    for b in st.bodies.iter().take(64) {
+    'bodies: for b in st.bodies.iter() {
         let m = b.mesh();
-        for (i, e) in m.edges.iter().enumerate().take(4000) {
+        for (i, e) in m.edges.iter().enumerate() {
             if !m.edge_pickable(i) {
                 continue;
             }
@@ -215,11 +234,13 @@ fn guide_points(app: &SolveApp) -> Vec<(Vec3, &'static str)> {
                 add(*a, "end", &mut out);
                 add(*z, "end", &mut out);
             }
-            if out.len() > 20_000 {
-                return out;
+            if out.len() > MAX_GUIDES {
+                break 'bodies;
             }
         }
     }
+    let out = std::rc::Rc::new(out);
+    GUIDE_CACHE.with(|c| *c.borrow_mut() = Some((st, out.clone())));
     out
 }
 
@@ -302,8 +323,8 @@ pub fn update(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
         } else if let Some(pos) = pos.filter(|p| rect.contains(*p) && !crate::shell::covered(app, *p)) {
             let over_handle = handle_at(&w, &proj, pos).is_some();
             let mut near: Vec<(f32, Vec3, &'static str)> = guide_points(app)
-                .into_iter()
-                .filter_map(|(p, what)| proj.to_screen(p).map(|q| (q.distance(pos), p, what)))
+                .iter()
+                .filter_map(|&(p, what)| proj.to_screen(p).map(|q| (q.distance(pos), p, what)))
                 .filter(|(d, _, _)| *d <= 90.0)
                 .collect();
             near.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -685,5 +706,21 @@ mod tests {
         let bent = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(5.0, 1.0, 0.0), Vec3::new(10.0, 0.0, 0.0)];
         assert!(straight_direction(&bent).is_none());
         assert!(straight_direction(&[Vec3::ZERO]).is_none(), "a single point has no direction");
+    }
+
+    /// Owner: on an imported assembly (132 bodies) the origin would not take the centres of
+    /// the later bodies: every body shown gives its guide points.
+    #[test]
+    fn every_body_of_a_big_assembly_gives_its_centres() {
+        let mut s = solidcraft_engine::Session::default();
+        for k in 0..70 {
+            let x = f64::from(k) * 20.0;
+            s.execute("solid.cylinder", &serde_json::json!({"radius": 4, "height": 5, "base": [x, 0, 0], "operation": "new_body"})).unwrap();
+        }
+        let app = SolveApp::new(s, crate::Services::default());
+        let g = guide_points(&app);
+        let last = Vec3::new(69.0 * 20.0, 0.0, 5.0);
+        assert!(g.iter().any(|(p, what)| *what == "centre" && p.dist(last) < 1e-6), "the 70th body's top centre");
+        assert!(std::rc::Rc::ptr_eq(&g, &guide_points(&app)), "found once per model");
     }
 }
