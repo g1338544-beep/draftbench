@@ -30,6 +30,9 @@ const FORMATS: [(&str, &str, &str); 6] = [
     ("IGES", "iges", "igs"),
     ("OBJ", "obj", "obj"),
 ];
+/// The STEP versions a file can be written in (owner: like NX, AP203, AP214 or AP242), as
+/// `file.export`'s `schema` names them, and their labels.
+const STEP_SCHEMAS: [(&str, &str); 3] = [("ap242", "AP242"), ("ap214", "AP214 (automotive)"), ("ap203", "AP203")];
 /// The first `MESH_FORMATS` entries are saved by `file.save_mesh` (and can go to a slicer); the
 /// rest are written by `file.export`, which takes the same bodies.
 const MESH_FORMATS: usize = 3;
@@ -47,6 +50,8 @@ pub struct SaveMesh {
     slicer: String,
     /// The slicer list has not been read for this opening yet.
     stale: bool,
+    /// The STEP version (index into [`STEP_SCHEMAS`]).
+    schema: usize,
 }
 
 impl SaveMesh {
@@ -101,7 +106,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     }
     let p = &app.preferences;
     let format = FORMATS.iter().position(|f| f.1 == p.save_mesh_format).unwrap_or(0);
-    let kind = Kind::SaveMesh(SaveMesh { format, send: p.save_mesh_send, slicer: p.save_mesh_slicer.clone(), stale: true });
+    let schema = STEP_SCHEMAS.iter().position(|s| s.0 == p.step_schema).unwrap_or(0);
+    let kind = Kind::SaveMesh(SaveMesh { format, send: p.save_mesh_send, slicer: p.save_mesh_slicer.clone(), stale: true, schema });
     Some((kind, vec![SelInput::new("Bodies", BODIES, true)]))
 }
 
@@ -181,6 +187,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) -> bool {
         k.send &= !entries.is_empty();
     }
     choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
+    if FORMATS.get(k.format).is_some_and(|f| f.1 == "step") {
+        choice_row(ui, "STEP version", "sm_schema", &mut k.schema, &STEP_SCHEMAS.map(|s| s.1));
+        // Remembered for the next export.
+        app.preferences.step_schema = STEP_SCHEMAS.get(k.schema).map_or("ap242", |s| s.0).to_string();
+    }
     if k.format >= MESH_FORMATS {
         k.send = false;
         return false;
@@ -312,8 +323,12 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
         return Err(crate::i18n::tr("ui.save_mesh_pick_bodies").into());
     }
     if k.format >= MESH_FORMATS {
-        // STEP, IGES and OBJ: the file extension names the format.
-        return Ok(vec![("file.export".into(), json!({ "bodies": names }))]);
+        // STEP, IGES and OBJ: the file extension names the format; STEP in the version chosen.
+        let mut p = json!({ "bodies": names });
+        if format == "step" {
+            p["schema"] = json!(STEP_SCHEMAS.get(k.schema).map_or("ap242", |s| s.0));
+        }
+        return Ok(vec![("file.export".into(), p)]);
     }
     let mut p = json!({ "format": format });
     p["bodies"] = json!(names);

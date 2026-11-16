@@ -1850,6 +1850,37 @@ fn products_text(products: &[ExportProduct], root: usize, header: &StepHeader, m
     Ok(s)
 }
 
+/// A STEP file this module wrote (AP242), retold in another application protocol's terms
+/// (owner: like NX, write AP203, AP214 or AP242 for the program at the other end): its schema
+/// line and application context. `schema` is `ap242` (unchanged), `ap214` or `ap203`. The
+/// geometry, product structure, colours and curves are written alike; programs reading AP203
+/// (first edition) skip the colours and curves they do not know.
+pub fn step_with_schema(text: &str, schema: &str) -> crate::Result<String> {
+    const AP242: (&str, &str, &str) = (
+        "FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }'));",
+        "APPLICATION_CONTEXT('managed model based 3d engineering')",
+        "'ap242_managed_model_based_3d_engineering',2014,",
+    );
+    let to = match schema.trim().to_ascii_lowercase().as_str() {
+        "" | "ap242" | "242" => return Ok(text.to_string()),
+        "ap214" | "214" => (
+            "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 3 1 1 }'));",
+            "APPLICATION_CONTEXT('core data for automotive mechanical design processes')",
+            "'automotive_design',2001,",
+        ),
+        "ap203" | "203" => (
+            "FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));",
+            "APPLICATION_CONTEXT('configuration controlled 3d designs of mechanical parts and assemblies')",
+            "'config_control_design',1994,",
+        ),
+        other => return Err(KernelError::Invalid(format!("unknown STEP version `{other}` (ap203, ap214 or ap242)"))),
+    };
+    if !text.contains(AP242.0) {
+        return Err(KernelError::Invalid("not a STEP file this program wrote".into()));
+    }
+    Ok(text.replacen(AP242.0, to.0, 1).replacen(AP242.1, to.1, 1).replacen(AP242.2, to.2, 1))
+}
+
 /// A surface colour for a solid (STYLED_ITEM chain).
 fn style(o: &mut Out, item: u64, c: [f32; 3], opacity: f32) -> u64 {
     let rgb = o.add_shared(format!("COLOUR_RGB('',{},{},{})", real(c[0] as f64), real(c[1] as f64), real(c[2] as f64)));
@@ -1908,6 +1939,26 @@ mod tests {
         assert!(read[1].1.iter().all(|q| (q.z - 10.0).abs() < 1e-9) && (read[1].1[0].x - 3.0).abs() < 1e-9);
         // Curves alone are a file too.
         assert!(step_export_bodies_and_curves(&[], &curves, &StepHeader::default()).is_ok());
+    }
+
+    /// Owner: STEP written as AP203, AP214 or AP242 (the schema line and application context
+    /// follow), and each reads back.
+    #[test]
+    fn step_versions_name_their_schema_and_read_back() {
+        let b = crate::box_solid(10.0, 20.0, 5.0).unwrap();
+        let text = step_export_bodies(&[ExportBody { name: "Part".into(), body: &b, color: Some([1.0, 0.0, 0.0]) }], &StepHeader::default()).unwrap();
+        for (schema, line, app) in [
+            ("ap242", "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF", "managed model based 3d engineering"),
+            ("ap214", "AUTOMOTIVE_DESIGN", "core data for automotive mechanical design processes"),
+            ("ap203", "CONFIG_CONTROL_DESIGN", "configuration controlled 3d designs"),
+        ] {
+            let out = step_with_schema(&text, schema).unwrap();
+            assert!(out.contains(&format!("FILE_SCHEMA(('{line}")) && out.contains(app), "{schema}");
+            assert_eq!(out.matches("FILE_SCHEMA").count(), 1);
+            let back = crate::step_import(&out).unwrap();
+            assert_eq!(back.bodies.len(), 1, "{schema} reads back");
+        }
+        assert!(step_with_schema(&text, "ap999").is_err());
     }
 
     #[test]

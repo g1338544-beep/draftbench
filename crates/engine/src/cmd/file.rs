@@ -48,7 +48,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.export", "Export", export)
         .icon("export")
         .noundo()
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); schema?: ap203|ap214|ap242 (STEP version, default ap242); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10)"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
         .at("MESH", "MODIFY")
         .icon("mesh_export")
@@ -610,7 +610,7 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Result<Value> {
+fn export_to(s: &Session, path: &str, format: Format, bodies: &[String], schema: &str) -> Result<Value> {
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
@@ -625,6 +625,13 @@ fn export_to(s: &Session, path: &str, format: Format, bodies: &[String]) -> Resu
         // file the design's properties where the format has a place for them.
         solidcraft_io::export_with_metadata(&s.doc.painted(&s.world_state()), bodies, format, &name, &s.doc.metadata)?
     };
+    // STEP in the version asked for (AP242 as written).
+    let bytes = if format == Format::Step && !schema.trim().is_empty() {
+        let text = String::from_utf8(bytes).map_err(|_| EngineError::Other("STEP export: not text".into()))?;
+        solidcraft_kernel::step_with_schema(&text, schema).map_err(|e| bad("file.export", e.to_string()))?.into_bytes()
+    } else {
+        bytes
+    };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
 }
@@ -635,7 +642,11 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if format == Format::Urdf {
         return export_urdf(s, path, p);
     }
-    export_to(s, path, format, &string_list(p, "bodies"))
+    let schema = str_(p, "schema").unwrap_or("");
+    if !matches!(schema.trim().to_ascii_lowercase().as_str(), "" | "ap203" | "ap214" | "ap242") {
+        return Err(bad("file.export", "`schema` must be ap203, ap214 or ap242"));
+    }
+    export_to(s, path, format, &string_list(p, "bodies"), schema)
 }
 
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
@@ -716,7 +727,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
             crate::slicers::resolve(spec).ok_or_else(|| bad(cmd, format!("no slicer `{spec}` (see file.slicers, or give the path of a program)")))?,
         ),
     };
-    let mut out = export_to(s, path, format, &string_list(p, "bodies"))?;
+    let mut out = export_to(s, path, format, &string_list(p, "bodies"), "")?;
     if let (Some(slicer), Some(obj)) = (slicer, out.as_object_mut()) {
         // The file is saved either way; a slicer that won't start is reported, not fatal.
         match slicer.open(path) {

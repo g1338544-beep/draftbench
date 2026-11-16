@@ -524,6 +524,8 @@ preference_settings! {
     /// Default modelling orientation: `z` (Z up) or `y` (Y up) (#3).
     up_axis: String = "z".into(), PAGE_DESIGN;
     /// After a STEP or IGES file opens, offer to stand a Y-up part up (`stand_up`).
+    /// The STEP version files are exported in: `ap242`, `ap214` or `ap203` (the Export dialog's choice).
+    step_schema: String = "ap242".into(), PAGE_DESIGN;
     offer_stand_up: bool = true, PAGE_DESIGN => check("Offer to stand up Y-up files", "After a STEP or IGES file opens with Z up, offer a quarter turn about X");
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), 1;

@@ -680,7 +680,7 @@ mod tests {
         eprintln!("import {:?}: curves {} bodies {}", t.elapsed(), r["curves"], r["bodies"].as_array().map_or(0, Vec::len));
         for f in &s.doc.features {
             if let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &f.kind {
-                eprintln!("sketch {} colour {:?} curves {}", f.name, sketch.view.color, sketch.curves.len());
+                eprintln!("sketch {} colour {:?} wires {}", f.name, sketch.view.color, sketch.wires.len());
             }
         }
     }
