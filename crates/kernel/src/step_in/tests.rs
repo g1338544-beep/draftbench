@@ -2317,3 +2317,58 @@ fn step_conformance_parts_read_back_their_exact_shape() {
         }
     }
 }
+
+/// Owner (an NX file's trimlines): every curve of a curve set comes in — trimmed straight lines and
+/// trimmed or whole circles as well as splines — with the colour its style gives.
+#[test]
+fn curve_sets_bring_straight_pieces_arcs_and_their_colours() {
+    let text = format!(
+        "{HEAD}\
+#1=CARTESIAN_POINT('',(0.,0.,0.));\n\
+#2=DIRECTION('',(1.,0.,0.));\n\
+#3=VECTOR('',#2,1.);\n\
+#4=LINE('',#1,#3);\n\
+#5=TRIMMED_CURVE('',#4,(PARAMETER_VALUE(2.)),(PARAMETER_VALUE(12.)),.T.,.PARAMETER.);\n\
+#6=DIRECTION('',(0.,0.,1.));\n\
+#7=AXIS2_PLACEMENT_3D('',#1,#6,#2);\n\
+#8=CIRCLE('',#7,5.);\n\
+#9=TRIMMED_CURVE('',#8,(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(1.5707963267949)),.T.,.PARAMETER.);\n\
+#10=CIRCLE('',#7,3.);\n\
+#11=GEOMETRIC_CURVE_SET('None',(#5,#9,#10));\n\
+#20=DRAUGHTING_PRE_DEFINED_COLOUR('red');\n\
+#21=DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');\n\
+#22=CURVE_STYLE('',#21,POSITIVE_LENGTH_MEASURE(0.1),#20);\n\
+#23=PRESENTATION_STYLE_ASSIGNMENT((#22));\n\
+#24=STYLED_ITEM('',(#23),#9);\n\
+{TAIL}"
+    );
+    let curves = step_curves(&text);
+    assert_eq!(curves.len(), 3, "all three: {:?}", curves.iter().map(|c| (&c.0, c.1.len())).collect::<Vec<_>>());
+    let line = &curves[0];
+    assert_eq!(line.1.len(), 2, "a straight piece is its two ends");
+    assert!((line.1[0].x - 2.0).abs() < 1e-9 && (line.1[1].x - 12.0).abs() < 1e-9, "trimmed at 2 and 12: {:?}", line.1);
+    assert_eq!(line.2, None, "no style, no colour");
+    let arc = &curves[1];
+    assert_eq!(arc.2, Some([1.0, 0.0, 0.0]), "the red trimline is red");
+    let (a, b) = (arc.1[0], *arc.1.last().unwrap());
+    assert!((a.x - 5.0).abs() < 1e-6 && a.y.abs() < 1e-6 && b.x.abs() < 1e-6 && (b.y - 5.0).abs() < 1e-6, "a quarter turn: {a:?} {b:?}");
+    assert!(arc.1.iter().all(|q| (q.len() - 5.0).abs() < 1e-6));
+    let circle = &curves[2];
+    assert!(circle.1.iter().all(|q| (q.len() - 3.0).abs() < 1e-6) && (circle.1[0] - *circle.1.last().unwrap()).len() < 1e-6, "a whole circle closes");
+    assert!(curves.iter().all(|c| c.0.starts_with("Curve")), "an unnamed ('None') set's curves are called Curve: {:?}", curves.iter().map(|c| &c.0).collect::<Vec<_>>());
+}
+
+/// A real file's curves, counted by colour (set STEP_CURVES_FILE; not committed data).
+#[test]
+#[ignore]
+fn count_curves_of_a_file() {
+    let Ok(path) = std::env::var("STEP_CURVES_FILE") else { return };
+    let text = std::fs::read_to_string(path).unwrap();
+    let t = std::time::Instant::now();
+    let curves = step_curves(&text);
+    let mut by: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for c in &curves {
+        *by.entry(format!("{:?} {}", c.2, if c.1.len() == 2 { "line" } else { "curve" })).or_default() += 1;
+    }
+    eprintln!("{} curves in {:?}: {by:?}", curves.len(), t.elapsed());
+}

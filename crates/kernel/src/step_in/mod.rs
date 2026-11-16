@@ -538,44 +538,7 @@ impl Reader {
     }
 
     fn find_colour(&self, styles: Option<&Param>) -> Option<[f32; 3]> {
-        let mut queue: Vec<u64> = styles?.as_list()?.iter().filter_map(Param::as_ref_id).collect();
-        let mut seen = HashSet::new();
-        while let Some(id) = queue.pop() {
-            if seen.len() > 64 || !seen.insert(id) {
-                continue;
-            }
-            let e = self.ex.get(id)?;
-            if e.name() == "COLOUR_RGB" {
-                let p = e.params();
-                let c = |i: usize| p.get(i).and_then(Param::as_f64).map(|x| x.clamp(0.0, 1.0) as f32);
-                return Some([c(1)?, c(2)?, c(3)?]);
-            }
-            if e.name() == "DRAUGHTING_PRE_DEFINED_COLOUR" {
-                return Some(match e.params().first().and_then(Param::as_str).unwrap_or("") {
-                    "red" => [1.0, 0.0, 0.0],
-                    "green" => [0.0, 1.0, 0.0],
-                    "blue" => [0.0, 0.0, 1.0],
-                    "yellow" => [1.0, 1.0, 0.0],
-                    "magenta" => [1.0, 0.0, 1.0],
-                    "cyan" => [0.0, 1.0, 1.0],
-                    "black" => [0.0, 0.0, 0.0],
-                    _ => [1.0, 1.0, 1.0],
-                });
-            }
-            fn walk(p: &Param, out: &mut Vec<u64>, depth: usize) {
-                match p {
-                    Param::Ref(r) => out.push(*r),
-                    Param::List(v) | Param::Typed(_, v) if depth < 4 => v.iter().for_each(|x| walk(x, out, depth + 1)),
-                    _ => {}
-                }
-            }
-            for r in &e.records {
-                for p in &r.params {
-                    walk(p, &mut queue, 0);
-                }
-            }
-        }
-        None
+        style_colour(&self.ex, styles)
     }
 
     fn units_of(&mut self, rep: u64) -> Units {
@@ -1200,49 +1163,237 @@ pub fn step_cache_alive() -> (usize, usize) {
 
 /// Read a STEP file: its solids (as bodies, placed by the assembly structure) and the tree.
 /// The named curves of a STEP file (owner: "show the lines other programs put in a STEP
-/// file", CF trimlines): each GEOMETRIC_CURVE_SET or GEOMETRIC_SET's polylines and B-spline
-/// curves, sampled (mm), named after their set. Curves of other kinds are left out.
-pub fn step_curves(text: &str) -> Vec<(String, Vec<solidcraft_geom::Vec3>)> {
-    use mt::{BoundedCurve as _, ParametricCurve as _};
+/// file", CF trimlines): every curve of each GEOMETRIC_CURVE_SET or GEOMETRIC_SET, sampled (mm),
+/// named after its set, with the colour its style gives (owner: an NX file's red trimlines came in
+/// black, and its straight pieces not at all). Straight lines, circles, ellipses, polylines,
+/// B-splines and NURBS, whole or trimmed, and composite curves of them are read; anything else is
+/// left out.
+pub fn step_curves(text: &str) -> Vec<(String, Vec<solidcraft_geom::Vec3>, Option<[f32; 3]>)> {
     let Ok(ex) = p21::parse(text) else { return Vec::new() };
     let mut cache = HashMap::new();
     let mut ids: Vec<u64> = ex.entities.iter().filter(|(_, e)| matches!(e.name(), "GEOMETRIC_CURVE_SET" | "GEOMETRIC_SET")).map(|(i, _)| *i).collect();
     ids.sort_unstable();
+    // The colours styles give the curves.
+    let mut colours: HashMap<u64, [f32; 3]> = HashMap::new();
+    for e in ex.entities.values().filter(|e| matches!(e.name(), "STYLED_ITEM" | "OVER_RIDING_STYLED_ITEM")) {
+        let p = e.params();
+        if let Some(item) = p.get(2).and_then(Param::as_ref_id)
+            && let Some(c) = style_colour(&ex, p.get(1))
+        {
+            colours.entry(item).or_insert(c);
+        }
+    }
     let mut out = Vec::new();
     for id in ids.into_iter().take(10_000) {
         let Some(set) = ex.get(id) else { continue };
-        let name = set.params().first().and_then(Param::as_str).filter(|n| !n.trim().is_empty()).map_or_else(|| format!("Curve {id}"), str::to_string);
+        // A set NX leaves unnamed is called 'None': its curves are then just "Curve".
+        let name = set
+            .params()
+            .first()
+            .and_then(Param::as_str)
+            .map(str::trim)
+            .filter(|n| !n.is_empty() && !n.eq_ignore_ascii_case("none"))
+            .map_or_else(|| "Curve".to_string(), str::to_string);
         // Its units: the context of the representation holding it.
         let ctx = ex.entities.values().filter_map(representation).find(|(items, _)| items.contains(&id)).and_then(|(_, c)| c);
         let u = context_units(&ex, ctx, &mut cache);
         let cx = Ctx { ex: &ex, len: u.len, ang: u.ang, tol: u.tol, snap: u.snap };
         let items: Vec<u64> = set.params().get(1).and_then(Param::as_list).map(|l| l.iter().filter_map(Param::as_ref_id).collect()).unwrap_or_default();
         let many = items.len() > 1;
-        for (k, item) in items.into_iter().take(10_000).enumerate() {
-            let sampled = guard("STEP curves", || {
-                let pts: Vec<solidcraft_geom::Vec3> = match geom::curve(&cx, item, 0) {
-                    Ok(geom::CurveGeo::BSpline(c)) => {
-                        let (t0, t1) = c.range_tuple();
-                        (0..=200).map(|i| c.subs(t0 + (t1 - t0) * i as f64 / 200.0)).map(|q| solidcraft_geom::Vec3::new(q.x, q.y, q.z)).collect()
-                    }
-                    Ok(geom::CurveGeo::Nurbs(c)) => {
-                        let (t0, t1) = c.range_tuple();
-                        (0..=200).map(|i| c.subs(t0 + (t1 - t0) * i as f64 / 200.0)).map(|q| solidcraft_geom::Vec3::new(q.x, q.y, q.z)).collect()
-                    }
-                    _ => Vec::new(),
-                };
-                Ok(pts)
-            });
+        for (k, item) in items.into_iter().take(20_000).enumerate() {
+            let sampled = guard("STEP curves", || Ok(sample_curve(&cx, item, 0)));
             if let Ok(pts) = sampled
                 && pts.len() >= 2
                 && pts.iter().all(|q| q.is_finite())
             {
-                out.push((if many { format!("{name} ({})", k + 1) } else { name.clone() }, pts));
+                let colour = colours.get(&item).copied();
+                out.push((if many { format!("{name} ({})", k + 1) } else { name.clone() }, pts, colour));
             }
         }
     }
     out
 }
+
+/// Points along a STEP curve (mm): 2 for a straight piece, up to 201 for a curved one; none for a
+/// curve that is unbounded (a bare LINE) or not understood.
+fn sample_curve(cx: &Ctx, id: u64, depth: usize) -> Vec<solidcraft_geom::Vec3> {
+    use mt::{BoundedCurve as _, ParametricCurve as _};
+    if depth > 8 {
+        return Vec::new();
+    }
+    let Some(e) = cx.ex.get(id) else { return Vec::new() };
+    let p = e.params();
+    let v = |q: mt::Point3| solidcraft_geom::Vec3::new(q.x, q.y, q.z);
+    match e.name() {
+        "TRIMMED_CURVE" => {
+            let Some(basis) = p.get(1).and_then(Param::as_ref_id) else { return Vec::new() };
+            let Ok(geo) = geom::curve(cx, basis, depth + 1) else { return Vec::new() };
+            // A trim is a parameter value or a point (a point is projected onto the curve).
+            let trim = |q: Option<&Param>| -> Option<f64> {
+                let list = q?.as_list()?;
+                let par = list.iter().find_map(|x| match x {
+                    Param::Typed(t, a) if t == "PARAMETER_VALUE" => a.first().and_then(Param::as_f64),
+                    _ => None,
+                });
+                if par.is_some() {
+                    return par;
+                }
+                let pt = list.iter().find_map(Param::as_ref_id).and_then(|r| geom::point(cx, r).ok())?;
+                Some(param_of(cx, &geo, basis, pt))
+            };
+            let (Some(t0), Some(t1)) = (trim(p.get(2)), trim(p.get(3))) else { return Vec::new() };
+            let sense = !matches!(p.get(4), Some(Param::Enum(s)) if s == "F");
+            let mut pts = sample_between(cx, &geo, basis, t0, t1, sense);
+            if !sense {
+                pts.reverse();
+            }
+            pts
+        }
+        "COMPOSITE_CURVE" => {
+            let mut pts: Vec<solidcraft_geom::Vec3> = Vec::new();
+            for seg in p.get(1).and_then(Param::as_list).into_iter().flatten().filter_map(Param::as_ref_id).take(2000) {
+                let Some(se) = cx.ex.get(seg) else { continue };
+                let sp = se.params();
+                let Some(parent) = sp.get(2).and_then(Param::as_ref_id) else { continue };
+                let mut piece = sample_curve(cx, parent, depth + 1);
+                if matches!(sp.get(1), Some(Param::Enum(s)) if s == "F") {
+                    piece.reverse();
+                }
+                if pts.last().zip(piece.first()).is_some_and(|(a, b)| (*a - *b).len() < 1e-9) {
+                    piece.remove(0);
+                }
+                pts.extend(piece);
+            }
+            pts
+        }
+        _ => match geom::curve(cx, id, depth + 1) {
+            Ok(geom::CurveGeo::BSpline(c)) => {
+                let (t0, t1) = c.range_tuple();
+                (0..=200).map(|i| v(c.subs(t0 + (t1 - t0) * i as f64 / 200.0))).collect()
+            }
+            Ok(geom::CurveGeo::Nurbs(c)) => {
+                let (t0, t1) = c.range_tuple();
+                (0..=200).map(|i| v(c.subs(t0 + (t1 - t0) * i as f64 / 200.0))).collect()
+            }
+            // A whole circle or ellipse.
+            Ok(geo @ geom::CurveGeo::Conic { .. }) => sample_between(cx, &geo, id, 0.0, std::f64::consts::TAU / cx.ang.max(1e-12), true),
+            _ => Vec::new(),
+        },
+    }
+}
+
+/// The STEP parameter of a curve at its point nearest `q`: along a line, its distance in file
+/// units of the line's vector; around a conic, its angle in file angle units.
+fn param_of(cx: &Ctx, geo: &geom::CurveGeo, basis: u64, q: mt::Point3) -> f64 {
+    use mt::{BoundedCurve as _, InnerSpace as _, SearchNearestParameter as _};
+    match geo {
+        geom::CurveGeo::Line { p, d } => (q - *p).dot(*d) / (line_magnitude(cx, basis) * cx.len).max(1e-12),
+        geom::CurveGeo::Conic { f, a, b } => {
+            let r = q - f.o;
+            (r.dot(f.y) / b).atan2(r.dot(f.x) / a) / cx.ang.max(1e-12)
+        }
+        geom::CurveGeo::BSpline(c) => c.search_nearest_parameter(q, None, 50).unwrap_or_else(|| c.range_tuple().0),
+        geom::CurveGeo::Nurbs(c) => c.search_nearest_parameter(q, None, 50).unwrap_or_else(|| c.range_tuple().0),
+        _ => {
+            let _ = q;
+            0.0
+        }
+    }
+}
+
+/// The magnitude of a LINE's vector (file length units; 1 when unreadable).
+fn line_magnitude(cx: &Ctx, line: u64) -> f64 {
+    cx.ex
+        .get(line)
+        .and_then(|l| l.params().get(2).and_then(Param::as_ref_id))
+        .and_then(|vid| cx.ex.get(vid))
+        .and_then(|vec| vec.params().get(2).and_then(Param::as_f64))
+        .filter(|m| m.is_finite() && *m > 0.0)
+        .unwrap_or(1.0)
+}
+
+/// Points of a curve from parameter `t0` to `t1` (STEP parameters); a closed conic runs the
+/// way `sense` says, wrapping past a full turn.
+fn sample_between(cx: &Ctx, geo: &geom::CurveGeo, basis: u64, t0: f64, t1: f64, sense: bool) -> Vec<solidcraft_geom::Vec3> {
+    use mt::ParametricCurve as _;
+    let v = |q: mt::Point3| solidcraft_geom::Vec3::new(q.x, q.y, q.z);
+    if !(t0.is_finite() && t1.is_finite()) {
+        return Vec::new();
+    }
+    match geo {
+        geom::CurveGeo::Line { p, d } => {
+            let m = line_magnitude(cx, basis) * cx.len;
+            vec![v(*p + *d * (m * t0)), v(*p + *d * (m * t1))]
+        }
+        geom::CurveGeo::Conic { f, a, b } => {
+            let (mut s0, mut s1) = (t0 * cx.ang, t1 * cx.ang);
+            if sense {
+                while s1 <= s0 + 1e-12 {
+                    s1 += std::f64::consts::TAU;
+                }
+            } else {
+                std::mem::swap(&mut s0, &mut s1);
+                while s1 <= s0 + 1e-12 {
+                    s1 += std::f64::consts::TAU;
+                }
+            }
+            let n = (((s1 - s0) / std::f64::consts::TAU) * 96.0).ceil().clamp(8.0, 400.0) as usize;
+            (0..=n)
+                .map(|i| {
+                    let t = s0 + (s1 - s0) * i as f64 / n as f64;
+                    v(f.o + f.x * (a * t.cos()) + f.y * (b * t.sin()))
+                })
+                .collect()
+        }
+        geom::CurveGeo::BSpline(c) => (0..=200).map(|i| v(c.subs(t0 + (t1 - t0) * i as f64 / 200.0))).collect(),
+        geom::CurveGeo::Nurbs(c) => (0..=200).map(|i| v(c.subs(t0 + (t1 - t0) * i as f64 / 200.0))).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The colour a STYLED_ITEM's styles give (surface or curve style): the first COLOUR_RGB or
+/// pre-defined colour found under them.
+fn style_colour(ex: &Exchange, styles: Option<&Param>) -> Option<[f32; 3]> {
+    let mut queue: Vec<u64> = styles?.as_list()?.iter().filter_map(Param::as_ref_id).collect();
+    let mut seen = HashSet::new();
+    while let Some(id) = queue.pop() {
+        if seen.len() > 64 || !seen.insert(id) {
+            continue;
+        }
+        let e = ex.get(id)?;
+        if e.name() == "COLOUR_RGB" {
+            let p = e.params();
+            let c = |i: usize| p.get(i).and_then(Param::as_f64).map(|x| x.clamp(0.0, 1.0) as f32);
+            return Some([c(1)?, c(2)?, c(3)?]);
+        }
+        if e.name() == "DRAUGHTING_PRE_DEFINED_COLOUR" {
+            return Some(match e.params().first().and_then(Param::as_str).unwrap_or("") {
+                "red" => [1.0, 0.0, 0.0],
+                "green" => [0.0, 1.0, 0.0],
+                "blue" => [0.0, 0.0, 1.0],
+                "yellow" => [1.0, 1.0, 0.0],
+                "magenta" => [1.0, 0.0, 1.0],
+                "cyan" => [0.0, 1.0, 1.0],
+                "black" => [0.0, 0.0, 0.0],
+                _ => [1.0, 1.0, 1.0],
+            });
+        }
+        fn walk(p: &Param, out: &mut Vec<u64>, depth: usize) {
+            match p {
+                Param::Ref(r) => out.push(*r),
+                Param::List(v) | Param::Typed(_, v) if depth < 4 => v.iter().for_each(|x| walk(x, out, depth + 1)),
+                _ => {}
+            }
+        }
+        for r in &e.records {
+            for p in &r.params {
+                walk(p, &mut queue, 0);
+            }
+        }
+    }
+    None
+}
+
 
 pub fn step_import(text: &str) -> Result<StepImport> {
     step_import_with_workers(text, parallel::workers())

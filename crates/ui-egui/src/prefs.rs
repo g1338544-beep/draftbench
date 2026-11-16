@@ -397,8 +397,9 @@ preference_settings! {
     offer_recovery: bool = false, 1 => check("Offer to recover unsaved designs at start");
     /// The display options a new sketch starts with (the last sketch's: grid, snap, what is shown).
     sketch_display: Option<solidcraft_engine::sketch::SketchView> = None, 1;
-    /// Width of the model's edges on screen (logical pixels).
-    edge_width: f32 = 2.0, 1, accept(0.5..=8.0);
+    /// Width of the model's edges on screen (logical pixels): 0.25 mm by default, thin like other
+    /// CAD programs (owner: thicker than NX).
+    edge_width: f32 = 0.945, 1, accept(0.5..=8.0);
     /// Enter in a dialog previews the result first; Enter again applies it. (Off under test so the
     /// many tests that press Enter once keep applying.)
     enter_previews: bool = !cfg!(test), 1;

@@ -4334,7 +4334,7 @@ pub(crate) fn edge_width() -> f32 {
 }
 
 /// Edges a little over two pixels wide read clearly against shaded faces.
-const DEFAULT_EDGE_WIDTH: f32 = 2.0;
+const DEFAULT_EDGE_WIDTH: f32 = 0.945;
 
 static PART_COLOUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static SELECTION_COLOUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

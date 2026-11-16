@@ -125,43 +125,137 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
     }
-    // The file's named curves (another program's trimlines): a 3D sketch each, by its name.
+    // The file's curves (another program's trimlines): one 3D sketch per set and colour, drawn in
+    // that colour (owner: an NX file's 565 trimline pieces came in as 200 black sketches, the
+    // straight ones missing, and turning the view dragged).
     if !options.y_up && (path.to_ascii_lowercase().ends_with(".step") || path.to_ascii_lowercase().ends_with(".stp")) {
         let curves = solidcraft_io::vfs::read(path, solidcraft_io::MAX_STEP_BYTES)
             .ok()
             .and_then(|b| String::from_utf8(b).ok())
             .map(|t| solidcraft_kernel::step_curves(&t))
             .unwrap_or_default();
-        let mut made = Vec::new();
-        for (name, pts) in curves.into_iter().take(200) {
-            if s.execute("sketch.create", &json!({"plane": "XY", "name": name})).is_err() {
-                continue;
-            }
-            let _ = s.execute("sketch.options", &json!({"sketch_3d": true}));
-            let step = (pts.len() / 200).max(1);
-            let mut fit: Vec<[f64; 3]> = pts.iter().step_by(step).map(|q| [q.x, q.y, q.z]).collect();
-            if let Some(last) = pts.last()
-                && fit.last() != Some(&[last.x, last.y, last.z])
-            {
-                fit.push([last.x, last.y, last.z]);
-            }
-            // A curve's points must differ one from the next.
-            fit.dedup_by(|a, b| (a[0] - b[0]).abs() + (a[1] - b[1]).abs() + (a[2] - b[2]).abs() < 1e-6);
-            if fit.len() < 2 {
-                let _ = s.execute("sketch.finish", &json!({}));
-                continue;
-            }
-            let ok = s.execute("sketch.spline3d", &json!({"points": fit})).is_ok();
-            let _ = s.execute("sketch.finish", &json!({}));
-            if ok {
-                made.push(name);
-            }
-        }
+        let made = import_curves(s, curves);
         if !made.is_empty() {
             out["curves"] = json!(made);
         }
     }
     Ok(out)
+}
+
+/// Put a STEP file's curves into the design: one 3D sketch for each set name and colour (named
+/// after both, its lines drawn in the colour), each curve a 3D line when straight, else a 3D
+/// spline through at most 120 of its points (fewer where it is nearly straight). Returns the
+/// sketches made.
+fn import_curves(s: &mut Session, curves: Vec<(String, Vec<solidcraft_geom::Vec3>, Option<[f32; 3]>)>) -> Vec<String> {
+    // Group by set name (without the curve's own number) and colour, in file order.
+    let mut groups: Vec<(String, Option<[f32; 3]>, Vec<Vec<solidcraft_geom::Vec3>>)> = Vec::new();
+    for (name, pts, colour) in curves.into_iter().take(20_000) {
+        let set = match name.rfind(" (") {
+            Some(i) if name.ends_with(')') => name[..i].to_string(),
+            _ => name,
+        };
+        match groups.iter_mut().find(|g| g.0 == set && g.1 == colour) {
+            Some(g) => g.2.push(pts),
+            None => groups.push((set, colour, vec![pts])),
+        }
+    }
+    let mut made = Vec::new();
+    for (set, colour, list) in groups.into_iter().take(200) {
+        let hex = colour.map(|c| format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8));
+        let label = match hex.as_deref() {
+            Some(h) => format!("{set} {}", colour_name(h)),
+            None => set.clone(),
+        };
+        let Ok(r) = s.execute("sketch.create", &json!({"plane": "XY", "name": label})) else { continue };
+        let _ = s.execute("sketch.options", &json!({"sketch_3d": true}));
+        if let Some(h) = &hex {
+            let _ = s.execute("sketch.color", &json!({"color": h}));
+        }
+        let depth = s.undo.len();
+        let mut any = false;
+        for pts in list {
+            let fit = thin(&pts, 120);
+            if fit.len() < 2 {
+                continue;
+            }
+            let straight = fit.len() == 2;
+            let cmd = if straight { "sketch.line3d" } else { "sketch.spline3d" };
+            any |= s.execute(cmd, &json!({"points": fit})).is_ok();
+        }
+        // One step for the sketch, not one per curve.
+        s.undo.truncate(depth);
+        let _ = s.execute("sketch.finish", &json!({}));
+        if any {
+            made.push(r.get("name").and_then(Value::as_str).unwrap_or(&label).to_string());
+        }
+    }
+    made
+}
+
+/// A curve's points thinned to at most `max`: the ends kept, points dropped where the curve runs
+/// within 0.002 mm of straight (two points left for a straight piece), consecutive repeats removed.
+fn thin(pts: &[solidcraft_geom::Vec3], max: usize) -> Vec<[f64; 3]> {
+    let mut keep = vec![false; pts.len()];
+    if let (Some(f), Some(l)) = (keep.first_mut(), Some(pts.len().saturating_sub(1))) {
+        *f = true;
+        if let Some(k) = keep.get_mut(l) {
+            *k = true;
+        }
+    }
+    // Douglas–Peucker, iterative.
+    let mut stack = vec![(0usize, pts.len().saturating_sub(1))];
+    while let Some((a, b)) = stack.pop() {
+        if b <= a + 1 {
+            continue;
+        }
+        let (Some(&pa), Some(&pb)) = (pts.get(a), pts.get(b)) else { continue };
+        let ab = pb - pa;
+        let l2 = ab.dot(ab);
+        let (mut far, mut at) = (0.0, a);
+        for (k, q) in pts.iter().enumerate().take(b).skip(a + 1) {
+            let d = if l2 > 1e-24 { (*q - pa - ab * ((*q - pa).dot(ab) / l2)).len() } else { (*q - pa).len() };
+            if d > far {
+                far = d;
+                at = k;
+            }
+        }
+        if far > 0.002
+            && let Some(k) = keep.get_mut(at)
+        {
+            *k = true;
+            stack.push((a, at));
+            stack.push((at, b));
+        }
+    }
+    let mut out: Vec<[f64; 3]> = pts.iter().zip(&keep).filter(|(_, k)| **k).map(|(q, _)| [q.x, q.y, q.z]).collect();
+    if out.len() > max {
+        let step = out.len().div_ceil(max);
+        let last = out.last().copied();
+        out = out.into_iter().step_by(step).collect();
+        if let Some(l) = last
+            && out.last() != Some(&l)
+        {
+            out.push(l);
+        }
+    }
+    out.dedup_by(|a, b| (a[0] - b[0]).abs() + (a[1] - b[1]).abs() + (a[2] - b[2]).abs() < 1e-6);
+    out
+}
+
+/// A plain name for a curve colour (the pre-defined STEP colours), else its hex code.
+fn colour_name(hex: &str) -> String {
+    match hex {
+        "#ff0000" => "red",
+        "#00ff00" => "green",
+        "#0000ff" => "blue",
+        "#ffff00" => "yellow",
+        "#ff00ff" => "magenta",
+        "#00ffff" => "cyan",
+        "#000000" => "black",
+        "#ffffff" => "white",
+        other => other,
+    }
+    .to_string()
 }
 
 /// The bodies an import feature built, by name.
