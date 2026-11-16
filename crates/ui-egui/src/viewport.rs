@@ -1032,8 +1032,8 @@ fn finished_sketch_lines(
     ss: &solidcraft_engine::doc::SolvedSketch,
     proj: &Proj,
     unit: f64,
-) -> std::sync::Arc<Vec<(Vec<Vec3>, solidcraft_engine::view::Rgb, bool)>> {
-    type Lines = std::sync::Arc<Vec<(Vec<Vec3>, solidcraft_engine::view::Rgb, bool)>>;
+) -> std::sync::Arc<Vec<(Vec<Vec3>, solidcraft_engine::render::Rgb, bool)>> {
+    type Lines = std::sync::Arc<Vec<(Vec<Vec3>, solidcraft_engine::render::Rgb, bool)>>;
     static CACHE: std::sync::Mutex<Option<std::collections::HashMap<u64, (u64, Lines)>>> = std::sync::Mutex::new(None);
     let ppp = app.viewport.pixels_per_point();
     let mut h = std::collections::hash_map::DefaultHasher::new();

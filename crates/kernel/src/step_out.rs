@@ -1945,7 +1945,7 @@ mod tests {
     /// follow), and each reads back.
     #[test]
     fn step_versions_name_their_schema_and_read_back() {
-        let b = crate::box_solid(10.0, 20.0, 5.0).unwrap();
+        let b = crate::box_solid(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::new(10.0, 20.0, 5.0)).unwrap();
         let text = step_export_bodies(&[ExportBody { name: "Part".into(), body: &b, color: Some([1.0, 0.0, 0.0]) }], &StepHeader::default()).unwrap();
         for (schema, line, app) in [
             ("ap242", "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF", "managed model based 3d engineering"),
