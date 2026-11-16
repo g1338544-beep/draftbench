@@ -14,7 +14,7 @@ env:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -22,7 +22,12 @@ jobs:
       - name: Build
         shell: bash
         # The commit goes into the app (top right, next to the version), so which build is running is plain to see.
-        run: DRAFTBENCH_BUILD="${GITHUB_SHA::7}" cargo build --profile release-pc -p solidcraft -p solidcraft-cli
+        run: DRAFTBENCH_BUILD="${GITHUB_SHA::7}" cargo build --profile release-pc -p solidcraft
+      - name: Build the command-line tools
+        shell: bash
+        # The Assistant's design tools: the ordinary release profile (thin LTO) is fast enough
+        # for them and keeps the job well inside its time limit (the full-LTO build of both ran out).
+        run: cargo build --release -p solidcraft-cli
       - name: Package (no install)
         shell: pwsh
         run: |
@@ -31,7 +36,7 @@ jobs:
           New-Item -ItemType Directory -Path pack, portable | Out-Null
           Copy-Item target/release-pc/solidcraft.exe "portable/DraftNew-$sha.exe"
           # The Assistant starts its design tools from solidcraft-cli.exe next to the app.
-          Copy-Item target/release-pc/solidcraft-cli.exe "portable/solidcraft-cli.exe"
+          Copy-Item target/release/solidcraft-cli.exe "portable/solidcraft-cli.exe"
           Compress-Archive -Path portable/* -DestinationPath "pack/DraftNew-$sha-portable.zip"
       - uses: actions/upload-artifact@v4
         with:
