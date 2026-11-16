@@ -643,7 +643,10 @@ pub fn shown(app: &SolveApp) -> bool {
 
 /// The Assistant button in the application bar is shown (honours the existing preference).
 pub fn app_bar_button_shown(app: &SolveApp) -> bool {
-    shown(app) && app.preferences.ai_toolbar_button
+    // The browser build has no agent to start, but its own chat with Claude (`ai_web`) when it
+    // can post to the model (owner: "where do I type to the AI" on the web).
+    let available = shown(app) || (app.preferences.ai_features && app.services.ai_post.is_some());
+    available && app.preferences.ai_toolbar_button
 }
 
 /// The application bar's status mark, independent of panel layout and painting.

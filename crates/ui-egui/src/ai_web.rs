@@ -362,6 +362,8 @@ mod tests {
             ..Default::default()
         };
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), services);
+        // Owner: the web app shows the assistant button (it was hidden in the browser build).
+        assert!(crate::agent_chat::app_bar_button_shown(&app), "the button shows where the app can post to the model");
         let ctx = egui::Context::default();
         app.ai_web.key = "sk-test".into();
         prompt(&mut app, &ctx, "a box please");
