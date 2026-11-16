@@ -927,19 +927,35 @@ fn make_wnp_cabinet_example() {
     cut(&mut s, &handle, (59.0, 77.0), (-23.0, -14.0), (345.0, 430.0));
     run(&mut s, "solid.cylinder", json!({"diameter": 12, "height": 4, "base": [68, -22, 452], "axis": [0, -1, 0], "operation": "join", "targets": [handle]}));
     colours.push(("Handle".into(), "#2a2a2c"));
-    for (k, (z0, z1)) in [(1, (470.0, 765.0)), (2, (35.0, 330.0))] {
+    // The rod lock (the drawing's dashed rods, owner's analysis): two flat bars 16×3 from the
+    // handle's cam up and down, each held by a U guide on two studs, a pin at the end going back
+    // into a keeper on the body's frame: the door locks top, middle and bottom.
+    for (k, (z0, z1, cam, tip)) in [(1, (470.0, 790.0, 475.0, 778.0)), (2, (10.0, 330.0, 325.0, 22.0))] {
         let name = format!("Lock Rod {k}");
-        part(&mut s, &name, "WNP-05", "Lock rod D8", "Steel Zn plated");
-        let r = mk(&mut s, "solid.cylinder", json!({"diameter": 8, "height": z1 - z0, "base": [66, 12, z0], "axis": [0, 0, 1], "operation": "new"}));
+        part(&mut s, &name, "WNP-05", "Lock rod, flat bar 16x3", "Steel Zn plated");
+        let r = mk(&mut s, "solid.box", bx((58.0, 74.0), (9.0, 12.0), (z0, z1)));
+        // The pin to the handle's cam, and the locking pin at the end.
+        run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 7.5, "base": [66, 9, cam], "axis": [0, -1, 0], "operation": "join", "targets": [r]}));
+        run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 12, "base": [66, 12, tip], "axis": [0, 1, 0], "operation": "join", "targets": [r]}));
         colours.push((name, "#b8bcc4"));
         hide.push(r);
     }
     for (k, zc) in [(1, 680.0), (2, 120.0)] {
         let name = format!("Rod Guide {k}");
-        part(&mut s, &name, "WNP-11", "Rod guide", "POM");
-        let gd = mk(&mut s, "solid.box", bx((56.0, 76.0), (t, 8.0), (zc - 10.0, zc + 10.0)));
-        colours.push((name, "#f2f2f2"));
+        part(&mut s, &name, "WNP-11", "Rod guide U, 2x M5 stud", "Steel Zn plated");
+        let gd = mk(&mut s, "solid.box", bx((52.0, 80.0), (t, 14.0), (zc - 12.0, zc + 12.0)));
+        cut(&mut s, &gd, (57.0, 75.0), (t - 1.0, 12.5), (zc - 13.0, zc + 13.0));
+        colours.push((name, "#b8bcc4"));
         hide.push(gd);
+    }
+    // The keepers on the frame, top and bottom, slotted for the rods' pins.
+    for (k, (z0, z1)) in [(1, (770.0, 786.0)), (2, (14.0, 30.0))] {
+        let name = format!("Keeper {k}");
+        part(&mut s, &name, "WNP-12", "Rod keeper", "Zinc die cast");
+        let kp = mk(&mut s, "solid.box", bx((56.0, 76.0), (22.0, 27.0), (z0, z1)));
+        let (s0, s1) = if k == 1 { (z0 - 1.0, z1 - 4.0) } else { (z0 + 4.0, z1 + 1.0) };
+        cut(&mut s, &kp, (62.5, 69.5), (21.0, 24.5), (s0, s1));
+        colours.push((name, "#2a2a2c"));
     }
 
     // Concealed hinges at 80, 400 and 720 (the drawing's 80 / 320 / 320 / 80): a pin inside the
