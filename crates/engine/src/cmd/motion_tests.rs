@@ -859,6 +859,8 @@ fn make_wnp_cabinet_example() {
     for (x, z) in [(100.0, 100.0), (500.0, 100.0), (100.0, 700.0), (500.0, 700.0)] {
         hole(&mut s, &body, [x, d + 1.0, z], [0.0, -1.0, 0.0], 10.0, t + 2.0);
     }
+    // An earth stud on the floor inside, front left.
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 15, "base": [60, 60, t], "axis": [0, 0, 1], "operation": "join", "targets": [body]}));
     colours.push(("Body", "#d6d6d0"));
 
     // The door: a tray 27 deep, open at the back.
@@ -867,38 +869,44 @@ fn make_wnp_cabinet_example() {
     cut(&mut s, &dr, (t, w - t), (t, door + 1.0), (t, h - t));
     // Ø23 hole 120 below the top, centred (a pilot light or switch).
     hole(&mut s, &dr, [300.0, -1.0, h - 120.0], [0.0, 1.0, 0.0], 23.0, t + 2.0);
-    // The handle's opening, left side.
-    cut(&mut s, &dr, (25.0, 45.0), (-1.0, t + 1.0), (430.0, 530.0));
-    // Two stiffeners across the inside (U channels), 120 below the top and 100 above the bottom.
-    for zc in [h - 120.0, 100.0] {
-        join(&mut s, &dr, (60.0, 540.0), (t, 16.0), (zc - 10.0, zc + 10.0));
-        cut(&mut s, &dr, (60.0 - 1.0, 540.0 + 1.0), (t, 16.0 - t), (zc - 10.0 + t, zc + 10.0 - t));
+    // The handle's opening: left, at mid height (the drawing's front view).
+    cut(&mut s, &dr, (58.0, 78.0), (-1.0, t + 1.0), (345.0, 455.0));
+    // Two stiffeners across the inside (U channels) near the top and the bottom, 125…560 across
+    // (the dashed shapes of the front view).
+    for zc in [h - 58.0, 58.0] {
+        join(&mut s, &dr, (125.0, 560.0), (t, 16.0), (zc - 12.0, zc + 12.0));
+        cut(&mut s, &dr, (125.0 - 1.0, 560.0 + 1.0), (t, 16.0 - t), (zc - 12.0 + t, zc + 12.0 - t));
     }
+    // An earth stud inside the door, bottom left.
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 15, "base": [110, t, 110], "axis": [0, 1, 0], "operation": "join", "targets": [dr]}));
     colours.push(("Door", "#d6d6d0"));
 
     // A4 document pocket inside the door: 300 wide, 250 high, 50 deep, 100 above the bottom.
     part(&mut s, "Document Pocket", "WNP-03", "A4 document pocket D50", "PP 1.0");
-    let pocket = mk(&mut s, "solid.box", bx((150.0, 450.0), (16.5, 66.5), (130.0, 380.0)));
-    cut(&mut s, &pocket, (151.0, 449.0), (16.5 - 1.0, 65.5), (131.0, 381.0));
+    let pocket = mk(&mut s, "solid.box", bx((150.0, 450.0), (16.5, 66.5), (100.0, 350.0)));
+    cut(&mut s, &pocket, (151.0, 449.0), (16.5 - 1.0, 65.5), (101.0, 351.0));
+    // The V notch at its top (to reach the papers), as drawn.
+    run(&mut s, "solid.cylinder", json!({"diameter": 80, "height": 52, "base": [300, 15.5, 350], "axis": [0, 1, 0], "operation": "cut", "targets": [pocket]}));
     colours.push(("Document Pocket", "#3c3c3c"));
 
     // The handle (swing handle) and its lock rod.
     part(&mut s, "Handle", "WNP-04", "Swing handle with key lock", "Zinc die cast");
-    let handle = mk(&mut s, "solid.box", bx((20.0, 50.0), (-22.0, 0.0), (415.0, 545.0)));
-    cut(&mut s, &handle, (26.0, 44.0), (-23.0, -14.0), (430.0, 510.0));
-    run(&mut s, "solid.cylinder", json!({"diameter": 12, "height": 4, "base": [35, -22, 528], "axis": [0, -1, 0], "operation": "join", "targets": [handle]}));
+    let handle = mk(&mut s, "solid.box", bx((53.0, 83.0), (-22.0, 0.0), (330.0, 470.0)));
+    cut(&mut s, &handle, (59.0, 77.0), (-23.0, -14.0), (345.0, 430.0));
+    run(&mut s, "solid.cylinder", json!({"diameter": 12, "height": 4, "base": [68, -22, 452], "axis": [0, -1, 0], "operation": "join", "targets": [handle]}));
     colours.push(("Handle", "#2a2a2c"));
     part(&mut s, "Lock Rod", "WNP-05", "Lock rod D8", "Steel Zn plated");
-    mk(&mut s, "solid.cylinder", json!({"diameter": 8, "height": 600, "base": [35, 22, 100], "axis": [0, 0, 1], "operation": "new"}));
+    // Top to bottom past the handle (the front view's dash-dot line), clear of the stiffeners.
+    mk(&mut s, "solid.cylinder", json!({"diameter": 8, "height": 680, "base": [66, 22, 60], "axis": [0, 0, 1], "operation": "new"}));
     colours.push(("Lock Rod", "#b8bcc4"));
 
-    // Hinges on the right, 80 from the top and the bottom (a knuckle on the outside).
-    for (k, zc) in [(1, 80.0), (2, h - 80.0)] {
+    // Hinges on the right at 80, 400 and 720 (the drawing's 80 / 320 / 320 / 80), knuckles outside.
+    for (k, zc) in [(1, 80.0), (2, 400.0), (3, h - 80.0)] {
         let name = format!("Hinge {k}");
-        part(&mut s, &name, "WNP-06", "Hinge 50 (pair)", "Zinc die cast");
+        part(&mut s, &name, "WNP-06", "Hinge 50", "Zinc die cast");
         let hg = mk(&mut s, "solid.cylinder", json!({"diameter": 10, "height": 50, "base": [w + 5.0, door, zc - 25.0], "axis": [0, 0, 1], "operation": "new"}));
         join(&mut s, &hg, (w, w + 5.0), (door - 12.0, door + 12.0), (zc - 25.0, zc + 25.0));
-        colours.push((if k == 1 { "Hinge 1" } else { "Hinge 2" }, "#2a2a2c"));
+        colours.push((["Hinge 1", "Hinge 2", "Hinge 3"][k - 1], "#2a2a2c"));
     }
 
     // The door's flat gasket, against the body's return.
@@ -921,13 +929,15 @@ fn make_wnp_cabinet_example() {
     // Blank gland plates under the openings, each with six M5 screws.
     for (k, cx) in [(1, 150.0), (2, 450.0)] {
         let name = format!("Gland Plate {k}");
-        part(&mut s, &name, "WNP-10", "Gland plate 244x104, t2.0", "SPCC t2.0");
-        let gp = mk(&mut s, "solid.box", bx((cx - 122.0, cx + 122.0), (d - 80.0 - 52.0, d - 80.0 + 52.0), (-2.0, 0.0)));
-        for (dx, dy) in [(-112.0, -42.0), (0.0, -42.0), (112.0, -42.0), (-112.0, 42.0), (0.0, 42.0), (112.0, 42.0)] {
+        part(&mut s, &name, "WNP-10", "Gland plate 236x104 R10, t2.0", "SPCC t2.0");
+        let gp = mk(&mut s, "solid.box", bx((cx - 118.0, cx + 118.0), (d - 80.0 - 52.0, d - 80.0 + 52.0), (-2.0, 0.0)));
+        let corners: Vec<[f64; 3]> = [(-118.0, -52.0), (118.0, -52.0), (-118.0, 52.0), (118.0, 52.0)].iter().map(|(dx, dy)| [cx + dx, d - 80.0 + dy, -1.0]).collect();
+        run(&mut s, "solid.fillet", json!({"body": gp, "edges": corners, "radius": 10}));
+        for (dx, dy) in [(-106.0, -40.0), (106.0, -40.0), (-106.0, 40.0), (106.0, 40.0)] {
             hole(&mut s, &gp, [cx + dx, d - 80.0 + dy, -3.0], [0.0, 0.0, 1.0], 5.5, 4.0);
         }
         colours.push((if k == 1 { "Gland Plate 1" } else { "Gland Plate 2" }, "#d6d6d0"));
-        for (j, (dx, dy)) in [(-112.0, -42.0), (0.0, -42.0), (112.0, -42.0), (-112.0, 42.0), (0.0, 42.0), (112.0, 42.0)].into_iter().enumerate() {
+        for (j, (dx, dy)) in [(-106.0, -40.0), (106.0, -40.0), (-106.0, 40.0), (106.0, 40.0)].into_iter().enumerate() {
             let sname = format!("Screw M5 {k}.{}", j + 1);
             part(&mut s, &sname, "ISO7380-M5x10", "Button head screw M5x10", "Steel Zn plated");
             let head = mk(&mut s, "solid.cylinder", json!({"diameter": 9.5, "height": 2.8, "base": [cx + dx, d - 80.0 + dy, -2.0], "axis": [0, 0, -1], "operation": "new"}));
@@ -942,7 +952,7 @@ fn make_wnp_cabinet_example() {
         let _ = s.execute("appearance.assign", &json!({"components": [format!("Stud {k}")], "color": "#b8bcc4"}));
     }
     for k in 1..=2 {
-        for j in 1..=6 {
+        for j in 1..=4 {
             let _ = s.execute("appearance.assign", &json!({"components": [format!("Screw M5 {k}.{j}")], "color": "#2a2a2c"}));
         }
     }
@@ -955,7 +965,7 @@ fn make_wnp_cabinet_example() {
     }
     let base = out.join("Cabinet-WNP-600x800x300");
     run(&mut s, "file.save", json!({"path": base.with_extension("draftnew").to_string_lossy()}));
-    for schema in ["ap214", "ap242"] {
+    for schema in ["ap214"] {
         let p = out.join(format!("Cabinet-WNP-600x800x300-{}.step", schema.to_uppercase()));
         run(&mut s, "file.export", json!({"path": p.to_string_lossy(), "schema": schema}));
     }
