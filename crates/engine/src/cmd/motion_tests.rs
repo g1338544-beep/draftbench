@@ -913,9 +913,10 @@ fn make_wnp_cabinet_example() {
     // A4 document pocket inside the door: 300 × 250, 50 deep, 100 above the bottom, the bottom
     // corners cut and a V notch at the top; open at the top.
     part(&mut s, "Document Pocket", "WNP-03", "A4 document pocket D50", "PP 1.0");
-    let outline = [(150.0, 140.0), (190.0, 100.0), (410.0, 100.0), (450.0, 140.0), (450.0, 350.0), (318.0, 350.0), (300.0, 330.0), (282.0, 350.0), (150.0, 350.0)];
+    // The V: 80 wide, 30 deep; the bottom corners cut 50 across, 80 up (measured off the drawing).
+    let outline = [(150.0, 180.0), (200.0, 100.0), (400.0, 100.0), (450.0, 180.0), (450.0, 350.0), (340.0, 350.0), (300.0, 320.0), (260.0, 350.0), (150.0, 350.0)];
     let pocket = prism_xz(&mut s, "Pocket outline", &outline, 16.5, 66.5, None);
-    let inside = [(151.0, 140.4), (190.4, 101.0), (409.6, 101.0), (449.0, 140.4), (449.0, 400.0), (151.0, 400.0)];
+    let inside = [(151.0, 180.3), (200.6, 101.0), (399.4, 101.0), (449.0, 180.3), (449.0, 400.0), (151.0, 400.0)];
     prism_xz(&mut s, "Pocket inside", &inside, 15.5, 65.5, Some(&pocket));
     colours.push(("Document Pocket".into(), "#3c3c3c"));
     hide.push(pocket.clone());
