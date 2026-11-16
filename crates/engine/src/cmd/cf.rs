@@ -669,6 +669,22 @@ mod tests {
     /// Owner: trimlines at several gaps. A 40 × 20 box's top: for the gaps 1 and 3 a 3D sketch each,
     /// named for its gap, its curve that far in from the top's edge all round (a rectangle 38 × 18,
     /// then 34 × 14); a range 0.5 to 2 by 0.5 gives four.
+    /// A real file's curves through the import (set STEP_CURVES_FILE; not committed data).
+    #[test]
+    #[ignore]
+    fn import_curves_of_a_file() {
+        let Ok(path) = std::env::var("STEP_CURVES_FILE") else { return };
+        let mut s = Session::default();
+        let t = std::time::Instant::now();
+        let r = s.execute("file.insert_step", &json!({"path": path})).unwrap();
+        eprintln!("import {:?}: curves {} bodies {}", t.elapsed(), r["curves"], r["bodies"].as_array().map_or(0, Vec::len));
+        for f in &s.doc.features {
+            if let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &f.kind {
+                eprintln!("sketch {} colour {:?} curves {}", f.name, sketch.view.color, sketch.curves.len());
+            }
+        }
+    }
+
     #[test]
     fn trimlines_at_several_gaps() {
         let mut s = Session::default();

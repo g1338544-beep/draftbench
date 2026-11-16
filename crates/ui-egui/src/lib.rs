@@ -1681,6 +1681,8 @@ impl SolveApp {
             },
             "home" => {
                 to.set_view(StandardView::Iso);
+                // With the WCS moved: the isometric view of its own axes (owner).
+                to = viewport::view_with_wcs(self, to);
                 self.pending_fit = Some((to, viewport::view_bounds(self), true));
                 to = self.fitted(to);
             }

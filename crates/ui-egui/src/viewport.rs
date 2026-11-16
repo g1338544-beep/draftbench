@@ -1022,6 +1022,60 @@ fn continuity_color(t: &Tokens, verdict: solidcraft_engine::kernel::SeamVerdict)
 }
 
 /// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
+/// A finished sketch's lines in world space, sampled once for the model and the zoom (a factor
+/// of two either way) and kept while the view turns (owner: turning a design with an NX file's
+/// hundreds of trimlines dragged, every curve sampled again for every frame). Not clipped to the
+/// view, so turning never shows a curve cut short.
+fn finished_sketch_lines(
+    app: &SolveApp,
+    sid: u64,
+    ss: &solidcraft_engine::doc::SolvedSketch,
+    proj: &Proj,
+    unit: f64,
+) -> std::sync::Arc<Vec<(Vec<Vec3>, solidcraft_engine::view::Rgb, bool)>> {
+    type Lines = std::sync::Arc<Vec<(Vec<Vec3>, solidcraft_engine::view::Rgb, bool)>>;
+    static CACHE: std::sync::Mutex<Option<std::collections::HashMap<u64, (u64, Lines)>>> = std::sync::Mutex::new(None);
+    let ppp = app.viewport.pixels_per_point();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
+    (ss.plane.origin.x.to_bits(), ss.plane.normal().z.to_bits()).hash(&mut h);
+    (app.cam.half_height().max(1e-9).log2().floor() as i64).hash(&mut h);
+    unit.to_bits().hash(&mut h);
+    ppp.to_bits().hash(&mut h);
+    let key = h.finish();
+    if let Ok(cache) = CACHE.lock()
+        && let Some((k, lines)) = cache.as_ref().and_then(|c| c.get(&sid))
+        && *k == key
+    {
+        return lines.clone();
+    }
+    let view = crate::sketch_display::pixel_view(proj, ppp);
+    let mut budget = solidcraft_engine::render::SamplingBudget::new(400_000, 2_000_000);
+    let lines: Lines = std::sync::Arc::new(sketch_lines_with_sampler(&ss.sketch, &ss.plane, false, &ss.report.curve_determined, |sk, index, plane| {
+        let segs = sk.exact_segs(index).unwrap_or_else(|| sk.segs(index));
+        let mut parts: Vec<Vec<Vec3>> = Vec::new();
+        for seg in &segs {
+            let path = solidcraft_engine::render::sample_segment_unclipped(seg, plane, &view, &mut budget);
+            for part in path.parts {
+                // Pieces of one curve run on from each other.
+                match parts.last_mut() {
+                    Some(last) if last.last().zip(part.first()).is_some_and(|(a, b)| a.dist(*b) < 1e-9) => last.extend(part.into_iter().skip(1)),
+                    _ => parts.push(part),
+                }
+            }
+        }
+        parts
+    }));
+    if let Ok(mut cache) = CACHE.lock() {
+        let map = cache.get_or_insert_with(std::collections::HashMap::new);
+        if map.len() > 4096 {
+            map.clear();
+        }
+        map.insert(sid, (key, lines.clone()));
+    }
+    lines
+}
+
 pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
@@ -1098,9 +1152,14 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         }
         // Construction curves are dashed, centerlines dash-dot (lengths follow the grid).
         let unit = grid_step(app.cam.half_height()).0;
-        for (pts, col, cons) in sketch_lines_with_sampler(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, |_, index, plane| {
-            crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone()
-        }) {
+        let lines = if active || ss.sketch.curves.iter().any(|c| c.infinite) {
+            std::sync::Arc::new(sketch_lines_with_sampler(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, |_, index, plane| {
+                crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone()
+            }))
+        } else {
+            finished_sketch_lines(app, sid, ss, proj, unit)
+        };
+        for (pts, col, cons) in lines.iter().cloned() {
             let segs = sketch_segments(
                 &pts,
                 if !cons {
@@ -1113,7 +1172,9 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
                 unit,
             );
             for (a, b) in segs {
-                sc.line(a.to_f32(), b.to_f32(), sketch_color(&tk, col), if cons { 1.2 } else { 2.0 }, active);
+                // A finished sketch's lines are thin, like the model's edges (owner: thicker than NX).
+                let width = if active { if cons { 1.2 } else { 2.0 } } else { edge_width().max(1.0) };
+                sc.line(a.to_f32(), b.to_f32(), sketch_color(&tk, col), width, active);
             }
         }
     }

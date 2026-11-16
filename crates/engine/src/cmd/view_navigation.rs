@@ -95,7 +95,7 @@ fn history_layout(_s: &mut Session, p: &Value) -> Result<Value> {
     Ok(Value::Object(result))
 }
 
-fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
+fn navigate(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.navigate";
     let mut cam: Camera =
         serde_json::from_value(p.get("camera").cloned().ok_or_else(|| bad(cmd, "camera is required"))?).map_err(|_| bad(cmd, "invalid camera"))?;
@@ -145,6 +145,16 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             Some("counterclockwise") => cam.roll = (cam.roll - FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
             Some("home") => {
                 cam.set_view(StandardView::Iso);
+                // With the WCS moved, Home is the isometric view of its own axes (owner: after
+                // moving the origin, Iso still looked at the world's).
+                if let Some(w) = s.wcs.filter(|w| (w.origin - solidcraft_geom::Vec3::ZERO).len() > 1e-9 || (w.x - solidcraft_geom::Vec3::X).len() > 1e-9 || (w.y - solidcraft_geom::Vec3::Y).len() > 1e-9)
+                    && let Some(back) = {
+                        let b = cam.back();
+                        (w.x * b.x + w.y * b.y + w.z() * b.z).normalized()
+                    }
+                {
+                    cam = cam.looking_from(back);
+                }
                 fit = true;
             }
             Some("fit") => fit = true,
@@ -229,6 +239,24 @@ mod tests {
     use super::*;
     use solidcraft_geom::Vec3;
     use solidcraft_render::UpAxis;
+
+    /// Owner: with the origin (WCS) moved and turned, Home shows the isometric view of the WCS's
+    /// own axes, not the world's.
+    #[test]
+    fn home_is_the_iso_view_of_a_moved_wcs() {
+        let mut s = Session::default();
+        let cam = Camera::default();
+        let world = navigate(&mut s, &json!({"camera": cam, "action": "home"})).unwrap();
+        let world: Camera = serde_json::from_value(world["camera"].clone()).unwrap();
+        // The WCS a quarter turn about Z and moved: XC along world Y.
+        s.wcs = Some(crate::cmd::wcs::Wcs { origin: Vec3::new(50.0, 20.0, 0.0), x: Vec3::Y, y: -Vec3::X });
+        let moved = navigate(&mut s, &json!({"camera": cam, "action": "home"})).unwrap();
+        let moved: Camera = serde_json::from_value(moved["camera"].clone()).unwrap();
+        let b = world.back();
+        let want = (Vec3::Y * b.x - Vec3::X * b.y + Vec3::Z * b.z).normalized().unwrap();
+        assert!(moved.back().dist(want) < 1e-9, "{:?} vs {want:?}", moved.back());
+        assert!(world.back().dist(want) > 0.5, "not the world's iso");
+    }
 
     #[test]
     fn look_at_planes_uses_the_first_supported_selection_and_flips_on_repeat() {
