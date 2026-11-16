@@ -1230,8 +1230,8 @@ fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTreeMap<Strin
 
 /// A feature's fingerprint in the chain after `prev`: its own inputs, where it is placed, and
 /// the sheet metal or plastic rules it takes defaults from.
-fn chain_fingerprint(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, prev: u64, rolled_back: bool, steps: &StepDigests) -> u64 {
-    let mut fp = fingerprint(prev, f, vals, rolled_back, steps) ^ placement_digest(doc, f);
+fn chain_fingerprint(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, prev: u64, rolled_back: bool, steps: &StepDigests, before: &ModelState) -> u64 {
+    let mut fp = fingerprint(prev, f, vals, rolled_back, steps) ^ placement_digest(doc, f, before);
     // Sheet metal features also depend on the rules (and the parameters they use).
     if f.kind.is_sheet() {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1318,7 +1318,7 @@ fn cache_key(f: &Feature, chain_fp: u64, local: u64, ctx: u64, state: &ModelStat
 
 /// Where components are placed, for a sketch that sees other components' geometry (on a face,
 /// or with projections): it is resolved in its own component's view of them.
-fn placement_digest(doc: &Document, f: &Feature) -> u64 {
+fn placement_digest(doc: &Document, f: &Feature, before: &ModelState) -> u64 {
     let path = match &f.kind {
         FeatureKind::Sweep { path_sketch, .. }
         | FeatureKind::SurfaceSweep { path_sketch, .. }
@@ -1393,7 +1393,7 @@ fn placement_digest(doc: &Document, f: &Feature) -> u64 {
     // A combine moves tools placed differently from its target into the target's frame (#3383).
     let combine = matches!(&f.kind, FeatureKind::Combine { .. });
     if !to_object && !combine && drawn_tools_change_bodies(&f.kind) {
-        return drawn_tools_digest(doc, f);
+        return drawn_tools_digest(doc, f, before);
     }
     if to_object || combine {
         return if doc.occurrences.is_empty() && doc.body_offsets.is_empty() { 0 } else { placements_hash(doc) };
@@ -1506,7 +1506,8 @@ impl Model {
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev_fp = first.checked_sub(1).and_then(|i| self.results.get(i)).map_or(0, |r| r.fingerprint);
         for (i, f) in doc.features.iter().enumerate().skip(first) {
-            prev_fp = chain_fingerprint(doc, &vals, f, prev_fp, i >= marker, &steps);
+            let before = self.state_before(i);
+            prev_fp = chain_fingerprint(doc, &vals, f, prev_fp, i >= marker, &steps, &before);
             if let Some(r) = self.results.get_mut(i).filter(|r| r.id == f.id) {
                 r.fingerprint = prev_fp;
             }
@@ -1536,6 +1537,12 @@ impl Model {
         self.kept.0.clone()
     }
 
+    /// The model as it stood before feature `i` was evaluated: the last result before it that
+    /// built something (the empty model before the first).
+    fn state_before(&self, i: usize) -> Arc<ModelState> {
+        self.results.iter().take(i).rev().find(|r| !r.skipped).map_or_else(|| self.empty.clone(), |r| r.state.clone())
+    }
+
     /// Whether the results are `doc`'s evaluation: one per feature, each on the inputs `doc`
     /// gives it, none stale, so [`Model::evaluate`] would keep every one of them. A document
     /// changed without an evaluation since is not.
@@ -1548,7 +1555,7 @@ impl Model {
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev = 0;
         doc.features.iter().zip(&self.results).enumerate().all(|(i, (f, r))| {
-            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &steps);
+            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &steps, &self.state_before(i));
             r.id == f.id && r.fingerprint == prev
         })
     }
@@ -1577,7 +1584,7 @@ impl Model {
             let rolled_back = i >= marker;
             // Opening was cancelled: the rest is skipped and the result discarded.
             let cancelled = watched.step(i);
-            let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.step_digests);
+            let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.step_digests, &state);
             prev_fp = fp;
             if reuse
                 && let Some(old) = self.results.get(i)
@@ -1608,7 +1615,7 @@ impl Model {
                 continue;
             }
             // The same feature on the same inputs: its earlier result.
-            let key = cache_key(f, fp, fingerprint(0, f, &vals, false, &self.step_digests) ^ placement_digest(doc, f), ctx, &state);
+            let key = cache_key(f, fp, fingerprint(0, f, &vals, false, &self.step_digests) ^ placement_digest(doc, f, &state), ctx, &state);
             let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
             if !self.no_cache
                 && let Some(c) = self.cache.lock().ok().and_then(|mut m| m.get(key)).or_else(|| kept.and_then(|k| k.get(key)))
@@ -1874,9 +1881,13 @@ impl Model {
         let marker = doc.marker.unwrap_or(usize::MAX);
         self.step_digests = StepDigests::of(doc, &self.step_digests);
         let mut prev = 0;
+        let mut before = self.empty.clone();
         for (i, (r, f)) in self.results.iter_mut().zip(&doc.features).enumerate() {
-            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &self.step_digests);
+            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &self.step_digests, &before);
             r.fingerprint = prev;
+            if !r.skipped {
+                before = r.state.clone();
+            }
         }
     }
 }
@@ -6713,7 +6724,7 @@ impl Drop for ToolFrames {
 /// [`placement_digest`] of a feature with drawn tools: the placements, when it names the bodies
 /// it changes (they may lie in another component, where its tools meet them, #3383); nothing
 /// otherwise, as it then changes only bodies of its own component.
-fn drawn_tools_digest(doc: &Document, f: &Feature) -> u64 {
+fn drawn_tools_digest(doc: &Document, f: &Feature, before: &ModelState) -> u64 {
     let targets = match &f.kind {
         FeatureKind::Extrude { targets, .. }
         | FeatureKind::Revolve { targets, .. }
@@ -6743,13 +6754,13 @@ fn drawn_tools_digest(doc: &Document, f: &Feature) -> u64 {
         }
         _ => f.participants.clone(),
     };
-    relative_placements_digest(doc, f, &names).unwrap_or_else(|| placements_hash(doc))
+    relative_placements_digest(doc, f, &names, before).unwrap_or_else(|| placements_hash(doc))
 }
 
 /// The placements of the bodies `names` relative to `f`'s component, with their offsets: `None`
 /// when one can't be told (all bodies, or a body no earlier feature names), so the caller falls
 /// back to every placement.
-fn relative_placements_digest(doc: &Document, f: &Feature, names: &[String]) -> Option<u64> {
+fn relative_placements_digest(doc: &Document, f: &Feature, names: &[String], before: &ModelState) -> Option<u64> {
     let frame = crate::mat_inverse(&doc.component_transform(f.component))?;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for name in names {
@@ -6758,7 +6769,14 @@ fn relative_placements_digest(doc: &Document, f: &Feature, names: &[String]) -> 
         }
         let component = match doc.body_components.get(name) {
             Some(c) => *c,
-            None => doc.features.iter().take_while(|g| g.id != f.id).find(|g| g.body_names.iter().any(|n| n == name))?.component,
+            None => match doc.features.iter().take_while(|g| g.id != f.id).find(|g| g.body_names.iter().any(|n| n == name)) {
+                Some(g) => g.component,
+                // A body with its default name ("Body1") is named by no feature: the bodies built
+                // before this feature say whose it is (owner: driving a joint of a 98-part gripper
+                // rebuilt every part on each step, 20 s a step, as each part's first cut fell back
+                // to every placement).
+                None => doc.model_body_component(before.body(name)?),
+            },
         };
         name.hash(&mut h);
         component.hash(&mut h);
