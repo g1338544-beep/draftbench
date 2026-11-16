@@ -869,10 +869,14 @@ fn make_wnp_cabinet_example() {
     part(&mut s, "Body", "WNP-01", "Body WNP 600x800x300, t1.5", "SPCC t1.5");
     let body = mk(&mut s, "solid.box", bx((0.0, w), (0.0, d), (0.0, h)));
     cut(&mut s, &body, (t, w - t), (-1.0, d - t), (t, h - t));
-    join(&mut s, &body, (t, w - t), (27.0, 27.0 + t), (t, h - t));
-    cut(&mut s, &body, (24.0, w - 24.0), (26.0, 28.0 + t), (24.0, h - 24.0));
-    join(&mut s, &body, (24.0, w - 24.0), (27.0 + t, 36.0), (24.0, h - 24.0));
-    cut(&mut s, &body, (24.0 + t, w - 24.0 - t), (27.0, 37.0), (24.0 + t, h - 24.0 - t));
+    // One block for the frame and its return, then hollowed: the opening, and behind the frame
+    // round the return.
+    join(&mut s, &body, (t, w - t), (27.0, 36.0), (t, h - t));
+    cut(&mut s, &body, (24.0 + t, w - 24.0 - t), (26.0, 37.0), (24.0 + t, h - 24.0 - t));
+    cut(&mut s, &body, (t, 24.0), (27.0 + t, 37.0), (t, h - t));
+    cut(&mut s, &body, (w - 24.0, w - t), (27.0 + t, 37.0), (t, h - t));
+    cut(&mut s, &body, (24.0, w - 24.0), (27.0 + t, 37.0), (t, 24.0));
+    cut(&mut s, &body, (24.0, w - 24.0), (27.0 + t, 37.0), (h - 24.0, h - t));
     // Two 204×64 gland openings in the floor, 150 from each side, centred 80 from the back.
     for cx in [150.0, 450.0] {
         cut(&mut s, &body, (cx - 102.0, cx + 102.0), (d - 80.0 - 32.0, d - 80.0 + 32.0), (-1.0, t + 1.0));
