@@ -1778,3 +1778,27 @@ fn the_toggle_clamp_moves_as_a_four_bar() {
     }
 }
 
+
+/// Driving a joint rebuilds nothing when no feature's tool meets a moved part (owner: each step
+/// of a 98-part gripper's joint took 20 s, as each part's own hole, cut from its body by its
+/// default name "Body1", counted as depending on every part's placement).
+#[test]
+fn driving_a_joint_rebuilds_no_part_holes() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+        let body = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap_or_default();
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 4, "base": [x + 5, 5, -1], "axis": [0, 0, 1], "operation": "cut", "targets": [body]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let o = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 2, 10]}, "b": {"face": [25, 2, 0]}, "limits": [[0, 10]], "name": "Rail"}));
+    for v in [3, 6] {
+        run(&mut s, "joint.drive", json!({"joint": "Rail", "value": v}));
+        assert_eq!(s.model.last_recomputed, 0, "driving to {v} mm rebuilt features");
+    }
+    assert!(near(place(&s, "B", Vec3::new(25.0, 2.0, 0.0)), Vec3::new(5.0, 2.0, 16.0)), "B moved: {:?}", place(&s, "B", Vec3::new(25.0, 2.0, 0.0)));
+}
