@@ -1174,6 +1174,7 @@ fn a_playing_joint_waits_for_its_preview() {
     }
     let phase = |k: &Asm| if let Asm::Joint(f) = k { f.phase } else { f64::NAN };
     let ctx = egui::Context::default();
+    crate::fonts::setup_bundled_fonts(&ctx);
     let mut play = |app: &mut SolveApp, k: &mut Asm| {
         crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             rows(app, ui, k, &mut d.inputs, &mut d.active);
