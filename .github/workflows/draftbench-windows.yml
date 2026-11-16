@@ -22,7 +22,7 @@ jobs:
       - name: Build
         shell: bash
         # The commit goes into the app (top right, next to the version), so which build is running is plain to see.
-        run: DRAFTBENCH_BUILD="${GITHUB_SHA::7}" cargo build --profile release-pc -p solidcraft
+        run: DRAFTBENCH_BUILD="${GITHUB_SHA::7}" cargo build --profile release-pc -p solidcraft -p solidcraft-cli
       - name: Package (no install)
         shell: pwsh
         run: |
@@ -30,6 +30,8 @@ jobs:
           $sha = $env:GITHUB_SHA.Substring(0, 7)
           New-Item -ItemType Directory -Path pack, portable | Out-Null
           Copy-Item target/release-pc/solidcraft.exe "portable/DraftNew-$sha.exe"
+          # The Assistant starts its design tools from solidcraft-cli.exe next to the app.
+          Copy-Item target/release-pc/solidcraft-cli.exe "portable/solidcraft-cli.exe"
           Compress-Archive -Path portable/* -DestinationPath "pack/DraftNew-$sha-portable.zip"
       - uses: actions/upload-artifact@v4
         with:
