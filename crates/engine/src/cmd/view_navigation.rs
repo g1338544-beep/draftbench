@@ -153,7 +153,7 @@ fn navigate(s: &mut Session, p: &Value) -> Result<Value> {
                         (w.x * b.x + w.y * b.y + w.z() * b.z).normalized()
                     }
                 {
-                    cam = cam.looking_from(back);
+                    cam = cam.looking_from(back).with_screen_up(w.z());
                 }
                 fit = true;
             }
@@ -256,6 +256,19 @@ mod tests {
         let want = (Vec3::Y * b.x - Vec3::X * b.y + Vec3::Z * b.z).normalized().unwrap();
         assert!(moved.back().dist(want) < 1e-9, "{:?} vs {want:?}", moved.back());
         assert!(world.back().dist(want) > 0.5, "not the world's iso");
+
+        // Turned a quarter about XC (owner: Home came out tilted): ZC, now along world -Y,
+        // reads straight up the screen and XC, YC lie as on the world's own Iso.
+        s.wcs = Some(crate::cmd::wcs::Wcs { origin: Vec3::new(10.0, 0.0, 5.0), x: Vec3::X, y: Vec3::Z });
+        let turned = navigate(&mut s, &json!({"camera": cam, "action": "home"})).unwrap();
+        let turned: Camera = serde_json::from_value(turned["camera"].clone()).unwrap();
+        let w = s.wcs.unwrap();
+        let (r, u, _) = turned.basis();
+        let (wr, wu, _) = world.basis();
+        assert!(w.z().dot(r).abs() < 1e-9 && w.z().dot(u) > 0.5, "ZC up the screen: {r:?} {u:?}");
+        for (axis, world_axis) in [(w.x, Vec3::X), (w.y, Vec3::Y), (w.z(), Vec3::Z)] {
+            assert!((axis.dot(r) - world_axis.dot(wr)).abs() < 1e-9 && (axis.dot(u) - world_axis.dot(wu)).abs() < 1e-9, "as the world's iso");
+        }
     }
 
     #[test]

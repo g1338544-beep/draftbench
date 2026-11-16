@@ -5401,90 +5401,88 @@ fn face_samples(b: &ModelBody) -> Vec<Vec3> {
 /// Each face appears once, with a point on it. Shell evaluation and selection feedback use
 /// the same expansion; callers keep the original picks when saving the feature.
 pub fn tangent_face_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<(usize, Vec3)> {
+    use std::collections::{HashMap, HashSet};
     let m = b.mesh();
-    let samples = face_samples(b);
     let face_of = |p: Vec3| crate::appearance::face_index_at(b, p);
-    // The surface normal of face f at its mesh vertex nearest q (vertex normals are the
-    // surface's, so a tangent edge reads the same from both sides).
-    let normal_near = |f: u32, q: Vec3| -> Option<Vec3> {
-        m.triangles
-            .iter()
-            .zip(&m.tri_face)
-            .filter(|(_, tf)| **tf == f)
-            .flat_map(|(t, _)| t.iter().copied())
-            .filter_map(|i| Some((m.positions.get(i as usize)?.dist(q), *m.normals.get(i as usize)?)))
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .and_then(|(_, n)| n.normalized())
-    };
-    let mut chosen: Vec<u32> = picks.iter().filter_map(|p| face_of(*p).map(|f| f as u32)).collect();
-    chosen.sort_unstable();
-    chosen.dedup();
-    // Faces meeting at a shared mesh vertex count as neighbours even when no edge line joins
-    // them (a flat ring cut in two halves is one face to the eye).
+    // Each face's mesh vertices (position, surface normal) and a point on it, found in one pass
+    // (owner: a double-click on a big imported part froze the program while every neighbour
+    // test scanned the whole mesh again).
+    let mut verts: HashMap<u32, Vec<(Vec3, Vec3)>> = HashMap::new();
+    let mut sample: HashMap<u32, Vec3> = HashMap::new();
     let key = |q: Vec3| ((q.x * 1e3).round() as i64, (q.y * 1e3).round() as i64, (q.z * 1e3).round() as i64);
-    let mut at_vertex: std::collections::HashMap<(i64, i64, i64), Vec<u32>> = std::collections::HashMap::new();
+    // Faces meeting at a shared mesh vertex count as neighbours even when no edge line joins
+    // them (a flat ring cut in two halves is one face to the eye): vertex → (face, its normal there).
+    let mut at_vertex: HashMap<(i64, i64, i64), Vec<(u32, Option<Vec3>)>> = HashMap::new();
     for (t, tf) in m.triangles.iter().zip(&m.tri_face) {
+        if let Some([p0, p1, p2]) = m.tri(t) {
+            sample.entry(*tf).or_insert((p0 + p1 + p2) * (1.0 / 3.0));
+        }
         for i in t {
-            if let Some(q) = m.positions.get(*i as usize) {
-                let list = at_vertex.entry(key(*q)).or_default();
-                if !list.contains(tf) && list.len() < 16 {
-                    list.push(*tf);
-                }
+            let Some(q) = m.positions.get(*i as usize).copied() else { continue };
+            let n = m.normals.get(*i as usize).and_then(|n| n.normalized());
+            if let Some(n) = n {
+                verts.entry(*tf).or_default().push((q, n));
+            }
+            let list = at_vertex.entry(key(q)).or_default();
+            if !list.iter().any(|(g, _)| g == tf) && list.len() < 16 {
+                list.push((*tf, n));
             }
         }
     }
+    // The surface normal of face f at its mesh vertex nearest q (vertex normals are the
+    // surface's, so a tangent edge reads the same from both sides).
+    let normal_near = |f: u32, q: Vec3| -> Option<Vec3> {
+        verts.get(&f)?.iter().min_by(|a, b| a.0.dist(q).total_cmp(&b.0.dist(q))).map(|(_, n)| *n)
+    };
+    let mut edges_of: HashMap<u32, Vec<(u32, Vec3)>> = HashMap::new();
+    for (e, fs) in m.edges.iter().zip(&m.edge_faces) {
+        let (Some(&fa), Some(&fb)) = (fs.first(), fs.get(1)) else { continue };
+        let Some(mid) = e.get(e.len() / 2).copied() else { continue };
+        edges_of.entry(fa as u32).or_default().push((fb as u32, mid));
+        edges_of.entry(fb as u32).or_default().push((fa as u32, mid));
+    }
+    let tangent = 2f64.to_radians().cos();
+    let picked: Vec<(u32, Vec3)> = picks.iter().filter_map(|p| face_of(*p).map(|f| (f as u32, *p))).collect();
+    let mut chosen: Vec<u32> = picked.iter().map(|(f, _)| *f).collect();
+    chosen.sort_unstable();
+    chosen.dedup();
+    let mut taken: HashSet<u32> = chosen.iter().copied().collect();
     let mut k = 0;
     while k < chosen.len() && chosen.len() < 10_000 {
-        let f = chosen[k];
+        let Some(&f) = chosen.get(k) else { break };
         k += 1;
-        let mut shared: Vec<(u32, Vec3)> = Vec::new();
-        for (t, tf) in m.triangles.iter().zip(&m.tri_face) {
-            if *tf != f {
-                continue;
-            }
-            for i in t {
-                let Some(q) = m.positions.get(*i as usize).copied() else { continue };
-                for g in at_vertex.get(&key(q)).into_iter().flatten() {
-                    if *g != f && !chosen.contains(g) && shared.len() < 4096 {
-                        shared.push((*g, q));
-                    }
+        // Neighbours across a shared vertex: the normals there are the faces' own.
+        let mut tried: HashSet<(u32, (i64, i64, i64))> = HashSet::new();
+        for (q, n1) in verts.get(&f).map(Vec::as_slice).unwrap_or(&[]) {
+            let kq = key(*q);
+            for (g, n2) in at_vertex.get(&kq).map(Vec::as_slice).unwrap_or(&[]) {
+                if *g == f || taken.contains(g) || !tried.insert((*g, kq)) {
+                    continue;
+                }
+                if n2.is_some_and(|n2| n1.dot(n2) > tangent) {
+                    taken.insert(*g);
+                    chosen.push(*g);
                 }
             }
         }
-        for (g, q) in shared {
-            if chosen.contains(&g) {
+        // Neighbours across an edge line.
+        for (other, mid) in edges_of.get(&f).map(Vec::as_slice).unwrap_or(&[]) {
+            if taken.contains(other) {
                 continue;
             }
-            if let (Some(n1), Some(n2)) = (normal_near(f, q), normal_near(g, q))
-                && n1.dot(n2) > 2f64.to_radians().cos()
+            if let (Some(n1), Some(n2)) = (normal_near(f, *mid), normal_near(*other, *mid))
+                && n1.dot(n2) > tangent
             {
-                chosen.push(g);
-            }
-        }
-        for (e, fs) in m.edges.iter().zip(&m.edge_faces) {
-            let (Some(&a), Some(&bb)) = (fs.first(), fs.get(1)) else { continue };
-            let other = if a == f {
-                bb
-            } else if bb == f {
-                a
-            } else {
-                continue;
-            };
-            if chosen.contains(&other) {
-                continue;
-            }
-            let Some(mid) = e.get(e.len() / 2).copied() else { continue };
-            if let (Some(n1), Some(n2)) = (normal_near(f, mid), normal_near(other, mid))
-                && n1.dot(n2) > 2f64.to_radians().cos()
-            {
-                chosen.push(other);
+                taken.insert(*other);
+                chosen.push(*other);
             }
         }
     }
     let mut out = Vec::new();
     for f in chosen {
-        if let Some(p) = picks.iter().chain(&samples).find(|p| face_of(**p) == Some(f as usize)) {
-            out.push((f as usize, *p));
+        let on = picked.iter().find(|(g, _)| *g == f).map(|(_, p)| *p);
+        if let Some(p) = on.or_else(|| sample.get(&f).copied()) {
+            out.push((f as usize, p));
         }
     }
     out
@@ -7224,6 +7222,63 @@ mod chain_tests {
             assert_eq!(crate::appearance::face_index_at(b, *point), Some(*index));
         }
         assert_eq!(tangent_face_chain(b, &[Vec3::new(20.0, 15.0, 20.0); 2]), pts);
+    }
+
+    /// A box rounded on every edge is one smooth skin: a double-click takes all 26 faces, and
+    /// quickly (owner: a double-click on a big imported part froze the program while every
+    /// neighbour test scanned the whole mesh again).
+    #[test]
+    fn a_fully_rounded_box_chains_every_face_quickly() {
+        let mut doc = Document::new("T");
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "40".into(),
+                width: "30".into(),
+                height: "20".into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+        let mids = [
+            (20.0, 0.0, 0.0),
+            (20.0, 30.0, 0.0),
+            (20.0, 0.0, 20.0),
+            (20.0, 30.0, 20.0),
+            (0.0, 15.0, 0.0),
+            (40.0, 15.0, 0.0),
+            (0.0, 15.0, 20.0),
+            (40.0, 15.0, 20.0),
+            (0.0, 0.0, 10.0),
+            (40.0, 0.0, 10.0),
+            (0.0, 30.0, 10.0),
+            (40.0, 30.0, 10.0),
+        ];
+        doc.add_feature(
+            FeatureKind::Fillet {
+                edges: mids.iter().map(|&(x, y, z)| crate::Position(Vec3::new(x, y, z))).collect(),
+                radius: "3".into(),
+                body: None,
+                style: crate::FilletStyle::Constant,
+                fit: Default::default(),
+                corner: Default::default(),
+            },
+            None,
+        )
+        .unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let st = m.state();
+        let b = &st.bodies[0];
+        let all: std::collections::BTreeSet<u32> = b.mesh().tri_face.iter().copied().collect();
+        let started = std::time::Instant::now();
+        let pts = tangent_face_chain(b, &[Vec3::new(20.0, 15.0, 20.0)]);
+        let took = started.elapsed();
+        let faces: std::collections::BTreeSet<usize> = pts.iter().map(|(index, _)| *index).collect();
+        assert_eq!(faces.len(), all.len(), "every face of the smooth skin");
+        assert!(all.len() >= 26, "{all:?}");
+        assert!(took.as_secs_f64() < 2.0, "took {took:?}");
     }
 }
 

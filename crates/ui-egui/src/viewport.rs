@@ -1344,8 +1344,11 @@ pub fn view_with_wcs(app: &SolveApp, c: Camera) -> Camera {
         if x.x.hypot(x.y) > 1e-9 {
             out.yaw = c.yaw - x.y.atan2(x.x);
         }
+        return out;
     }
-    out
+    // ZC reads straight up the screen, as on the world's own Iso (owner: Home with a turned WCS
+    // came out tilted).
+    out.with_screen_up(w.z())
 }
 
 /// An origin plane's placement for a command, when the WCS has moved: the plane of the same
