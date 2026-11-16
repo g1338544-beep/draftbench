@@ -1157,3 +1157,33 @@ fn roller_and_feeder_dialogs_run() {
     let r = app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
     assert_eq!(r["parts"].as_array().unwrap().len(), 4, "{r}");
 }
+
+/// A playing joint steps only once the last step's preview is on the screen (owner: a 98-body
+/// gripper jerked while its joint played: the screen repaints every 16 ms while a preview
+/// computes, and each repaint took another step, so the shown motion skipped ahead unevenly).
+#[test]
+fn a_playing_joint_waits_for_its_preview() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    let Kind::Assembly(k) = &mut d.kind else { panic!("a joint dialog") };
+    if let Asm::Joint(f) = k {
+        f.kind = 1;
+        f.animate = true;
+        f.phase = 0.25;
+    }
+    let phase = |k: &Asm| if let Asm::Joint(f) = k { f.phase } else { f64::NAN };
+    let ctx = egui::Context::default();
+    let mut play = |app: &mut SolveApp, k: &mut Asm| {
+        crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            rows(app, ui, k, &mut d.inputs, &mut d.active);
+        });
+    };
+    app.preview.busy = true;
+    play(&mut app, k);
+    play(&mut app, k);
+    assert_eq!(phase(k), 0.25, "no step while the preview computes");
+    app.preview.busy = false;
+    play(&mut app, k);
+    assert!(phase(k) > 0.25, "the next step once it is shown");
+}
