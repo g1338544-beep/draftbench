@@ -799,3 +799,167 @@ fn make_centering_gripper_example() {
         eprintln!("{name}: {:?}", r.map(|v| v["frames"].clone()));
     }
 }
+
+/// An electrical cabinet from a supplier's drawing (owner: WNP 600×800×300, SPCC 1.5): body, door
+/// with its handle, lock rod, stiffeners, A4 pocket, hinges and gasket, the 536×736 mounting plate
+/// on its studs, two 204×64 gland openings under blank cover plates. Writes Cabinet-WNP-600x800x300
+/// .draftnew/.step and a picture (raw RGBA, `w h` in the name) to CABINET_OUT.
+#[test]
+#[ignore]
+fn make_wnp_cabinet_example() {
+    let out = std::path::PathBuf::from(std::env::var("CABINET_OUT").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string()));
+    let mut s = Session::default();
+    fn names(s: &Session) -> Vec<String> {
+        s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
+    }
+    fn mk(s: &mut Session, c: &str, p: Value) -> String {
+        let before = names(s);
+        run(s, c, p);
+        names(s).into_iter().find(|n| !before.contains(n)).unwrap_or_default()
+    }
+    fn part(s: &mut Session, name: &str, pn: &str, desc: &str, mat: &str) {
+        run(s, "component.activate", json!({"component": "root"}));
+        run(s, "component.create", json!({"name": name}));
+        run(s, "component.metadata.set", json!({"component": name, "part_number": pn, "description": desc, "properties": {"material": mat}}));
+    }
+    fn bx(x: (f64, f64), y: (f64, f64), z: (f64, f64)) -> Value {
+        json!({"length": x.1 - x.0, "width": y.1 - y.0, "height": z.1 - z.0, "corner": [x.0, y.0, z.0], "operation": "new"})
+    }
+    fn cut(s: &mut Session, body: &str, x: (f64, f64), y: (f64, f64), z: (f64, f64)) {
+        let mut p = bx(x, y, z);
+        p["operation"] = json!("cut");
+        p["targets"] = json!([body]);
+        run(s, "solid.box", p);
+    }
+    fn join(s: &mut Session, body: &str, x: (f64, f64), y: (f64, f64), z: (f64, f64)) {
+        let mut p = bx(x, y, z);
+        p["operation"] = json!("join");
+        p["targets"] = json!([body]);
+        run(s, "solid.box", p);
+    }
+    fn hole(s: &mut Session, body: &str, at: [f64; 3], axis: [f64; 3], d: f64, depth: f64) {
+        run(s, "solid.cylinder", json!({"diameter": d, "height": depth, "base": at, "axis": axis, "operation": "cut", "targets": [body]}));
+    }
+    let t = 1.5;
+    // X across (0…600), Y from the door's face (0) to the back (300), Z up (0…800).
+    let (w, d, h, door) = (600.0, 300.0, 800.0, 27.0);
+    let mut colours: Vec<(&str, &str)> = Vec::new();
+
+    // The body: a box open at the front, a 20 mm return round the opening.
+    part(&mut s, "Body", "WNP-01", "Body WNP 600x800x300, t1.5", "SPCC t1.5");
+    let body = mk(&mut s, "solid.box", bx((0.0, w), (door, d), (0.0, h)));
+    cut(&mut s, &body, (t, w - t), (door - 1.0, d - t), (t, h - t));
+    join(&mut s, &body, (0.0, w), (door, door + t), (0.0, h));
+    cut(&mut s, &body, (20.0, w - 20.0), (door - 1.0, door + t + 1.0), (20.0, h - 20.0));
+    // Two 204×64 gland openings in the floor, 150 from each side, 80 from the back.
+    for cx in [150.0, 450.0] {
+        cut(&mut s, &body, (cx - 102.0, cx + 102.0), (d - 80.0 - 32.0, d - 80.0 + 32.0), (-1.0, t + 1.0));
+    }
+    // Four Ø10 wall-mounting holes in the back.
+    for (x, z) in [(100.0, 100.0), (500.0, 100.0), (100.0, 700.0), (500.0, 700.0)] {
+        hole(&mut s, &body, [x, d + 1.0, z], [0.0, -1.0, 0.0], 10.0, t + 2.0);
+    }
+    colours.push(("Body", "#d6d6d0"));
+
+    // The door: a tray 27 deep, open at the back.
+    part(&mut s, "Door", "WNP-02", "Door 600x800, t1.5", "SPCC t1.5");
+    let dr = mk(&mut s, "solid.box", bx((0.0, w), (0.0, door), (0.0, h)));
+    cut(&mut s, &dr, (t, w - t), (t, door + 1.0), (t, h - t));
+    // Ø23 hole 120 below the top, centred (a pilot light or switch).
+    hole(&mut s, &dr, [300.0, -1.0, h - 120.0], [0.0, 1.0, 0.0], 23.0, t + 2.0);
+    // The handle's opening, left side.
+    cut(&mut s, &dr, (25.0, 45.0), (-1.0, t + 1.0), (430.0, 530.0));
+    // Two stiffeners across the inside (U channels), 120 below the top and 100 above the bottom.
+    for zc in [h - 120.0, 100.0] {
+        join(&mut s, &dr, (60.0, 540.0), (t, 16.0), (zc - 10.0, zc + 10.0));
+        cut(&mut s, &dr, (60.0 - 1.0, 540.0 + 1.0), (t, 16.0 - t), (zc - 10.0 + t, zc + 10.0 - t));
+    }
+    colours.push(("Door", "#d6d6d0"));
+
+    // A4 document pocket inside the door: 300 wide, 250 high, 50 deep, 100 above the bottom.
+    part(&mut s, "Document Pocket", "WNP-03", "A4 document pocket D50", "PP 1.0");
+    let pocket = mk(&mut s, "solid.box", bx((150.0, 450.0), (16.5, 66.5), (130.0, 380.0)));
+    cut(&mut s, &pocket, (151.0, 449.0), (16.5 - 1.0, 65.5), (131.0, 381.0));
+    colours.push(("Document Pocket", "#3c3c3c"));
+
+    // The handle (swing handle) and its lock rod.
+    part(&mut s, "Handle", "WNP-04", "Swing handle with key lock", "Zinc die cast");
+    let handle = mk(&mut s, "solid.box", bx((20.0, 50.0), (-22.0, 0.0), (415.0, 545.0)));
+    cut(&mut s, &handle, (26.0, 44.0), (-23.0, -14.0), (430.0, 510.0));
+    run(&mut s, "solid.cylinder", json!({"diameter": 12, "height": 4, "base": [35, -22, 528], "axis": [0, -1, 0], "operation": "join", "targets": [handle]}));
+    colours.push(("Handle", "#2a2a2c"));
+    part(&mut s, "Lock Rod", "WNP-05", "Lock rod D8", "Steel Zn plated");
+    mk(&mut s, "solid.cylinder", json!({"diameter": 8, "height": 600, "base": [35, 22, 100], "axis": [0, 0, 1], "operation": "new"}));
+    colours.push(("Lock Rod", "#b8bcc4"));
+
+    // Hinges on the right, 80 from the top and the bottom (a knuckle on the outside).
+    for (k, zc) in [(1, 80.0), (2, h - 80.0)] {
+        let name = format!("Hinge {k}");
+        part(&mut s, &name, "WNP-06", "Hinge 50 (pair)", "Zinc die cast");
+        let hg = mk(&mut s, "solid.cylinder", json!({"diameter": 10, "height": 50, "base": [w + 5.0, door, zc - 25.0], "axis": [0, 0, 1], "operation": "new"}));
+        join(&mut s, &hg, (w, w + 5.0), (door - 12.0, door + 12.0), (zc - 25.0, zc + 25.0));
+        colours.push((if k == 1 { "Hinge 1" } else { "Hinge 2" }, "#2a2a2c"));
+    }
+
+    // The door's flat gasket, against the body's return.
+    part(&mut s, "Gasket", "WNP-07", "Flat gasket 8x3", "EPDM");
+    let g = mk(&mut s, "solid.box", bx((12.0, w - 12.0), (door - 3.0, door), (12.0, h - 12.0)));
+    cut(&mut s, &g, (20.0, w - 20.0), (door - 4.0, door + 1.0), (20.0, h - 20.0));
+    colours.push(("Gasket", "#1c1c1c"));
+
+    // The mounting plate, 536×736×2, on four studs 20 long off the back.
+    part(&mut s, "Mounting Plate", "WNP-08", "Mounting plate 536x736, t2.0", "SECC t2.0");
+    let back = d - t;
+    mk(&mut s, "solid.box", bx((32.0, 568.0), (back - 22.0, back - 20.0), (32.0, 768.0)));
+    colours.push(("Mounting Plate", "#f08c28"));
+    for (k, (x, z)) in [(52.0, 52.0), (548.0, 52.0), (52.0, 748.0), (548.0, 748.0)].into_iter().enumerate() {
+        let name = format!("Stud {}", k + 1);
+        part(&mut s, &name, "WNP-09", "Stud M6, standoff D12x20", "Steel Zn plated");
+        mk(&mut s, "solid.cylinder", json!({"diameter": 12, "height": 20, "base": [x, back, z], "axis": [0, -1, 0], "operation": "new"}));
+    }
+
+    // Blank gland plates under the openings, each with six M5 screws.
+    for (k, cx) in [(1, 150.0), (2, 450.0)] {
+        let name = format!("Gland Plate {k}");
+        part(&mut s, &name, "WNP-10", "Gland plate 244x104, t2.0", "SPCC t2.0");
+        let gp = mk(&mut s, "solid.box", bx((cx - 122.0, cx + 122.0), (d - 80.0 - 52.0, d - 80.0 + 52.0), (-2.0, 0.0)));
+        for (dx, dy) in [(-112.0, -42.0), (0.0, -42.0), (112.0, -42.0), (-112.0, 42.0), (0.0, 42.0), (112.0, 42.0)] {
+            hole(&mut s, &gp, [cx + dx, d - 80.0 + dy, -3.0], [0.0, 0.0, 1.0], 5.5, 4.0);
+        }
+        colours.push((if k == 1 { "Gland Plate 1" } else { "Gland Plate 2" }, "#d6d6d0"));
+        for (j, (dx, dy)) in [(-112.0, -42.0), (0.0, -42.0), (112.0, -42.0), (-112.0, 42.0), (0.0, 42.0), (112.0, 42.0)].into_iter().enumerate() {
+            let sname = format!("Screw M5 {k}.{}", j + 1);
+            part(&mut s, &sname, "ISO7380-M5x10", "Button head screw M5x10", "Steel Zn plated");
+            let head = mk(&mut s, "solid.cylinder", json!({"diameter": 9.5, "height": 2.8, "base": [cx + dx, d - 80.0 + dy, -2.0], "axis": [0, 0, -1], "operation": "new"}));
+            run(&mut s, "solid.cylinder", json!({"diameter": 5, "height": 2.0, "base": [cx + dx, d - 80.0 + dy, -2.0], "axis": [0, 0, 1], "operation": "join", "targets": [head]}));
+        }
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    for (c, col) in &colours {
+        let _ = s.execute("appearance.assign", &json!({"components": [c], "color": col}));
+    }
+    for k in 1..=4 {
+        let _ = s.execute("appearance.assign", &json!({"components": [format!("Stud {k}")], "color": "#b8bcc4"}));
+    }
+    for k in 1..=2 {
+        for j in 1..=6 {
+            let _ = s.execute("appearance.assign", &json!({"components": [format!("Screw M5 {k}.{j}")], "color": "#2a2a2c"}));
+        }
+    }
+    s.doc_mut().name = "Cabinet WNP 600x800x300".into();
+    let clash = run(&mut s, "inspect.interference", json!({"budget_s": 900}));
+    eprintln!("interference: {}", clash);
+    let bom = run(&mut s, "assembly.bom", json!({}));
+    for r in bom["rows"].as_array().into_iter().flatten() {
+        eprintln!("bom {} {} x{} {}", r["item"], r["description"], r["count"], r["properties"]["material"]);
+    }
+    let base = out.join("Cabinet-WNP-600x800x300");
+    run(&mut s, "file.save", json!({"path": base.with_extension("draftnew").to_string_lossy()}));
+    for schema in ["ap214", "ap242"] {
+        let p = out.join(format!("Cabinet-WNP-600x800x300-{}.step", schema.to_uppercase()));
+        run(&mut s, "file.export", json!({"path": p.to_string_lossy(), "schema": schema}));
+    }
+    let cam = crate::view::home_camera(&s);
+    let img = solidcraft_render::render(&crate::view::scene(&s, &cam), &cam, 1400, 1100);
+    std::fs::write(out.join("cabinet-1400x1100.rgba"), &img.rgba).unwrap();
+}
