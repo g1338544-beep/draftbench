@@ -1057,3 +1057,343 @@ fn make_wnp_cabinet_example() {
     let img = solidcraft_render::render(&crate::view::scene(&s, &top), &top, 1400, 1100);
     std::fs::write(out.join("cabinet-detail-1400x1100.rgba"), &img.rgba).unwrap();
 }
+
+/// Owner's concept (Concept_platfrom.xlsx): one set of two lifting work platforms beside a row
+/// of three Ø1600 coils, 2500 mm apart; each platform 1000 × 6000 lifted by a ballscrew in each
+/// of its two end towers (as on the Onderlift photo), a 600 × 1000 landing and a 600 × 5000
+/// stair along its outer side, hinged at the landing and rolling on wheels at the floor (the
+/// owner's folding stair photo), its treads kept level by the handrail (a parallelogram).
+/// Deck height 500…3500 (assumed), 2000 as built. Writes .draftnew/.step and pictures (raw RGBA,
+/// `w h` in the name) to PLATFORM_OUT.
+#[test]
+#[ignore]
+fn make_coil_platform_example() {
+    let out = std::path::PathBuf::from(std::env::var("PLATFORM_OUT").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string()));
+    let mut s = Session::default();
+    fn names(s: &Session) -> Vec<String> {
+        s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
+    }
+    fn mk(s: &mut Session, c: &str, p: Value) -> String {
+        let before = names(s);
+        run(s, c, p);
+        names(s).into_iter().find(|n| !before.contains(n)).unwrap_or_default()
+    }
+    fn part(s: &mut Session, name: &str) {
+        run(s, "component.activate", json!({"component": "root"}));
+        run(s, "component.create", json!({"name": name}));
+    }
+    fn bx(s: &mut Session, x: (f64, f64), y: (f64, f64), z: (f64, f64)) -> String {
+        let (x0, x1) = (x.0.min(x.1), x.0.max(x.1));
+        mk(s, "solid.box", json!({"length": x1 - x0, "width": y.1 - y.0, "height": z.1 - z.0, "corner": [x0, y.0, z.0], "operation": "new"}))
+    }
+    fn rod(s: &mut Session, a: [f64; 3], b: [f64; 3], r: f64) -> String {
+        let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        mk(s, "solid.cylinder", json!({"radius": r, "height": l, "base": a, "axis": [d[0] / l, d[1] / l, d[2] / l], "operation": "new"}))
+    }
+    /// A closed outline in a YZ plane (y, z), x0…x1 thick: a new body.
+    fn plate_yz(s: &mut Session, name: &str, pts: &[(f64, f64)], x0: f64, x1: f64) -> String {
+        let (a, b) = (x0.min(x1), x0.max(x1));
+        run(s, "sketch.create", json!({"plane": {"origin": [a, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": name}));
+        let p: Vec<[f64; 2]> = pts.iter().map(|q| [q.0, q.1]).collect();
+        run(s, "sketch.line", json!({"points": p, "closed": true}));
+        run(s, "sketch.finish", json!({}));
+        let before = names(s);
+        run(s, "solid.extrude", json!({"sketch": name, "distance": b - a, "operation": "new"}));
+        names(s).into_iter().find(|n| !before.contains(n)).unwrap_or_default()
+    }
+    let mut colours: Vec<(String, &str)> = Vec::new();
+    let (blue, yellow, green, alu, black, grey) = ("#1f6fd1", "#f5c400", "#3c9a5f", "#c8ccd2", "#26282c", "#8a9099");
+    const H0: f64 = 2000.0; // deck top as built
+    const L: f64 = 5000.0; // stair: foot pivot to landing pivot
+    const RISE: f64 = 1000.0; // handrail above the stringer pivots (the parallelogram's links)
+
+    // ===== FLOOR (grounded): the 18 × 11 m bay, yellow lines round the set, the three coils.
+    part(&mut s, "Floor");
+    let f = bx(&mut s, (-9000.0, 9000.0), (-5500.0, 5500.0), (-60.0, 0.0));
+    colours.push((f, "#d9dde2"));
+    for (x, y) in [((-3050.0, 3050.0), (-3700.0, -3620.0)), ((-3050.0, 3050.0), (3620.0, 3700.0)), ((-3050.0, -2970.0), (-3700.0, 3700.0)), ((2970.0, 3050.0), (-3700.0, 3700.0))] {
+        let l = bx(&mut s, x, y, (0.0, 2.0));
+        colours.push((l, yellow));
+    }
+    part(&mut s, "Coils");
+    for cy in [-2000.0, 0.0, 2000.0] {
+        let base = mk(&mut s, "solid.cylinder", json!({"radius": 950, "height": 420, "base": [0, cy, 0], "axis": [0, 0, 1], "operation": "new"}));
+        colours.push((base, "#3f7fc4"));
+        let ring = mk(&mut s, "solid.cylinder", json!({"radius": 900, "height": 60, "base": [0, cy, 420], "axis": [0, 0, 1], "operation": "new"}));
+        colours.push((ring, "#e8a200"));
+        let coil = mk(&mut s, "solid.cylinder", json!({"radius": 800, "height": 2500, "base": [0, cy, 480], "axis": [0, 0, 1], "operation": "new"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 350, "height": 2520, "base": [0, cy, 470], "axis": [0, 0, 1], "operation": "cut", "targets": [coil]}));
+        colours.push((coil, "#c9a46a"));
+    }
+
+    let mut joints: Vec<(String, f64)> = Vec::new();
+    for (side, sx) in [("R", 1.0f64), ("L", -1.0f64)] {
+        let x = |v: f64| v * sx;
+        let xr = |a: f64, b: f64| (x(a), x(b));
+        // ===== TOWERS (grounded): two columns, top and bottom beams, X bracing on the outer face,
+        // the ballscrew (bellows-covered) in the middle, its gear motor on top, guide rails.
+        for (end, ey) in [("Front", -1.0f64), ("Rear", 1.0f64)] {
+            part(&mut s, &format!("Tower {side} {end}"));
+            let yr = |a: f64, b: f64| if ey > 0.0 { (a, b) } else { (-b, -a) };
+            let yv = |v: f64| v * ey;
+            let plate = bx(&mut s, xr(1150.0, 2950.0), yr(3100.0, 3450.0), (0.0, 25.0));
+            colours.push((plate, grey));
+            for (a, b) in [(1250.0, 1500.0), (2600.0, 2850.0)] {
+                let c = bx(&mut s, xr(a, b), yr(3150.0, 3400.0), (25.0, 5500.0));
+                colours.push((c, blue));
+                let rail = bx(&mut s, xr(a + 100.0, a + 150.0), yr(3120.0, 3150.0), (300.0, 5300.0));
+                colours.push((rail, alu));
+            }
+            let top = bx(&mut s, xr(1500.0, 2600.0), yr(3150.0, 3400.0), (5250.0, 5500.0));
+            colours.push((top, blue));
+            let low = bx(&mut s, xr(1500.0, 2600.0), yr(3150.0, 3400.0), (25.0, 225.0));
+            colours.push((low, blue));
+            for (z0, z1) in [(225.0, 2737.0), (2737.0, 5250.0)] {
+                let a = rod(&mut s, [x(1500.0), yv(3375.0), z0], [x(2600.0), yv(3375.0), z1], 30.0);
+                let b = rod(&mut s, [x(2600.0), yv(3375.0), z0], [x(1500.0), yv(3375.0), z1], 30.0);
+                colours.push((a, blue));
+                colours.push((b, blue));
+            }
+            let screw = mk(&mut s, "solid.cylinder", json!({"radius": 45, "height": 5025, "base": [x(2050.0), yv(3240.0), 225], "axis": [0, 0, 1], "operation": "new"}));
+            colours.push((screw, black));
+            let motor = bx(&mut s, xr(1900.0, 2200.0), yr(3110.0, 3400.0), (5500.0, 5780.0));
+            colours.push((motor, grey));
+            let m = mk(&mut s, "solid.cylinder", json!({"radius": 95, "height": 420, "base": [x(2200.0), yv(3255.0), 5640], "axis": [sx, 0, 0], "operation": "new"}));
+            colours.push((m, "#4d5866"));
+            if end == "Front" {
+                let panel = bx(&mut s, xr(2300.0, 2750.0), (-3650.0, -3450.0), (900.0, 1600.0));
+                colours.push((panel, "#e9ecef"));
+                let stop = mk(&mut s, "solid.cylinder", json!({"radius": 30, "height": 30, "base": [x(2420.0), -3650, 1450], "axis": [0, -1, 0], "operation": "new"}));
+                colours.push((stop, "#d62828"));
+            }
+        }
+
+        // ===== PLATFORM: frame, green deck, toe boards, handrails, the landing, the ballscrew nut
+        // brackets and the guide carriages at each tower.
+        part(&mut s, &format!("Platform {side}"));
+        let zt = H0 - 150.0;
+        for (a, b) in [(1250.0, 1350.0), (2150.0, 2250.0)] {
+            let l = bx(&mut s, xr(a, b), (-3000.0, 3000.0), (zt, H0 - 30.0));
+            colours.push((l, blue));
+        }
+        for y in [-3000.0, -2000.0, -1000.0, 0.0, 1000.0, 2000.0, 2900.0] {
+            let c = bx(&mut s, xr(1350.0, 2150.0), (y, y + 100.0), (zt, H0 - 30.0));
+            colours.push((c, blue));
+        }
+        let deck = bx(&mut s, xr(1250.0, 2250.0), (-3000.0, 3000.0), (H0 - 30.0, H0));
+        colours.push((deck, green));
+        // Landing beside it at the rear end.
+        for (a, b) in [(2250.0, 2850.0)] {
+            for (y0, y1) in [(2000.0, 2080.0), (2920.0, 3000.0)] {
+                let c = bx(&mut s, xr(a, b), (y0, y1), (zt, H0 - 30.0));
+                colours.push((c, blue));
+            }
+            let e = bx(&mut s, xr(2770.0, 2850.0), (2080.0, 2920.0), (zt, H0 - 30.0));
+            colours.push((e, blue));
+            let d = bx(&mut s, xr(a, b), (2000.0, 3000.0), (H0 - 30.0, H0));
+            colours.push((d, green));
+        }
+        // Toe boards: inner side, outer side up to the landing, the ends, the landing's edges.
+        for (xa, ya) in [((1250.0, 1260.0), (-3000.0, 3000.0)), ((2240.0, 2250.0), (-3000.0, 2000.0)), ((1250.0, 2250.0), (-3000.0, -2990.0)), ((1250.0, 2850.0), (2990.0, 3000.0)), ((2840.0, 2850.0), (2000.0, 3000.0))] {
+            let t = bx(&mut s, xr(xa.0, xa.1), ya, (H0, H0 + 150.0));
+            colours.push((t, yellow));
+        }
+        // Handrails Ø42: posts, top rail at 1100, knee rail at 550.
+        let rail = |s: &mut Session, colours: &mut Vec<(String, &str)>, a: [f64; 2], b: [f64; 2]| {
+            for h in [550.0, 1100.0] {
+                let r = rod(s, [a[0], a[1], H0 + h], [b[0], b[1], H0 + h], 21.0);
+                colours.push((r, yellow));
+            }
+        };
+        let mut posts: Vec<[f64; 2]> = Vec::new();
+        for y in [-2975.0, -1500.0, 0.0, 1500.0, 2975.0] {
+            posts.push([x(1275.0), y]);
+        }
+        for y in [-2975.0, -1500.0, 0.0, 1500.0] {
+            posts.push([x(2225.0), y]);
+        }
+        posts.push([x(2825.0), 2975.0]);
+        for p in &posts {
+            let r = rod(&mut s, [p[0], p[1], H0], [p[0], p[1], H0 + 1120.0], 21.0);
+            colours.push((r, yellow));
+        }
+        rail(&mut s, &mut colours, [x(1275.0), -2975.0], [x(1275.0), 2975.0]);
+        rail(&mut s, &mut colours, [x(2225.0), -2975.0], [x(2225.0), 1960.0]);
+        rail(&mut s, &mut colours, [x(1275.0), -2975.0], [x(2225.0), -2975.0]);
+        rail(&mut s, &mut colours, [x(1275.0), 2975.0], [x(2825.0), 2975.0]);
+        rail(&mut s, &mut colours, [x(2855.0), 2040.0], [x(2855.0), 2975.0]);
+        // The landing's pivot posts at the stair's head: the handrail's pivots RISE above the
+        // stringers'.
+        let tz = H0 - 200.0;
+        for xc in [2245.0, 2855.0] {
+            let p = bx(&mut s, xr(xc - 20.0, xc + 20.0), (2000.0, 2040.0), (tz - 60.0, H0 + 1120.0));
+            colours.push((p, yellow));
+        }
+        for xc in [2285.0, 2815.0] {
+            let lug = bx(&mut s, xr(xc - 45.0, xc + 45.0), (2000.0, 2080.0), (tz - 60.0, zt));
+            colours.push((lug, blue));
+        }
+        // At each tower: guide carriages on the columns' rails, the ballscrew nut on a bracket.
+        for ey in [-1.0f64, 1.0] {
+            let yr = |a: f64, b: f64| if ey > 0.0 { (a, b) } else { (-b, -a) };
+            for a in [1250.0, 2600.0] {
+                let c = bx(&mut s, xr(a + 50.0, a + 200.0), yr(3000.0, 3115.0), (H0 - 450.0, H0 + 50.0));
+                colours.push((c, grey));
+            }
+            let br = bx(&mut s, xr(1960.0, 2140.0), yr(3000.0, 3330.0), (H0 - 330.0, H0 - 150.0));
+            run(&mut s, "solid.cylinder", json!({"radius": 50, "height": 200, "base": [x(2050.0), 3240.0 * ey, H0 - 340.0], "axis": [0, 0, 1], "operation": "cut", "targets": [br]}));
+            colours.push((br, blue));
+            let nut = mk(&mut s, "solid.cylinder", json!({"radius": 75, "height": 160, "base": [x(2050.0), 3240.0 * ey, H0 - 490.0], "axis": [0, 0, 1], "operation": "new"}));
+            run(&mut s, "solid.cylinder", json!({"radius": 46, "height": 170, "base": [x(2050.0), 3240.0 * ey, H0 - 495.0], "axis": [0, 0, 1], "operation": "cut", "targets": [nut]}));
+            colours.push((nut, "#b08d57"));
+        }
+
+        // ===== STAIR: stringers hinged under the landing, the handrail RISE above them (both
+        // hinged to the landing posts and to the foot), the foot rolling on two wheels, treads
+        // hung from both: a parallelogram keeps every tread level at any height.
+        let ty = 2000.0;
+        let dz = tz - 250.0;
+        let run_y = (L * L - dz * dz).sqrt();
+        let fy = ty - run_y; // the foot's pivot (250 above the floor)
+        let (uy, uz) = ((ty - fy) / L, dz / L);
+        let at = |sl: f64| (fy + uy * sl, 250.0 + uz * sl);
+        part(&mut s, &format!("Stair {side} Stringers"));
+        let (ny, nz) = (-uz, uy);
+        for (i, xc) in [2285.0, 2815.0].iter().enumerate() {
+            let (a, b) = (at(-60.0), at(L + 60.0));
+            let pts = [(a.0 + ny * 75.0, a.1 + nz * 75.0), (b.0 + ny * 75.0, b.1 + nz * 75.0), (b.0 - ny * 75.0, b.1 - nz * 75.0), (a.0 - ny * 75.0, a.1 - nz * 75.0)];
+            let st = plate_yz(&mut s, &format!("Stringer {side}{i}"), &pts, x(xc - 20.0), x(xc + 20.0));
+            colours.push((st, yellow));
+        }
+        part(&mut s, &format!("Stair {side} Handrail"));
+        for xc in [2245.0, 2855.0] {
+            let (a, b) = (at(-40.0), at(L + 40.0));
+            let r = rod(&mut s, [x(xc), a.0, a.1 + RISE], [x(xc), b.0, b.1 + RISE], 21.0);
+            colours.push((r, yellow));
+        }
+        part(&mut s, &format!("Stair {side} Foot"));
+        for xc in [2245.0, 2855.0] {
+            let p = bx(&mut s, xr(xc - 20.0, xc + 20.0), (fy - 20.0, fy + 20.0), (110.0, 250.0 + RISE + 30.0));
+            colours.push((p, yellow));
+            let w = mk(&mut s, "solid.cylinder", json!({"radius": 75, "height": 40, "base": [x(if xc < 2500.0 { xc - 65.0 } else { xc + 25.0 }), fy, 75], "axis": [sx, 0, 0], "operation": "new"}));
+            colours.push((w, black));
+        }
+        let axle = rod(&mut s, [x(2180.0), fy, 75.0], [x(2920.0), fy, 75.0], 12.5);
+        colours.push((axle, alu));
+        let tie = rod(&mut s, [x(2225.0), fy, 150.0], [x(2875.0), fy, 150.0], 20.0);
+        colours.push((tie, yellow));
+        let mut treads = Vec::new();
+        for k in 0..16 {
+            let name = format!("Stair {side} Tread {:02}", k + 1);
+            part(&mut s, &name);
+            let p = at(250.0 + 290.0 * f64::from(k));
+            let plate = bx(&mut s, xr(2305.0, 2795.0), (p.0 - 120.0, p.0 + 120.0), (p.1 - 10.0, p.1 + 30.0));
+            colours.push((plate, alu));
+            let pin = rod(&mut s, [x(2230.0), p.0, p.1], [x(2870.0), p.0, p.1], 10.0);
+            colours.push((pin, alu));
+            for xc in [2245.0, 2855.0] {
+                let b = bx(&mut s, xr(xc - 15.0, xc + 15.0), (p.0 - 15.0, p.0 + 15.0), (p.1 - 20.0, p.1 + RISE));
+                colours.push((b, yellow));
+            }
+            treads.push((name, p));
+        }
+
+        // ===== JOINTS
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let floor = occ(&s, "Floor");
+        let plat = occ(&s, &format!("Platform {side}"));
+        let st = occ(&s, &format!("Stair {side} Stringers"));
+        let hr = occ(&s, &format!("Stair {side} Handrail"));
+        let foot = occ(&s, &format!("Stair {side} Foot"));
+        let lift = format!("Lift {side}");
+        run(&mut s, "joint.as_built", json!({"type": "slider", "a": floor, "b": plat, "at": {"frame": {"origin": [x(1750.0), 0, H0], "z": [0, 0, 1]}}, "name": lift, "limits": [[500.0 - H0, 3500.0 - H0]]}));
+        joints.push((lift, H0));
+        let fr = |p: (f64, f64), z: f64| json!({"frame": {"origin": [x(2550.0), p.0, p.1 + z], "z": [1, 0, 0]}});
+        run(&mut s, "joint.as_built", json!({"type": "revolute", "a": plat, "b": st, "at": fr((ty, tz), 0.0), "name": format!("Stair {side} Head")}));
+        run(&mut s, "joint.as_built", json!({"type": "revolute", "a": plat, "b": hr, "at": fr((ty, tz), RISE), "name": format!("Handrail {side} Head")}));
+        run(&mut s, "joint.as_built", json!({"type": "revolute", "a": foot, "b": st, "at": fr((fy, 250.0), 0.0), "name": format!("Stair {side} Foot")}));
+        run(&mut s, "joint.as_built", json!({"type": "revolute", "a": foot, "b": hr, "at": fr((fy, 250.0), RISE), "name": format!("Handrail {side} Foot")}));
+        run(&mut s, "joint.as_built", json!({"type": "slider", "a": floor, "b": foot, "at": {"frame": {"origin": [x(2550.0), fy, 75], "z": [0, 1, 0]}}, "name": format!("Wheels {side}")}));
+        for (name, p) in &treads {
+            let t = occ(&s, name);
+            run(&mut s, "joint.as_built", json!({"type": "revolute", "a": st, "b": t, "at": fr(*p, 0.0), "name": format!("{name} Pin")}));
+            run(&mut s, "joint.as_built", json!({"type": "revolute", "a": hr, "b": t, "at": fr(*p, RISE), "name": format!("{name} Rail")}));
+        }
+        eprintln!("side {side}: foot at y {fy:.0}, stair {:.1} deg", uz.atan2(uy).to_degrees());
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    for c in ["Floor", "Coils", "Tower R Front", "Tower R Rear", "Tower L Front", "Tower L Rear"] {
+        let o = occ(&s, c);
+        run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+    }
+    for (b, c) in &colours {
+        if let Err(e) = s.execute("appearance.assign", &json!({"bodies": [b], "color": c})) {
+            eprintln!("colour {b}: {e}");
+        }
+    }
+    for (comp, pn, desc, mat) in [
+        ("Platform R", "CP-100R", "Lifting platform 1000x6000 with landing 600x1000", "SS400 painted, GRP grating"),
+        ("Platform L", "CP-100L", "Lifting platform 1000x6000 with landing 600x1000", "SS400 painted, GRP grating"),
+        ("Tower R Front", "CP-200", "Lift tower, ballscrew D50 L10, gear motor 1.1 kW with brake", "SS400 painted"),
+        ("Tower R Rear", "CP-200", "Lift tower, ballscrew D50 L10, gear motor 1.1 kW with brake", "SS400 painted"),
+        ("Tower L Front", "CP-200", "Lift tower, ballscrew D50 L10, gear motor 1.1 kW with brake", "SS400 painted"),
+        ("Tower L Rear", "CP-200", "Lift tower, ballscrew D50 L10, gear motor 1.1 kW with brake", "SS400 painted"),
+    ] {
+        run(&mut s, "component.metadata.set", json!({"component": comp, "part_number": pn, "description": desc, "properties": {"material": mat}}));
+    }
+    eprintln!("bodies: {}", s.world_state().bodies.len());
+    // The motion: each platform to its lowest and highest deck; the stairs follow.
+    let tread_z = |s: &Session, name: &str| -> (f64, f64) {
+        let c = s.doc.find_component(name).unwrap_or(0);
+        let b = s.world_state().bodies.iter().filter(|b| s.doc.model_body_component(b) == c).map(|b| b.mesh().bounds()).next();
+        b.map(|b| (b.min.y, b.max.z)).unwrap_or((f64::NAN, f64::NAN))
+    };
+    for v in [1500.0, -1500.0, 0.0] {
+        for side in ["R", "L"] {
+            let r = run(&mut s, "joint.drive", json!({"joint": format!("Lift {side}"), "values": [format!("{v} mm")]}));
+            eprintln!("lift {side} {v}: stopped {:?} moved {}", r.get("stopped_by_loop"), r["moved"]);
+        }
+        eprintln!("  deck {:.0}: tread 01 {:?}, tread 16 {:?}, foot {:?}", H0 + v, tread_z(&s, "Stair R Tread 01"), tread_z(&s, "Stair R Tread 16"), tread_z(&s, "Stair R Foot"));
+    }
+    let lr = |side: &str| s.doc.assembly.joints.iter().find(|j| j.name == format!("Lift {side}")).map(|j| j.id);
+    let (r, l) = (lr("R"), lr("L"));
+    let moves = vec![
+        json!({"together": [{"joint": r, "to": 1500, "time": 5.0}, {"joint": l, "to": 1500, "time": 5.0}]}),
+        json!({"wait": 1.0}),
+        json!({"together": [{"joint": r, "to": -1500, "time": 8.0}, {"joint": l, "to": -1500, "time": 8.0}]}),
+        json!({"wait": 1.0}),
+        json!({"together": [{"joint": r, "to": 0, "time": 4.0}, {"joint": l, "to": 0, "time": 4.0}]}),
+    ];
+    if let Err(e) = s.execute("motion.sequence", &json!({"name": "Lift", "moves": moves})) {
+        eprintln!("sequence: {e}");
+    }
+    let base = out.join("Coil-Platform-1set");
+    run(&mut s, "file.save", json!({"path": base.with_extension("draftnew").to_string_lossy()}));
+    run(&mut s, "file.export", json!({"path": out.join("Coil-Platform-1set-AP214.step").to_string_lossy(), "schema": "ap214"}));
+    {
+        // Does the STEP read back (and which bodies not)?
+        let mut back = Session::default();
+        let r = back.execute("file.import", &json!({"path": out.join("Coil-Platform-1set-AP214.step").to_string_lossy()}));
+        eprintln!("step read back: {} bodies, {:?}", back.world_state().bodies.len(), r.map(|v| v["warnings"].clone()));
+    }
+    let mut cam = crate::view::home_camera(&s);
+    cam.target = Vec3::new(0.0, 0.0, 1700.0);
+    cam.distance *= 0.5;
+    for (name, v) in [("mid", 0.0), ("high", 1500.0), ("low", -1500.0)] {
+        for side in ["R", "L"] {
+            run(&mut s, "joint.drive", json!({"joint": format!("Lift {side}"), "values": [format!("{v} mm")]}));
+        }
+        let img = solidcraft_render::render(&crate::view::scene(&s, &cam), &cam, 1600, 1100);
+        std::fs::write(out.join(format!("platform-{name}-1600x1100.rgba")), &img.rgba).unwrap();
+    }
+    // The right stair close, the platform high.
+    for side in ["R", "L"] {
+        run(&mut s, "joint.drive", json!({"joint": format!("Lift {side}"), "values": ["1500 mm"]}));
+    }
+    cam.target = Vec3::new(2550.0, 0.0, 1700.0);
+    cam.yaw += 0.9;
+    cam.distance *= 0.8;
+    let img = solidcraft_render::render(&crate::view::scene(&s, &cam), &cam, 1600, 1100);
+    std::fs::write(out.join("platform-side-1600x1100.rgba"), &img.rgba).unwrap();
+}
