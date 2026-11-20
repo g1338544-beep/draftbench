@@ -1397,3 +1397,31 @@ fn make_coil_platform_example() {
     let img = solidcraft_render::render(&crate::view::scene(&s, &cam), &cam, 1600, 1100);
     std::fs::write(out.join("platform-side-1600x1100.rgba"), &img.rgba).unwrap();
 }
+
+#[test]
+#[ignore]
+fn zz_read_owner_platform_step() {
+    let path = std::env::var("OWNER_STEP").unwrap_or_default();
+    let text = std::fs::read_to_string(&path).unwrap();
+    let imp = solidcraft_kernel::step_import(&text).unwrap();
+    eprintln!("bodies {} warnings {:?}", imp.bodies.len(), imp.warnings.iter().take(5).collect::<Vec<_>>());
+    let mut rows = Vec::new();
+    for b in &imp.bodies {
+        if let Ok(m) = b.body.tessellate(2.0) {
+            let bb = m.bounds();
+            rows.push(format!("{:.0} {:.0} {:.0} {:.0} {:.0} {:.0} {:?} {}", bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z, b.color.map(|c| [(c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8]), b.name));
+        } else {
+            rows.push(format!("nomesh {}", b.name));
+        }
+    }
+    std::fs::write(std::env::var("OWNER_OUT").unwrap_or_default(), rows.join("\n")).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let mut cam = crate::view::home_camera(&s);
+    cam.distance *= 0.6;
+    let img = solidcraft_render::render(&crate::view::scene(&s, &cam), &cam, 1600, 1100);
+    std::fs::write(std::env::var("OWNER_OUT").unwrap_or_default() + ".iso.rgba", &img.rgba).unwrap();
+    cam.yaw += 1.6;
+    let img = solidcraft_render::render(&crate::view::scene(&s, &cam), &cam, 1600, 1100);
+    std::fs::write(std::env::var("OWNER_OUT").unwrap_or_default() + ".iso2.rgba", &img.rgba).unwrap();
+}
